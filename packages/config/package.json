@@ -1,0 +1,26 @@
+{
+  "name": "@ori/config",
+  "version": "0.1.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "files": [
+    "typescript",
+    "eslint",
+    "prettier.config.js"
+  ],
+  "exports": {
+    "./eslint": "./eslint/base.js",
+    "./eslint/core": "./eslint/core.js",
+    "./eslint/next": "./eslint/next.js",
+    "./prettier": "./prettier.config.js",
+    "./typescript/*": "./typescript/*"
+  },
+  "dependencies": {
+    "@eslint/eslintrc": "^3.2.0",
+    "@eslint/js": "^9.17.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-import": "^2.31.0",
+    "typescript-eslint": "^8.18.0"
+  }
+}

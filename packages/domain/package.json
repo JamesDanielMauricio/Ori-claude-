@@ -1,0 +1,41 @@
+{
+  "name": "@ori/domain",
+  "version": "0.1.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "exports": {
+    "./auth": "./src/auth/index.ts",
+    "./auth/testing": "./src/auth/test-helpers.ts",
+    "./reference-data": "./src/reference-data/index.ts",
+    "./reference-data/testing": "./src/reference-data/test-helpers.ts",
+    "./lifecycle-engine": "./src/lifecycle-engine/index.ts",
+    "./lifecycle-engine/testing": "./src/lifecycle-engine/test-helpers.ts",
+    "./grower": "./src/grower/index.ts",
+    "./grower/testing": "./src/grower/test-helpers.ts",
+    "./customer": "./src/customer/index.ts",
+    "./customer/testing": "./src/customer/test-helpers.ts",
+    "./arrangement": "./src/arrangement/index.ts",
+    "./notifications": "./src/notifications/index.ts",
+    "./notifications/testing": "./src/notifications/test-helpers.ts"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@ori/db": "workspace:*",
+    "@ori/shared": "workspace:*",
+    "@supabase/supabase-js": "^2.47.0",
+    "drizzle-orm": "^0.38.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@ori/config": "workspace:*",
+    "@types/node": "^22.10.0",
+    "eslint": "^9.17.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.8"
+  }
+}

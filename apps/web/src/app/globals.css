@@ -1,0 +1,100 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens — the one place the palette/type/spacing decisions live.
+ * Everything else composes Tailwind utilities from these tokens; no screen
+ * defines its own hex values.
+ *
+ * Palette rationale: an earthy green accent (produce business), warm
+ * neutral canvas, and three semantic colors (accent = act/confirm,
+ * warning = attention/out-of-stock, danger = destructive/error). The
+ * -soft variants are for tinted backgrounds (selected rows, status
+ * chips) so screens stop improvising with opacity hacks.
+ */
+@theme {
+  --color-canvas: #f6f5f1;
+  --color-surface: #ffffff;
+  --color-border: #e3e1da;
+  --color-ink: #211f1b;
+  --color-ink-muted: #6b6862;
+  --color-accent: #2f6b3a;
+  --color-accent-soft: #e8f1e9;
+  --color-accent-ink: #ffffff;
+  --color-warning: #9a6b00;
+  --color-warning-soft: #f9f1dd;
+  --color-danger: #b3261e;
+  --color-danger-soft: #f9e8e7;
+  /* Loaded via next/font (Assistant, hebrew+latin subsets) in the root
+     layout — --font-assistant is injected there; the rest is fallback. */
+  --font-sans:
+    var(--font-assistant, "Assistant"), "Segoe UI", system-ui, -apple-system, "Helvetica Neue",
+    Arial, sans-serif;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+/* One consistent keyboard-focus treatment everywhere, instead of each
+   browser's default (or nothing, where a reset removed it). */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Native date/time/number inputs keep LTR internals inside the RTL page —
+   digits and date segments read left-to-right in Hebrew text too. */
+input[type="date"],
+input[type="time"],
+input[type="number"],
+input[type="email"] {
+  direction: ltr;
+  text-align: right;
+}
+
+/*
+ * Loading shimmer — GPU-composited (transform on a pseudo-element), not
+ * `background-position` or SVG SMIL. Both of those force a full repaint on
+ * the main thread every animation frame; this is the largest documented
+ * performance finding against the source app (Backoffice tab-switch lag was
+ * compounded by exactly this class of animation). `transform` and `opacity`
+ * are the only properties the compositor can animate without triggering
+ * layout/paint, so the shimmer sweep is implemented as a translated
+ * gradient overlay instead of a moving background position.
+ */
+@keyframes shimmer-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+.animate-shimmer-sweep {
+  animation: shimmer-sweep 1.6s ease-in-out infinite;
+}
+
+/* Toast enter transition — transform + opacity only, same GPU-compositing
+   reasoning as the shimmer above. */
+@keyframes toast-in {
+  from {
+    transform: translateY(0.5rem);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-toast-in {
+  animation: toast-in 0.18s ease-out;
+}

@@ -1,0 +1,31 @@
+{
+  "name": "ori-and-the-bananas",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Custom-code replacement for the Ori and the Bananas produce distribution Bubble app.",
+  "engines": {
+    "node": ">=20.11 <25"
+  },
+  "packageManager": "pnpm@10.15.0",
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "lint": "turbo run lint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:e2e": "turbo run test:e2e",
+    "db:generate": "pnpm --filter @ori/db db:generate",
+    "db:migrate": "pnpm --filter @ori/db db:migrate",
+    "supabase": "supabase"
+  },
+  "devDependencies": {
+    "@ori/config": "workspace:*",
+    "supabase": "^2.109.1",
+    "turbo": "^2.3.0",
+    "typescript": "^5.7.0",
+    "prettier": "^3.4.0"
+  }
+}

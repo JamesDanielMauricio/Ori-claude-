@@ -17,20 +17,29 @@ import { TableBody, TableCell, TableContainer, TableHead, TableHeader, TableRow 
 import { useToast } from "@/components/ui/toast";
 import { createClient } from "@/lib/supabase/client";
 
+// The whole screen's data as ONE nested row — see BOARD_SELECT below for
+// why this is a single shape rather than seven separate queries.
 interface TradingDay {
   id: string;
   trade_date: string;
   phase: "initiated" | "shop_open" | "shop_closed" | "closed";
+  // `unique(trading_day_id)` on daily_arrangements makes this a
+  // one-to-one embed, so PostgREST returns an object here, not an array.
+  daily_arrangements: DailyArrangement | null;
+  daily_picks: PickHeader[];
+  daily_orders: OrderHeader[];
 }
 
 interface DailyArrangement {
   id: string;
   status: "open" | "closed";
+  arrangement_records: ArrangementRecord[];
 }
 
 interface PickHeader {
   id: string;
   grower_company_id: string;
+  daily_pick_products: PickLine[];
 }
 
 interface PickLine {
@@ -38,11 +47,13 @@ interface PickLine {
   daily_pick_id: string;
   product_variety_id: string;
   pallets_picked: string;
+  product_varieties: Variety | null;
 }
 
 interface OrderHeader {
   id: string;
   customer_company_id: string;
+  daily_order_products: OrderLine[];
 }
 
 interface OrderLine {
@@ -50,6 +61,7 @@ interface OrderLine {
   daily_order_id: string;
   product_variety_id: string;
   pallets_ordered: string;
+  product_varieties: Variety | null;
 }
 
 interface Variety {
@@ -95,121 +107,51 @@ export default function ArrangementPage() {
   const [priceEditVarietyId, setPriceEditVarietyId] = useState<string | null>(null);
   const [closing, setClosing] = useState(false);
 
-  const dayQuery = useQuery({
-    queryKey: ["arrangement", "open-trading-day"],
+  // The whole screen in ONE request. Every table below hangs off the open
+  // trading day by a foreign key, so PostgREST can return the entire tree
+  // in a single round trip — the day, its arrangement + records, every
+  // grower's pick and pick lines, every customer's order and order lines,
+  // and each line's variety/family for labelling.
+  //
+  // This replaced a 7-query chain that was 3 round trips deep: the day had
+  // to land before picks/orders could be asked for, and those had to land
+  // before the varieties they referenced could be looked up. None of that
+  // was a real data dependency — the children all key off the day's id,
+  // which PostgREST already knows how to follow. Measured against this
+  // project's Supabase region (ap-northeast-1), each hop cost ~130-300ms,
+  // so the waterfall was the dominant cost of opening this screen, not the
+  // query work itself.
+  //
+  // `companies` stays separate below: it's whole-table reference data with
+  // no dependency on the day, so it starts immediately and resolves in
+  // parallel rather than adding a hop.
+  const boardQuery = useQuery({
+    queryKey: ["arrangement", "board"],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("trading_days")
-        .select("id, trade_date, phase")
+        .select(
+          `id, trade_date, phase,
+           daily_arrangements(id, status, arrangement_records(id, daily_pick_product_id, daily_order_product_id, customer_company_id, quantity_pallets, price, price_type)),
+           daily_picks(id, grower_company_id, daily_pick_products(id, daily_pick_id, product_variety_id, pallets_picked, product_varieties(id, name, family_id, product_families(name)))),
+           daily_orders(id, customer_company_id, daily_order_products(id, daily_order_id, product_variety_id, pallets_ordered, product_varieties(id, name, family_id, product_families(name))))`,
+        )
         .neq("phase", "closed")
         .maybeSingle();
       if (error) throw error;
-      return data as TradingDay | null;
-    },
-  });
-  const day = dayQuery.data;
-
-  const arrangementQuery = useQuery({
-    queryKey: ["arrangement", "daily-arrangement", day?.id],
-    enabled: !!day,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("daily_arrangements")
-        .select("id, status")
-        .eq("trading_day_id", day!.id)
-        .single();
-      if (error) throw error;
-      return data as DailyArrangement;
-    },
-  });
-  const arrangement = arrangementQuery.data;
-
-  const picksQuery = useQuery({
-    queryKey: ["arrangement", "picks", day?.id],
-    enabled: !!day,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("daily_picks")
-        .select("id, grower_company_id")
-        .eq("trading_day_id", day!.id);
-      if (error) throw error;
-      return data as PickHeader[];
-    },
-  });
-
-  const pickLinesQuery = useQuery({
-    queryKey: ["arrangement", "pick-lines", day?.id],
-    enabled: !!picksQuery.data?.length,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("daily_pick_products")
-        .select("id, daily_pick_id, product_variety_id, pallets_picked")
-        .in("daily_pick_id", picksQuery.data!.map((pick) => pick.id));
-      if (error) throw error;
-      return data as PickLine[];
-    },
-  });
-
-  const ordersQuery = useQuery({
-    queryKey: ["arrangement", "orders", day?.id],
-    enabled: !!day,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("daily_orders")
-        .select("id, customer_company_id")
-        .eq("trading_day_id", day!.id);
-      if (error) throw error;
-      return data as OrderHeader[];
-    },
-  });
-
-  const orderLinesQuery = useQuery({
-    queryKey: ["arrangement", "order-lines", day?.id],
-    enabled: !!ordersQuery.data?.length,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("daily_order_products")
-        .select("id, daily_order_id, product_variety_id, pallets_ordered")
-        .in("daily_order_id", ordersQuery.data!.map((order) => order.id));
-      if (error) throw error;
-      return data as OrderLine[];
-    },
-  });
-
-  const recordsQuery = useQuery({
-    queryKey: ["arrangement", "records", arrangement?.id],
-    enabled: !!arrangement,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("arrangement_records")
-        .select("id, daily_pick_product_id, daily_order_product_id, customer_company_id, quantity_pallets, price, price_type")
-        .eq("daily_arrangement_id", arrangement!.id);
-      if (error) throw error;
       // numeric columns come back as bare JSON numbers over PostgREST, not
       // decimal-preserving strings — see docs/SCHEMA_DECISIONS.md.
-      return data as unknown as ArrangementRecord[];
+      return data as unknown as TradingDay | null;
     },
   });
 
-  const varietyIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const line of pickLinesQuery.data ?? []) ids.add(line.product_variety_id);
-    for (const line of orderLinesQuery.data ?? []) ids.add(line.product_variety_id);
-    return [...ids];
-  }, [pickLinesQuery.data, orderLinesQuery.data]);
-
-  const varietiesQuery = useQuery({
-    queryKey: ["arrangement", "varieties", varietyIds],
-    enabled: varietyIds.length > 0,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("product_varieties")
-        .select("id, name, family_id, product_families(name)")
-        .in("id", varietyIds);
-      if (error) throw error;
-      return data as unknown as Variety[];
-    },
-  });
+  const day = boardQuery.data ?? null;
+  const arrangement = day?.daily_arrangements ?? null;
+  const records = useMemo(() => arrangement?.arrangement_records ?? [], [arrangement]);
+  const picks = useMemo(() => day?.daily_picks ?? [], [day]);
+  const orders = useMemo(() => day?.daily_orders ?? [], [day]);
+  const pickLines = useMemo(() => picks.flatMap((pick) => pick.daily_pick_products), [picks]);
+  const orderLines = useMemo(() => orders.flatMap((order) => order.daily_order_products), [orders]);
 
   const companiesQuery = useQuery({
     queryKey: ["arrangement", "companies"],
@@ -226,35 +168,39 @@ export default function ArrangementPage() {
     return map;
   }, [companiesQuery.data]);
 
+  // Varieties now ride along on the lines that reference them, so this is
+  // a de-duplicating pass over data already in hand rather than a lookup
+  // that has to wait for a request of its own.
   const varietyById = useMemo(() => {
     const map = new Map<string, Variety>();
-    for (const variety of varietiesQuery.data ?? []) map.set(variety.id, variety);
+    for (const line of pickLines) if (line.product_varieties) map.set(line.product_varieties.id, line.product_varieties);
+    for (const line of orderLines) if (line.product_varieties) map.set(line.product_varieties.id, line.product_varieties);
     return map;
-  }, [varietiesQuery.data]);
+  }, [pickLines, orderLines]);
 
   const growerIdByPickId = useMemo(() => {
     const map = new Map<string, string>();
-    for (const pick of picksQuery.data ?? []) map.set(pick.id, pick.grower_company_id);
+    for (const pick of picks) map.set(pick.id, pick.grower_company_id);
     return map;
-  }, [picksQuery.data]);
+  }, [picks]);
 
   const customerIdByOrderId = useMemo(() => {
     const map = new Map<string, string>();
-    for (const order of ordersQuery.data ?? []) map.set(order.id, order.customer_company_id);
+    for (const order of orders) map.set(order.id, order.customer_company_id);
     return map;
-  }, [ordersQuery.data]);
+  }, [orders]);
 
   const pickLineById = useMemo(() => {
     const map = new Map<string, PickLine>();
-    for (const line of pickLinesQuery.data ?? []) map.set(line.id, line);
+    for (const line of pickLines) map.set(line.id, line);
     return map;
-  }, [pickLinesQuery.data]);
+  }, [pickLines]);
 
   const orderLineById = useMemo(() => {
     const map = new Map<string, OrderLine>();
-    for (const line of orderLinesQuery.data ?? []) map.set(line.id, line);
+    for (const line of orderLines) map.set(line.id, line);
     return map;
-  }, [orderLinesQuery.data]);
+  }, [orderLines]);
 
   // Pooled supply by variety, broken down by grower — the PRD's left-hand
   // column.
@@ -263,7 +209,7 @@ export default function ArrangementPage() {
       string,
       { varietyId: string; label: string; total: number; byGrower: Map<string, { name: string; pallets: number }> }
     >();
-    for (const line of pickLinesQuery.data ?? []) {
+    for (const line of pickLines) {
       const variety = varietyById.get(line.product_variety_id);
       const growerId = growerIdByPickId.get(line.daily_pick_id);
       if (!variety || !growerId) continue;
@@ -280,7 +226,7 @@ export default function ArrangementPage() {
       group.byGrower.set(growerId, { name: growerName, pallets: (existing?.pallets ?? 0) + pallets });
     }
     return [...groups.values()].sort((a, b) => a.label.localeCompare(b.label));
-  }, [pickLinesQuery.data, varietyById, growerIdByPickId, companyNameById]);
+  }, [pickLines, varietyById, growerIdByPickId, companyNameById]);
 
   // Pooled demand by variety, broken down by customer — the PRD's
   // right-hand column.
@@ -289,7 +235,7 @@ export default function ArrangementPage() {
       string,
       { varietyId: string; label: string; total: number; byCustomer: Map<string, { name: string; pallets: number }> }
     >();
-    for (const line of orderLinesQuery.data ?? []) {
+    for (const line of orderLines) {
       const variety = varietyById.get(line.product_variety_id);
       const customerId = customerIdByOrderId.get(line.daily_order_id);
       if (!variety || !customerId) continue;
@@ -306,7 +252,7 @@ export default function ArrangementPage() {
       group.byCustomer.set(customerId, { name: customerName, pallets: (existing?.pallets ?? 0) + pallets });
     }
     return [...groups.values()].sort((a, b) => a.label.localeCompare(b.label));
-  }, [orderLinesQuery.data, varietyById, customerIdByOrderId, companyNameById]);
+  }, [orderLines, varietyById, customerIdByOrderId, companyNameById]);
 
   // Out-of-stock: total demand exceeds total supply for the variety (PRD's
   // ◯◯◯ OOS indicator).
@@ -323,7 +269,7 @@ export default function ArrangementPage() {
   // active view mode — same records, same joins, just a different primary
   // sort key (R6: one function, two groupings, not two data models).
   const recordRows = useMemo(() => {
-    return (recordsQuery.data ?? [])
+    return records
       .map((record) => {
         const pickLine = pickLineById.get(record.daily_pick_product_id);
         const orderLine = orderLineById.get(record.daily_order_product_id);
@@ -343,7 +289,7 @@ export default function ArrangementPage() {
         if (primary !== 0) return primary;
         return viewMode === "by-grower" ? a.varietyLabel.localeCompare(b.varietyLabel) : a.growerName.localeCompare(b.growerName);
       });
-  }, [recordsQuery.data, pickLineById, orderLineById, varietyById, growerIdByPickId, companyNameById, viewMode]);
+  }, [records, pickLineById, orderLineById, varietyById, growerIdByPickId, companyNameById, viewMode]);
 
   const deleteMutation = useMutation({
     mutationFn: async (recordId: string) => {
@@ -352,7 +298,9 @@ export default function ArrangementPage() {
     },
     onSuccess: () => {
       showToast("הרשומה נמחקה.", "success");
-      void queryClient.invalidateQueries({ queryKey: ["arrangement", "records", arrangement?.id] });
+      // Records are nested inside the board query's single response now,
+      // so refetching the board is what picks up the change.
+      void queryClient.invalidateQueries({ queryKey: ["arrangement", "board"] });
     },
     onError: (error: { message?: string }) => {
       showToast(`המחיקה נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
@@ -367,7 +315,7 @@ export default function ArrangementPage() {
     },
     onSuccess: () => {
       showToast("הרשומה עודכנה.", "success");
-      void queryClient.invalidateQueries({ queryKey: ["arrangement", "records", arrangement?.id] });
+      void queryClient.invalidateQueries({ queryKey: ["arrangement", "board"] });
     },
     onError: (error: { message?: string }) => {
       showToast(`העדכון נכשל: ${error.message ?? "שגיאה לא ידועה"}`, "error");
@@ -388,8 +336,7 @@ export default function ArrangementPage() {
     },
   });
 
-  const isLoading =
-    dayQuery.isLoading || (!!day && (arrangementQuery.isLoading || picksQuery.isLoading || ordersQuery.isLoading));
+  const isLoading = boardQuery.isLoading;
 
   if (isLoading) {
     return (

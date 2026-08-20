@@ -90,7 +90,7 @@ export default function ShopManagementPage() {
       {openDayQuery.isLoading ? (
         <Skeleton className="h-24 w-full" />
       ) : (
-        <section className="rounded-lg border border-border bg-surface p-5">
+        <section className="rounded-lg border border-border bg-surface shadow-card p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-sm text-ink-muted">{tradeDateLabel ?? "מוכן ליום חדש"}</p>
@@ -105,20 +105,34 @@ export default function ShopManagementPage() {
         <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <MetricCard
             label="ליקוטים שנשלחו"
-            value={metricsQuery.data ? `${metricsQuery.data.picksSubmitted}/${metricsQuery.data.picksTotal}` : null}
+            value={
+              metricsQuery.data
+                ? `${metricsQuery.data.picksSubmitted}/${metricsQuery.data.picksTotal}`
+                : null
+            }
           />
           <MetricCard
             label="הזמנות שנשלחו"
-            value={metricsQuery.data ? `${metricsQuery.data.ordersSubmitted}/${metricsQuery.data.ordersTotal}` : null}
+            value={
+              metricsQuery.data
+                ? `${metricsQuery.data.ordersSubmitted}/${metricsQuery.data.ordersTotal}`
+                : null
+            }
           />
           <MetricCard
             label="הודעות WhatsApp"
-            value={settingsQuery.data ? (settingsQuery.data.whatsapp_enabled ? "פעיל" : "כבוי") : null}
+            value={
+              settingsQuery.data ? (settingsQuery.data.whatsapp_enabled ? "פעיל" : "כבוי") : null
+            }
           />
           <MetricCard
             label="WhatsApp בסגירת סידור"
             value={
-              settingsQuery.data ? (settingsQuery.data.close_arrangement_whatsapp_enabled ? "פעיל" : "כבוי") : null
+              settingsQuery.data
+                ? settingsQuery.data.close_arrangement_whatsapp_enabled
+                  ? "פעיל"
+                  : "כבוי"
+                : null
             }
           />
         </section>
@@ -165,7 +179,7 @@ function PhaseStepper({ phase }: { phase: Phase | "none" }) {
 
 function MetricCard({ label, value }: { label: string; value: string | null }) {
   return (
-    <div className="rounded-lg border border-border bg-surface p-4">
+    <div className="rounded-lg border border-border bg-surface shadow-card p-4">
       <p className="text-xs text-ink-muted">{label}</p>
       {value === null ? (
         <Skeleton className="mt-1 h-6 w-14" />

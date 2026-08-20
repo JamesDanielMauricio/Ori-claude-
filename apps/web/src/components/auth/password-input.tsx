@@ -43,7 +43,7 @@ export function PasswordInput({
       <button
         type="button"
         onClick={() => setVisible((current) => !current)}
-        className="absolute inset-y-0 start-auto end-2 my-auto h-fit rounded px-1.5 py-0.5 text-xs text-ink-muted hover:bg-canvas hover:text-ink"
+        className="absolute inset-y-0 start-auto end-1.5 my-auto flex h-7 items-center rounded px-2 text-xs font-medium text-ink-muted transition-colors hover:bg-canvas hover:text-ink"
       >
         {visible ? "הסתר" : "הצג"}
       </button>

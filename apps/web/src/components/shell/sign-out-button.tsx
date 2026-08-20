@@ -11,8 +11,8 @@ export function SignOutButton({
 }: {
   className?: string;
   // "text" is the original plain-link look every existing caller (RoleShell)
-  // still uses. "solid" is additive — a full-width filled button — opted
-  // into only by BackofficeNav.
+  // still uses. "solid" is additive — a full-width button — opted into only
+  // by BackofficeNav.
   variant?: "text" | "solid";
 }) {
   const router = useRouter();
@@ -25,10 +25,15 @@ export function SignOutButton({
     router.push("/login");
   }
 
+  // Sign-out is deliberately NOT the accent green it used to be. Filled
+  // accent is this app's "confirm / do the thing" signal (Save, Open Shop,
+  // Submit Order), and spending it on the one control nobody is aiming for
+  // made the loudest thing in the sidebar the thing you least want to hit by
+  // accident. A quiet bordered button still reads as a button.
   const variantClasses =
     variant === "solid"
-      ? "w-full rounded-md bg-accent px-3 py-2 text-center text-sm font-medium text-accent-ink hover:opacity-90"
-      : "text-sm text-ink-muted hover:text-ink";
+      ? "w-full rounded-md border border-border-strong bg-surface px-3 py-2 text-center text-sm font-medium text-ink-muted transition-colors hover:bg-canvas hover:text-ink"
+      : "rounded-md px-2 py-1 text-sm text-ink-muted transition-colors hover:text-ink";
 
   return (
     <button

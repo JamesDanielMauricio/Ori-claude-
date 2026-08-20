@@ -11,19 +11,27 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { createClient } from "@/lib/supabase/client";
 
+// One nested row carrying the whole wizard's data — see BOARD comment in
+// the query below.
 interface TradingDay {
   id: string;
   trade_date: string;
+  // one-to-one embed (unique trading_day_id), so an object not an array
+  daily_arrangements: DailyArrangement | null;
+  daily_picks: PickHeader[];
+  daily_orders: OrderHeader[];
 }
 
 interface DailyArrangement {
   id: string;
   status: "open" | "closed";
+  arrangement_records: ExistingArrangementRecord[];
 }
 
 interface PickHeader {
   id: string;
   grower_company_id: string;
+  daily_pick_products: PickLine[];
 }
 
 interface PickLine {
@@ -31,11 +39,13 @@ interface PickLine {
   daily_pick_id: string;
   product_variety_id: string;
   pallets_picked: string;
+  product_varieties: Variety | null;
 }
 
 interface OrderHeader {
   id: string;
   customer_company_id: string;
+  daily_order_products: OrderLine[];
 }
 
 interface OrderLine {
@@ -43,6 +53,7 @@ interface OrderLine {
   daily_order_id: string;
   product_variety_id: string;
   pallets_ordered: string;
+  product_varieties: Variety | null;
 }
 
 interface Variety {
@@ -88,105 +99,43 @@ export default function NewArrangementPage() {
   const [priceType, setPriceType] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const dayQuery = useQuery({
-    queryKey: ["new-arrangement", "open-trading-day"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("trading_days").select("id, trade_date").neq("phase", "closed").maybeSingle();
-      if (error) throw error;
-      return data as TradingDay | null;
-    },
-  });
-  const day = dayQuery.data;
-
-  const arrangementQuery = useQuery({
-    queryKey: ["new-arrangement", "daily-arrangement", day?.id],
-    enabled: !!day,
-    queryFn: async () => {
-      const { data, error } = await supabase.from("daily_arrangements").select("id, status").eq("trading_day_id", day!.id).single();
-      if (error) throw error;
-      return data as DailyArrangement;
-    },
-  });
-  const arrangement = arrangementQuery.data;
-
-  const picksQuery = useQuery({
-    queryKey: ["new-arrangement", "picks", day?.id],
-    enabled: !!day,
-    queryFn: async () => {
-      const { data, error } = await supabase.from("daily_picks").select("id, grower_company_id").eq("trading_day_id", day!.id);
-      if (error) throw error;
-      return data as PickHeader[];
-    },
-  });
-
-  const pickLinesQuery = useQuery({
-    queryKey: ["new-arrangement", "pick-lines", day?.id],
-    enabled: !!picksQuery.data?.length,
+  // Same single-request shape as /backoffice/arrangement — see the long
+  // comment on that page's boardQuery for why the whole tree comes back in
+  // one round trip instead of a 3-deep chain of dependent queries.
+  const boardQuery = useQuery({
+    queryKey: ["new-arrangement", "board"],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("daily_pick_products")
-        .select("id, daily_pick_id, product_variety_id, pallets_picked")
-        .in("daily_pick_id", picksQuery.data!.map((pick) => pick.id));
+        .from("trading_days")
+        .select(
+          `id, trade_date,
+           daily_arrangements(id, status, arrangement_records(daily_pick_product_id, daily_order_product_id, quantity_pallets)),
+           daily_picks(id, grower_company_id, daily_pick_products(id, daily_pick_id, product_variety_id, pallets_picked, product_varieties(id, name, price, price_type, product_families(name)))),
+           daily_orders(id, customer_company_id, daily_order_products(id, daily_order_id, product_variety_id, pallets_ordered, product_varieties(id, name, price, price_type, product_families(name))))`,
+        )
+        .neq("phase", "closed")
+        .maybeSingle();
       if (error) throw error;
-      return data as PickLine[];
+      return data as unknown as TradingDay | null;
     },
   });
 
-  const ordersQuery = useQuery({
-    queryKey: ["new-arrangement", "orders", day?.id],
-    enabled: !!day,
-    queryFn: async () => {
-      const { data, error } = await supabase.from("daily_orders").select("id, customer_company_id").eq("trading_day_id", day!.id);
-      if (error) throw error;
-      return data as OrderHeader[];
-    },
-  });
+  const day = boardQuery.data ?? null;
+  const arrangement = day?.daily_arrangements ?? null;
+  const records = useMemo(() => arrangement?.arrangement_records ?? [], [arrangement]);
+  const picks = useMemo(() => day?.daily_picks ?? [], [day]);
+  const orders = useMemo(() => day?.daily_orders ?? [], [day]);
+  const pickLines = useMemo(() => picks.flatMap((pick) => pick.daily_pick_products), [picks]);
+  const orderLines = useMemo(() => orders.flatMap((order) => order.daily_order_products), [orders]);
 
-  const orderLinesQuery = useQuery({
-    queryKey: ["new-arrangement", "order-lines", day?.id],
-    enabled: !!ordersQuery.data?.length,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("daily_order_products")
-        .select("id, daily_order_id, product_variety_id, pallets_ordered")
-        .in("daily_order_id", ordersQuery.data!.map((order) => order.id));
-      if (error) throw error;
-      return data as OrderLine[];
-    },
-  });
-
-  const recordsQuery = useQuery({
-    queryKey: ["new-arrangement", "records", arrangement?.id],
-    enabled: !!arrangement,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("arrangement_records")
-        .select("daily_pick_product_id, daily_order_product_id, quantity_pallets")
-        .eq("daily_arrangement_id", arrangement!.id);
-      if (error) throw error;
-      return data as unknown as ExistingArrangementRecord[];
-    },
-  });
-
-  const varietyIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const line of pickLinesQuery.data ?? []) ids.add(line.product_variety_id);
-    for (const line of orderLinesQuery.data ?? []) ids.add(line.product_variety_id);
-    return [...ids];
-  }, [pickLinesQuery.data, orderLinesQuery.data]);
-
-  const varietiesQuery = useQuery({
-    queryKey: ["new-arrangement", "varieties", varietyIds],
-    enabled: varietyIds.length > 0,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("product_varieties")
-        .select("id, name, price, price_type, product_families(name)")
-        .in("id", varietyIds);
-      if (error) throw error;
-      return data as unknown as Variety[];
-    },
-  });
+  // De-duplicated from the lines that already carry them, rather than a
+  // dependent request of their own.
+  const varieties = useMemo(() => {
+    const map = new Map<string, Variety>();
+    for (const line of pickLines) if (line.product_varieties) map.set(line.product_varieties.id, line.product_varieties);
+    for (const line of orderLines) if (line.product_varieties) map.set(line.product_varieties.id, line.product_varieties);
+    return [...map.values()];
+  }, [pickLines, orderLines]);
 
   const companiesQuery = useQuery({
     queryKey: ["new-arrangement", "companies"],
@@ -205,47 +154,47 @@ export default function NewArrangementPage() {
 
   const growerIdByPickId = useMemo(() => {
     const map = new Map<string, string>();
-    for (const pick of picksQuery.data ?? []) map.set(pick.id, pick.grower_company_id);
+    for (const pick of picks) map.set(pick.id, pick.grower_company_id);
     return map;
-  }, [picksQuery.data]);
+  }, [picks]);
 
   const customerIdByOrderId = useMemo(() => {
     const map = new Map<string, string>();
-    for (const order of ordersQuery.data ?? []) map.set(order.id, order.customer_company_id);
+    for (const order of orders) map.set(order.id, order.customer_company_id);
     return map;
-  }, [ordersQuery.data]);
+  }, [orders]);
 
   // Already-arranged pallets per pick/order line — used only to show a
   // "remaining" hint; the server (check_arrangement_allocation) is the
   // real enforcement.
   const arrangedByPickLine = useMemo(() => {
     const map = new Map<string, number>();
-    for (const record of recordsQuery.data ?? []) {
+    for (const record of records) {
       map.set(record.daily_pick_product_id, (map.get(record.daily_pick_product_id) ?? 0) + record.quantity_pallets);
     }
     return map;
-  }, [recordsQuery.data]);
+  }, [records]);
 
   const arrangedByOrderLine = useMemo(() => {
     const map = new Map<string, number>();
-    for (const record of recordsQuery.data ?? []) {
+    for (const record of records) {
       map.set(record.daily_order_product_id, (map.get(record.daily_order_product_id) ?? 0) + record.quantity_pallets);
     }
     return map;
-  }, [recordsQuery.data]);
+  }, [records]);
 
   const varietyOptions = useMemo(() => {
-    return (varietiesQuery.data ?? [])
+    return varieties
       .map((variety) => ({
         id: variety.id,
         label: variety.product_families?.name ? `${variety.product_families.name} — ${variety.name}` : variety.name,
       }))
       .sort((a, b) => a.label.localeCompare(b.label));
-  }, [varietiesQuery.data]);
+  }, [varieties]);
 
   const growerLineOptions = useMemo(() => {
     if (!varietyId) return [];
-    return (pickLinesQuery.data ?? [])
+    return pickLines
       .filter((line) => line.product_variety_id === varietyId)
       .map((line) => {
         const growerId = growerIdByPickId.get(line.daily_pick_id);
@@ -258,11 +207,11 @@ export default function NewArrangementPage() {
         };
       })
       .sort((a, b) => a.label.localeCompare(b.label));
-  }, [varietyId, pickLinesQuery.data, growerIdByPickId, arrangedByPickLine, companyNameById]);
+  }, [varietyId, pickLines, growerIdByPickId, arrangedByPickLine, companyNameById]);
 
   const customerLineOptions = useMemo(() => {
     if (!varietyId) return [];
-    return (orderLinesQuery.data ?? [])
+    return orderLines
       .filter((line) => line.product_variety_id === varietyId)
       .map((line) => {
         const customerId = customerIdByOrderId.get(line.daily_order_id);
@@ -275,9 +224,9 @@ export default function NewArrangementPage() {
         };
       })
       .sort((a, b) => a.label.localeCompare(b.label));
-  }, [varietyId, orderLinesQuery.data, customerIdByOrderId, arrangedByOrderLine, companyNameById]);
+  }, [varietyId, orderLines, customerIdByOrderId, arrangedByOrderLine, companyNameById]);
 
-  const selectedVariety = varietiesQuery.data?.find((variety) => variety.id === varietyId) ?? null;
+  const selectedVariety = varieties.find((variety) => variety.id === varietyId) ?? null;
 
   // Reset the grower/customer/quantity selection whenever the variety
   // changes — a pick/order line from a different variety is meaningless
@@ -308,7 +257,9 @@ export default function NewArrangementPage() {
       setGrowerPickLineId("");
       setCustomerOrderLineId("");
       setQuantity("");
-      void queryClient.invalidateQueries({ queryKey: ["new-arrangement", "records", arrangement?.id] });
+      // Both this wizard's board and the sibling /backoffice/arrangement
+      // page's cache — the new record has to show up in each.
+      void queryClient.invalidateQueries({ queryKey: ["new-arrangement", "board"] });
       void queryClient.invalidateQueries({ queryKey: ["arrangement"] });
     },
     onError: (error: { message?: string }) => {
@@ -316,7 +267,7 @@ export default function NewArrangementPage() {
     },
   });
 
-  const isLoading = dayQuery.isLoading || (!!day && (arrangementQuery.isLoading || picksQuery.isLoading || ordersQuery.isLoading));
+  const isLoading = boardQuery.isLoading;
 
   if (isLoading) {
     return (

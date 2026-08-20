@@ -9,7 +9,7 @@ export default async function BackofficeLayout({ children }: { children: ReactNo
   return (
     <div className="flex min-h-dvh">
       <BackofficeNav />
-      <main className="flex-1 overflow-x-hidden p-6">{children}</main>
+      <main className="min-w-0 flex-1 overflow-x-hidden p-4 md:p-6">{children}</main>
     </div>
   );
 }

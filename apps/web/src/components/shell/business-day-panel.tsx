@@ -11,6 +11,7 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { createClient } from "@/lib/supabase/client";
 
@@ -88,7 +89,10 @@ export function BusinessDayPanel() {
     mutationFn: async () => {
       const tradeDate = new Date().toISOString().slice(0, 10);
       const input = initiateBusinessDayInputSchema.parse({ tradeDate });
-      const { error } = await supabase.rpc("initiate_business_day", toInitiateBusinessDayRpcArgs(input));
+      const { error } = await supabase.rpc(
+        "initiate_business_day",
+        toInitiateBusinessDayRpcArgs(input),
+      );
       if (error) throw error;
     },
     onSuccess: () => {
@@ -175,7 +179,7 @@ export function BusinessDayPanel() {
     updateMutation.isPending;
 
   if (openDayQuery.isLoading) {
-    return <div className="mx-3 my-3 h-28 animate-pulse rounded-md bg-canvas" />;
+    return <Skeleton className="mx-3 my-3 h-28" />;
   }
 
   // The toggle slot: initiate (no day) -> open shop (day started) ->
@@ -183,11 +187,23 @@ export function BusinessDayPanel() {
   // the shop has already closed for the day (forward-only).
   const toggle =
     phase === undefined
-      ? { label: "פתח יום עסקים", disabled: false, onClick: () => setConfirmAction("initiate" as const) }
+      ? {
+          label: "פתח יום עסקים",
+          disabled: false,
+          onClick: () => setConfirmAction("initiate" as const),
+        }
       : phase === "initiated"
-        ? { label: "פתח חנות", disabled: false, onClick: () => setConfirmAction("openShop" as const) }
+        ? {
+            label: "פתח חנות",
+            disabled: false,
+            onClick: () => setConfirmAction("openShop" as const),
+          }
         : phase === "shop_open"
-          ? { label: "סגור חנות", disabled: false, onClick: () => setConfirmAction("closeShop" as const) }
+          ? {
+              label: "סגור חנות",
+              disabled: false,
+              onClick: () => setConfirmAction("closeShop" as const),
+            }
           : { label: "פתח חנות", disabled: true, onClick: () => {} };
 
   // Close-business-day only makes sense before the shop has opened (the
@@ -198,10 +214,12 @@ export function BusinessDayPanel() {
   const updateEnabled = phase !== undefined;
 
   return (
-    <div className="flex flex-col gap-2 border-b border-border px-3 py-3">
+    <div className="flex flex-col gap-2 border-b border-border bg-surface-muted px-3 py-3">
       <p className="px-1 text-xs font-semibold text-ink-muted">
         {day
-          ? new Intl.DateTimeFormat("he-IL", { dateStyle: "short" }).format(new Date(day.trade_date))
+          ? new Intl.DateTimeFormat("he-IL", { dateStyle: "short" }).format(
+              new Date(day.trade_date),
+            )
           : "אין יום מסחר פתוח"}
       </p>
 
@@ -241,12 +259,21 @@ export function BusinessDayPanel() {
       )}
       {phase === "shop_open" && (
         <label className="flex items-center gap-2 px-1 text-xs text-ink-muted">
-          <input type="checkbox" checked={shopQuery.data?.can_see_prices ?? true} disabled readOnly />
+          <input
+            type="checkbox"
+            checked={shopQuery.data?.can_see_prices ?? true}
+            disabled
+            readOnly
+          />
           לקוחות מורשים רואים מחירים
         </label>
       )}
 
-      <Dialog open={confirmAction === "initiate"} onClose={() => setConfirmAction(null)} title="פתיחת יום עסקים">
+      <Dialog
+        open={confirmAction === "initiate"}
+        onClose={() => setConfirmAction(null)}
+        title="פתיחת יום עסקים"
+      >
         <ConfirmBody
           text="ייפתח יום מסחר חדש לתאריך של היום, ולכל מגדל פעיל עם מוצרים בעונה תיווצר רשימת קטיף ריקה."
           confirmLabel="פתח יום עסקים"
@@ -256,7 +283,11 @@ export function BusinessDayPanel() {
         />
       </Dialog>
 
-      <Dialog open={confirmAction === "openShop"} onClose={() => setConfirmAction(null)} title="פתיחת חנות">
+      <Dialog
+        open={confirmAction === "openShop"}
+        onClose={() => setConfirmAction(null)}
+        title="פתיחת חנות"
+      >
         <ConfirmBody
           text={`החנות תיפתח להזמנות. מחירים ${canSeePrices ? "יוצגו" : "לא יוצגו"} ללקוחות.`}
           confirmLabel="פתח חנות"
@@ -266,7 +297,11 @@ export function BusinessDayPanel() {
         />
       </Dialog>
 
-      <Dialog open={confirmAction === "closeShop"} onClose={() => setConfirmAction(null)} title="סגירת חנות">
+      <Dialog
+        open={confirmAction === "closeShop"}
+        onClose={() => setConfirmAction(null)}
+        title="סגירת חנות"
+      >
         <ConfirmBody
           text="לקוחות לא יוכלו יותר לשלוח או לעדכן הזמנות להיום. מגדלים עדיין יכולים לעדכן ליקוטים עד סגירת הסידור."
           confirmLabel="סגור חנות"
@@ -276,7 +311,11 @@ export function BusinessDayPanel() {
         />
       </Dialog>
 
-      <Dialog open={confirmAction === "closeDay"} onClose={() => setConfirmAction(null)} title="סגירת יום עסקים">
+      <Dialog
+        open={confirmAction === "closeDay"}
+        onClose={() => setConfirmAction(null)}
+        title="סגירת יום עסקים"
+      >
         <ConfirmBody
           text="הסידור ייסגר סופית, כל רשימות הקטיף להיום ייסגרו, והיום יסתיים. לא ניתן לבטל פעולה זו."
           confirmLabel="סגור יום עסקים"
@@ -286,7 +325,11 @@ export function BusinessDayPanel() {
         />
       </Dialog>
 
-      <Dialog open={confirmAction === "update"} onClose={() => setConfirmAction(null)} title="עדכון מלאי למגדלים">
+      <Dialog
+        open={confirmAction === "update"}
+        onClose={() => setConfirmAction(null)}
+        title="עדכון מלאי למגדלים"
+      >
         <ConfirmBody
           text="רשימות הקטיף של כל המגדלים הפעילים יסונכרנו מחדש מול רשימת המוצרים העונתית העדכנית שלהם. שינויים שכבר נכללו בסידור לא יימחקו."
           confirmLabel="עדכן מלאי"

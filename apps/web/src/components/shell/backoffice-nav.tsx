@@ -1,5 +1,6 @@
 "use client";
 
+import { Icon, type IconName } from "@/components/ui/icon";
 import { useAuth } from "@/lib/auth-context";
 
 import { AlertsBell } from "./alerts-bell";
@@ -19,35 +20,33 @@ import { Skeleton } from "../ui/skeleton";
 // fix, not a CSS tweak — R8.
 // Split into the same two visual groups as the source sidebar: day-to-day
 // operational screens with no heading, then a labelled "ניהול מערכת" group
-// for the reference/admin screens. Icons are emoji, matching the precedent
-// already set by AlertsBell's 🔔 — no icon library dependency added just
-// for this.
-const OPERATIONAL_NAV: Array<{ href: string; label: string; icon: string }> = [
-  { href: "/backoffice/shop", label: "ניהול חנות", icon: "🛒" },
-  { href: "/backoffice/arrangement", label: "סידור", icon: "📋" },
-  { href: "/backoffice/new-arrangement", label: "סידור חדש", icon: "➕" },
-  { href: "/backoffice/order-history", label: "היסטוריית הזמנות", icon: "🕘" },
+// for the reference/admin screens.
+const OPERATIONAL_NAV: Array<{ href: string; label: string; icon: IconName }> = [
+  { href: "/backoffice/shop", label: "ניהול חנות", icon: "cart" },
+  { href: "/backoffice/arrangement", label: "סידור", icon: "clipboard" },
+  { href: "/backoffice/new-arrangement", label: "סידור חדש", icon: "plusCircle" },
+  { href: "/backoffice/order-history", label: "היסטוריית הזמנות", icon: "clock" },
 ];
 
-const SYSTEM_NAV: Array<{ href: string; label: string; icon: string }> = [
-  { href: "/backoffice/products", label: "מוצרים", icon: "📦" },
-  { href: "/backoffice/growers", label: "מגדלים", icon: "🌱" },
-  { href: "/backoffice/customers", label: "לקוחות", icon: "👥" },
-  { href: "/backoffice/transporters", label: "מובילים", icon: "🚚" },
-  { href: "/backoffice/users", label: "משתמשים", icon: "👤" },
-  { href: "/backoffice/distributor-grower", label: "בשם מגדל", icon: "🧑‍🌾" },
-  { href: "/backoffice/distributor-customer", label: "בשם לקוח", icon: "🧑‍💼" },
+const SYSTEM_NAV: Array<{ href: string; label: string; icon: IconName }> = [
+  { href: "/backoffice/products", label: "מוצרים", icon: "package" },
+  { href: "/backoffice/growers", label: "מגדלים", icon: "sprout" },
+  { href: "/backoffice/customers", label: "לקוחות", icon: "users" },
+  { href: "/backoffice/transporters", label: "מובילים", icon: "truck" },
+  { href: "/backoffice/users", label: "משתמשים", icon: "user" },
+  { href: "/backoffice/distributor-grower", label: "בשם מגדל", icon: "leaf" },
+  { href: "/backoffice/distributor-customer", label: "בשם לקוח", icon: "briefcase" },
 ];
 
-function BackofficeNavLink({ href, label, icon }: { href: string; label: string; icon: string }) {
+// The icon leads the row (inline-start, so the right in RTL) and the label
+// follows. Previously the icon trailed at the far edge with the label pushed
+// away from it, which left the eleven rows with no common vertical line to
+// scan down — the icons now form that line.
+function BackofficeNavLink({ href, label, icon }: { href: string; label: string; icon: IconName }) {
   return (
     <NavLink href={href} variant="outline">
-      <span className="flex items-center justify-between gap-2">
-        <span>{label}</span>
-        <span aria-hidden className="text-base leading-none opacity-70">
-          {icon}
-        </span>
-      </span>
+      <Icon name={icon} className="h-[18px] w-[18px] shrink-0" />
+      <span className="truncate">{label}</span>
     </NavLink>
   );
 }
@@ -59,19 +58,37 @@ export function BackofficeNav() {
   const { profile, loading } = useAuth();
 
   return (
+    // Pinned to the viewport instead of stretching with the page: with
+    // `h-full` a long screen (the products table, order history) dragged the
+    // sidebar down with it, so the nav — and the day-lifecycle controls
+    // inside it — scrolled out of reach. Now the rail owns the viewport
+    // height and its own middle section is what scrolls.
     <nav
       aria-label="ניווט מערכת"
-      className="flex h-full w-64 shrink-0 flex-col border-e border-border bg-surface"
+      className="sticky top-0 flex h-dvh w-64 shrink-0 flex-col border-e border-border bg-surface"
     >
       <div className="border-b border-border px-4 py-4">
-        <p className="mb-3 text-base font-bold tracking-tight text-accent">אורי והבננות</p>
+        <div className="mb-3 flex items-center gap-2">
+          {/* A letter mark, not a glyph from the icon set: every icon in that
+              set is spoken for by a nav row, and reusing one for the brand
+              made the logo read as a twelfth destination. */}
+          <span
+            aria-hidden
+            className="flex h-7 w-7 select-none items-center justify-center rounded-md bg-accent text-sm font-bold text-accent-ink"
+          >
+            א
+          </span>
+          <p className="text-base font-bold tracking-tight text-ink">אורי והבננות</p>
+        </div>
         <div className="flex items-center justify-between gap-2">
           {loading ? (
             <Skeleton className="h-10 w-full" />
           ) : (
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold">{profile?.displayName}</p>
-              {profile?.companyName && <p className="truncate text-xs text-ink-muted">{profile.companyName}</p>}
+              {profile?.companyName && (
+                <p className="truncate text-xs text-ink-muted">{profile.companyName}</p>
+              )}
             </div>
           )}
           <AlertsBell />
@@ -80,8 +97,8 @@ export function BackofficeNav() {
 
       <BusinessDayPanel />
 
-      <div className="flex-1 space-y-4 overflow-y-auto px-2 py-3">
-        <ul className="space-y-1">
+      <div className="flex-1 space-y-5 overflow-y-auto px-2 py-3">
+        <ul className="space-y-0.5">
           {OPERATIONAL_NAV.map((item) => (
             <li key={item.href}>
               <BackofficeNavLink {...item} />
@@ -90,8 +107,10 @@ export function BackofficeNav() {
         </ul>
 
         <div>
-          <p className="px-3 pb-1 text-xs font-semibold text-ink-muted">ניהול מערכת</p>
-          <ul className="space-y-1">
+          <p className="px-3 pb-1.5 text-[11px] font-semibold tracking-wide text-ink-subtle">
+            ניהול מערכת
+          </p>
+          <ul className="space-y-0.5">
             {SYSTEM_NAV.map((item) => (
               <li key={item.href}>
                 <BackofficeNavLink {...item} />

@@ -25,7 +25,7 @@ export default function AdminResetPasswordPage() {
 
       <form
         onSubmit={handleSubmit}
-        className="flex max-w-md flex-col gap-4 rounded-lg border border-border bg-surface p-5"
+        className="flex max-w-md flex-col gap-4 rounded-lg border border-border bg-surface shadow-card p-5"
       >
         <FormField label="מזהה משתמש" htmlFor="targetUserId">
           <input

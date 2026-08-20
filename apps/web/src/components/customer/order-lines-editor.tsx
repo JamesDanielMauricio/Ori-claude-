@@ -1,6 +1,11 @@
 "use client";
 
-import { orderableCatalogInputSchema, submitOrderInputSchema, toOrderableCatalogRpcArgs, toSubmitOrderRpcArgs } from "@ori/domain/customer";
+import {
+  orderableCatalogInputSchema,
+  submitOrderInputSchema,
+  toOrderableCatalogRpcArgs,
+  toSubmitOrderRpcArgs,
+} from "@ori/domain/customer";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
@@ -67,7 +72,10 @@ export function OrderLinesEditor({
     queryKey,
     queryFn: async () => {
       const input = orderableCatalogInputSchema.parse({ tradingDayId, customerCompanyId });
-      const { data, error } = await supabase.rpc("get_orderable_catalog_for_customer", toOrderableCatalogRpcArgs(input));
+      const { data, error } = await supabase.rpc(
+        "get_orderable_catalog_for_customer",
+        toOrderableCatalogRpcArgs(input),
+      );
       if (error) throw error;
       return data as CatalogRow[];
     },
@@ -89,12 +97,20 @@ export function OrderLinesEditor({
   useEffect(() => {
     const channel = supabase
       .channel(`customer-catalog-${tradingDayId}-${customerCompanyId ?? "self"}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "daily_pick_products" }, () => {
-        void queryClient.invalidateQueries({ queryKey });
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "daily_order_products" }, () => {
-        void queryClient.invalidateQueries({ queryKey });
-      })
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "daily_pick_products" },
+        () => {
+          void queryClient.invalidateQueries({ queryKey });
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "daily_order_products" },
+        () => {
+          void queryClient.invalidateQueries({ queryKey });
+        },
+      )
       .subscribe();
 
     return () => {
@@ -103,7 +119,10 @@ export function OrderLinesEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tradingDayId, customerCompanyId]);
 
-  const families = useMemo(() => groupCatalogByFamily(catalogQuery.data ?? []), [catalogQuery.data]);
+  const families = useMemo(
+    () => groupCatalogByFamily(catalogQuery.data ?? []),
+    [catalogQuery.data],
+  );
 
   const confirmFamilies = useMemo(() => {
     const nonzeroRows = (catalogQuery.data ?? [])
@@ -176,8 +195,13 @@ export function OrderLinesEditor({
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-5">
         {families.map((family) => (
-          <div key={family.familyId} className="rounded-lg border border-border bg-surface">
-            <h2 className="border-b border-border px-4 py-2 text-sm font-semibold">{family.familyName}</h2>
+          <div
+            key={family.familyId}
+            className="rounded-lg border border-border bg-surface shadow-card"
+          >
+            <h2 className="border-b border-border px-4 py-2 text-sm font-semibold">
+              {family.familyName}
+            </h2>
             <ul>
               {family.varieties.map((row) => (
                 <li
@@ -187,9 +211,13 @@ export function OrderLinesEditor({
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium">
                       {row.variety_name}
-                      {!row.is_orderable && <span className="ms-2 text-xs text-danger">אזל מהמלאי</span>}
+                      {!row.is_orderable && (
+                        <span className="ms-2 text-xs text-danger">אזל מהמלאי</span>
+                      )}
                     </p>
-                    {formatPrice(row) && <p className="text-xs text-ink-muted">{formatPrice(row)}</p>}
+                    {formatPrice(row) && (
+                      <p className="text-xs text-ink-muted">{formatPrice(row)}</p>
+                    )}
                   </div>
                   <input
                     type="number"
@@ -198,7 +226,9 @@ export function OrderLinesEditor({
                     disabled={!editing}
                     className={`${inputClassName} w-24`}
                     value={draft[row.variety_id]?.pallets ?? ""}
-                    onChange={(event) => updateLine(row.variety_id, { pallets: event.target.value })}
+                    onChange={(event) =>
+                      updateLine(row.variety_id, { pallets: event.target.value })
+                    }
                   />
                   <Button
                     type="button"

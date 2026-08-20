@@ -295,13 +295,18 @@ export default function ProductsPage() {
   return (
     <>
       <ListDetailLayout
-        header={<PageHeader title="מוצרים" subtitle="קטלוג הזנים: מחירים, אוברבוקינג, עונתיות ומגבלות ללקוח." />}
+        header={
+          <PageHeader
+            title="מוצרים"
+            subtitle="קטלוג הזנים: מחירים, אוברבוקינג, עונתיות ומגבלות ללקוח."
+          />
+        }
         list={
           <div className="flex h-full min-h-0 flex-col gap-3">
             <Button type="button" onClick={handleNew} disabled={!familiesQuery.data?.length}>
               מוצר חדש
             </Button>
-            <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-surface">
+            <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-surface shadow-card">
               {productsQuery.isLoading ? (
                 <div className="space-y-2 p-3">
                   <Skeleton className="h-10 w-full" />
@@ -315,8 +320,10 @@ export default function ProductsPage() {
                       <button
                         type="button"
                         onClick={() => handleSelect(row.id)}
-                        className={`block w-full border-b border-border px-4 py-3 text-start text-sm hover:bg-canvas ${
-                          row.id === selectedId ? "bg-canvas font-medium" : ""
+                        className={`block w-full relative border-b border-border px-4 py-2.5 text-start text-sm transition-colors ${
+                          row.id === selectedId
+                            ? "bg-accent-soft font-semibold text-accent before:absolute before:inset-y-0 before:start-0 before:w-[3px] before:bg-accent"
+                            : "hover:bg-canvas"
                         }`}
                       >
                         {row.product_families?.name

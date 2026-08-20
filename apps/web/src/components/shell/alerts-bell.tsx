@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { Dialog } from "@/components/ui/dialog";
+import { Icon } from "@/components/ui/icon";
 import { createClient } from "@/lib/supabase/client";
 
 interface AlertRow {
@@ -76,7 +77,9 @@ export function AlertsBell() {
   }
 
   async function handleMarkAllRead() {
-    const unreadIds = (alertsQuery.data ?? []).filter((alert) => !alert.read).map((alert) => alert.id);
+    const unreadIds = (alertsQuery.data ?? [])
+      .filter((alert) => !alert.read)
+      .map((alert) => alert.id);
     if (unreadIds.length === 0) return;
     const { error } = await supabase.from("alerts").update({ read: true }).in("id", unreadIds);
     if (!error) {
@@ -90,13 +93,11 @@ export function AlertsBell() {
         type="button"
         onClick={() => setOpen(true)}
         aria-label="התראות"
-        className="relative rounded-md p-2 text-ink hover:bg-canvas"
+        className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-canvas hover:text-ink"
       >
-        <span aria-hidden className="block text-xl leading-none">
-          🔔
-        </span>
+        <Icon name="bell" />
         {unreadCount > 0 && (
-          <span className="absolute -end-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-semibold text-white">
+          <span className="absolute end-0.5 top-0.5 flex h-4 min-w-4 ring-2 ring-surface items-center justify-center rounded-full bg-danger px-1 text-[10px] font-semibold text-white">
             {unreadCount > 9 ? "9+" : unreadCount}
           </span>
         )}
@@ -105,7 +106,11 @@ export function AlertsBell() {
       <Dialog open={open} onClose={() => setOpen(false)} title="התראות">
         <div className="flex flex-col gap-3">
           {unreadCount > 0 && (
-            <button type="button" onClick={handleMarkAllRead} className="self-end text-xs text-ink-muted underline">
+            <button
+              type="button"
+              onClick={handleMarkAllRead}
+              className="self-end rounded px-1.5 py-0.5 text-xs font-medium text-accent transition-colors hover:bg-accent-soft"
+            >
               סמן הכל כנקרא
             </button>
           )}
@@ -118,8 +123,10 @@ export function AlertsBell() {
                 <button
                   type="button"
                   onClick={() => handleSelect(alert)}
-                  className={`flex w-full flex-col items-start gap-0.5 rounded-md border px-3 py-2 text-start text-sm hover:bg-canvas ${
-                    alert.read ? "border-transparent text-ink-muted" : "border-accent bg-canvas font-medium"
+                  className={`flex w-full flex-col items-start gap-0.5 rounded-md border px-3 py-2.5 text-start text-sm transition-colors hover:bg-canvas ${
+                    alert.read
+                      ? "border-transparent text-ink-muted"
+                      : "border-accent-soft bg-accent-soft/60 font-medium text-ink"
                   }`}
                 >
                   <span>
@@ -128,7 +135,9 @@ export function AlertsBell() {
                     {alert.number_for_display != null ? ` (${alert.number_for_display})` : ""}
                   </span>
                   {alert.alert_types?.second_line_of_text && (
-                    <span className="text-xs text-ink-muted">{alert.alert_types.second_line_of_text}</span>
+                    <span className="text-xs text-ink-muted">
+                      {alert.alert_types.second_line_of_text}
+                    </span>
                   )}
                 </button>
               </li>

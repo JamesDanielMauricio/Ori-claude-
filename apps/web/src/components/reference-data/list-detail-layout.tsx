@@ -26,7 +26,7 @@ export function ListDetailLayout({
       {header && <div className="shrink-0">{header}</div>}
       <div className="flex min-h-0 flex-1 flex-col gap-4 md:flex-row">
         <div className="flex min-h-0 w-full flex-col md:w-80 md:shrink-0">{list}</div>
-        <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-surface p-5">
+        <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-surface p-5 shadow-card">
           {detail}
         </div>
       </div>

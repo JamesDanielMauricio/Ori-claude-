@@ -239,6 +239,13 @@
       "when": 1783870018810,
       "tag": "0033_save-grower-transporter-assignment",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1787252845082,
+      "tag": "0035_fix-build-arrangement-alerts-security-definer",
+      "breakpoints": true
     }
   ]
 }

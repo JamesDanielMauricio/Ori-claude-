@@ -114,7 +114,10 @@ test.describe("Backoffice — arrangement workspace", () => {
     await customerSelect.selectOption(customerOptionValue!);
 
     await page.getByLabel("כמות (משטחים)").fill("5");
-    await page.getByLabel("מחיר").fill("12.5");
+    // `exact` because the sidebar's always-present Business Day Panel carries
+    // a "לקוחות מורשים רואים מחירים" checkbox, and getByLabel matches on
+    // substring — same collision reference-data-products.spec.ts handles.
+    await page.getByLabel("מחיר", { exact: true }).fill("12.5");
 
     await page.getByRole("button", { name: "צור רשומת סידור" }).click();
     await expect(page.getByText("הרשומה נוצרה.")).toBeVisible();

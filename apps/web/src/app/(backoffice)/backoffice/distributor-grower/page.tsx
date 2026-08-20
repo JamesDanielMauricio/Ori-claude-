@@ -64,7 +64,11 @@ export default function DistributorAsGrowerPage() {
   const openDayQuery = useQuery({
     queryKey: ["grower-oversight", "open-trading-day"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("trading_days").select("id, trade_date").neq("phase", "closed").maybeSingle();
+      const { data, error } = await supabase
+        .from("trading_days")
+        .select("id, trade_date")
+        .neq("phase", "closed")
+        .maybeSingle();
       if (error) throw error;
       return data as { id: string; trade_date: string } | null;
     },
@@ -120,7 +124,10 @@ export default function DistributorAsGrowerPage() {
     queryKey: ["grower-oversight", "grower-products", selectedId],
     enabled: !!selectedId,
     queryFn: async () => {
-      const { data, error } = await supabase.from("grower_products").select("product_variety_id").eq("company_id", selectedId!);
+      const { data, error } = await supabase
+        .from("grower_products")
+        .select("product_variety_id")
+        .eq("company_id", selectedId!);
       if (error) throw error;
       return data.map((row) => row.product_variety_id);
     },
@@ -136,7 +143,9 @@ export default function DistributorAsGrowerPage() {
     () =>
       (catalogQuery.data ?? []).map((product) => ({
         id: product.id,
-        label: product.product_families?.name ? `${product.product_families.name} — ${product.name}` : product.name,
+        label: product.product_families?.name
+          ? `${product.product_families.name} — ${product.name}`
+          : product.name,
       })),
     [catalogQuery.data],
   );
@@ -159,7 +168,10 @@ export default function DistributorAsGrowerPage() {
         // would silently wipe out an existing transporter assignment.
         transporterCompanyId: selected.transporter_company_id,
       });
-      const { error: saveError } = await supabase.rpc("save_grower", toSaveGrowerRpcArgs(saveInput));
+      const { error: saveError } = await supabase.rpc(
+        "save_grower",
+        toSaveGrowerRpcArgs(saveInput),
+      );
       if (saveError) throw saveError;
 
       if (openDayId) {
@@ -177,8 +189,12 @@ export default function DistributorAsGrowerPage() {
     onSuccess: () => {
       showToast("רשימת המוצרים עודכנה.", "success");
       setProductsDialogOpen(false);
-      void queryClient.invalidateQueries({ queryKey: ["grower-oversight", "grower-products", selectedId] });
-      void queryClient.invalidateQueries({ queryKey: ["grower-oversight", "picks-for-day", openDayId] });
+      void queryClient.invalidateQueries({
+        queryKey: ["grower-oversight", "grower-products", selectedId],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["grower-oversight", "picks-for-day", openDayId],
+      });
       if (selectedPick) {
         void queryClient.invalidateQueries({ queryKey: ["grower", "pick-lines", selectedPick.id] });
       }
@@ -197,7 +213,9 @@ export default function DistributorAsGrowerPage() {
     },
     onSuccess: () => {
       showToast("התזכורת נשלחה.", "success");
-      void queryClient.invalidateQueries({ queryKey: ["grower-oversight", "picks-for-day", openDayId] });
+      void queryClient.invalidateQueries({
+        queryKey: ["grower-oversight", "picks-for-day", openDayId],
+      });
     },
     onError: (error: { message?: string }) => {
       showToast(`שליחת התזכורת נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
@@ -221,9 +239,14 @@ export default function DistributorAsGrowerPage() {
   return (
     <>
       <ListDetailLayout
-        header={<PageHeader title="בשם מגדל" subtitle="צפייה ועריכה של ליקוטי היום בשם כל מגדל, ושליחת תזכורות." />}
+        header={
+          <PageHeader
+            title="בשם מגדל"
+            subtitle="צפייה ועריכה של ליקוטי היום בשם כל מגדל, ושליחת תזכורות."
+          />
+        }
         list={
-          <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-surface">
+          <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-surface shadow-card">
             {growersQuery.isLoading || (openDayId && picksForDayQuery.isLoading) ? (
               <div className="space-y-2 p-3">
                 <Skeleton className="h-10 w-full" />
@@ -239,12 +262,16 @@ export default function DistributorAsGrowerPage() {
                       <button
                         type="button"
                         onClick={() => setSelectedId(row.id)}
-                        className={`flex w-full items-center justify-between border-b border-border px-4 py-3 text-start text-sm hover:bg-canvas ${
-                          row.id === selectedId ? "bg-canvas font-medium" : ""
+                        className={`flex w-full items-center justify-between relative border-b border-border px-4 py-2.5 text-start text-sm transition-colors ${
+                          row.id === selectedId
+                            ? "bg-accent-soft font-semibold text-accent before:absolute before:inset-y-0 before:start-0 before:w-[3px] before:bg-accent"
+                            : "hover:bg-canvas"
                         }`}
                       >
                         <span>{row.name}</span>
-                        <span className="text-xs text-ink-muted">{pick ? STATUS_LABEL[pick.status] : "אין ליקוט"}</span>
+                        <span className="text-xs text-ink-muted">
+                          {pick ? STATUS_LABEL[pick.status] : "אין ליקוט"}
+                        </span>
                       </button>
                     </li>
                   );
@@ -265,7 +292,8 @@ export default function DistributorAsGrowerPage() {
                     {selectedPick ? (
                       <>
                         סטטוס: {STATUS_LABEL[selectedPick.status]}
-                        {selectedPick.submitted_at && ` · נשלח ב-${new Date(selectedPick.submitted_at).toLocaleString("he-IL")}`}
+                        {selectedPick.submitted_at &&
+                          ` · נשלח ב-${new Date(selectedPick.submitted_at).toLocaleString("he-IL")}`}
                         {selectedPick.reminder_sent_at &&
                           ` · תזכורת נשלחה ב-${new Date(selectedPick.reminder_sent_at).toLocaleString("he-IL")}`}
                       </>
@@ -275,14 +303,22 @@ export default function DistributorAsGrowerPage() {
                   </p>
                 </div>
                 <div className="flex gap-2">
-                  <Button type="button" variant="secondary" onClick={() => setProductsDialogOpen(true)}>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setProductsDialogOpen(true)}
+                  >
                     ערוך מוצרים בעונה
                   </Button>
                   <Button
                     type="button"
                     variant="secondary"
                     onClick={() => reminderMutation.mutate()}
-                    disabled={!selectedPick || selectedPick.status === "closed" || reminderMutation.isPending}
+                    disabled={
+                      !selectedPick ||
+                      selectedPick.status === "closed" ||
+                      reminderMutation.isPending
+                    }
                   >
                     {reminderMutation.isPending ? "שולח…" : "שלח תזכורת"}
                   </Button>
@@ -300,9 +336,17 @@ export default function DistributorAsGrowerPage() {
           )
         }
       />
-      <Dialog open={productsDialogOpen} onClose={() => setProductsDialogOpen(false)} title="מוצרים בעונה">
+      <Dialog
+        open={productsDialogOpen}
+        onClose={() => setProductsDialogOpen(false)}
+        title="מוצרים בעונה"
+      >
         <div className="flex flex-col gap-4">
-          <CheckboxList options={catalogOptions} selectedIds={productDraft} onToggle={toggleProduct} />
+          <CheckboxList
+            options={catalogOptions}
+            selectedIds={productDraft}
+            onToggle={toggleProduct}
+          />
           <div className="flex justify-end gap-2">
             <Button type="button" variant="secondary" onClick={() => setProductsDialogOpen(false)}>
               ביטול

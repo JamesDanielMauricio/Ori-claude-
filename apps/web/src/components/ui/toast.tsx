@@ -2,6 +2,8 @@
 
 import { createContext, useCallback, useContext, useState, type ReactNode } from "react";
 
+import { Icon, type IconName } from "./icon";
+
 type ToastVariant = "default" | "success" | "error";
 
 interface ToastMessage {
@@ -16,10 +18,22 @@ interface ToastContextValue {
 
 const ToastContext = createContext<ToastContextValue | null>(null);
 
+// Filled semantic backgrounds, kept from the original: a toast appears over
+// whatever screen the user was already reading, so it has to win on contrast
+// immediately rather than blend into the page as a bordered white card would.
 const VARIANT_CLASSES: Record<ToastVariant, string> = {
-  default: "border-border bg-surface text-ink",
-  success: "border-accent bg-accent text-accent-ink",
-  error: "border-danger bg-danger text-white",
+  default: "border-border-strong bg-surface text-ink",
+  success: "border-accent-hover bg-accent text-accent-ink",
+  error: "border-danger-hover bg-danger text-white",
+};
+
+// An icon alongside the text so the outcome is legible before the sentence
+// is read — and so success/failure isn't carried by color alone, which is
+// the same reason the message itself always states what happened.
+const VARIANT_ICONS: Record<ToastVariant, IconName> = {
+  default: "infoCircle",
+  success: "checkCircle",
+  error: "alertCircle",
 };
 
 export function ToastProvider({ children }: { children: ReactNode }) {
@@ -36,14 +50,15 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={{ showToast }}>
       {children}
-      <div className="pointer-events-none fixed inset-x-0 bottom-4 z-50 flex flex-col items-center gap-2">
+      <div className="pointer-events-none fixed inset-x-0 bottom-6 z-50 flex flex-col items-center gap-2 px-4">
         {toasts.map((toast) => (
           <div
             key={toast.id}
             role="status"
-            className={`animate-toast-in pointer-events-auto rounded-lg border px-4 py-2 text-sm shadow-lg ${VARIANT_CLASSES[toast.variant]}`}
+            className={`animate-toast-in pointer-events-auto flex max-w-md items-center gap-2.5 rounded-lg border px-4 py-2.5 text-sm font-medium shadow-overlay ${VARIANT_CLASSES[toast.variant]}`}
           >
-            {toast.message}
+            <Icon name={VARIANT_ICONS[toast.variant]} className="h-[18px] w-[18px] shrink-0" />
+            <span>{toast.message}</span>
           </div>
         ))}
       </div>

@@ -6,7 +6,14 @@ import { useMemo, useState } from "react";
 import { ListDetailLayout } from "@/components/reference-data/list-detail-layout";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
-import { TableBody, TableCell, TableContainer, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { createClient } from "@/lib/supabase/client";
 
 interface OrderRow {
@@ -88,9 +95,11 @@ export default function CustomerOrderHistoryPage() {
 
   return (
     <ListDetailLayout
-      header={<PageHeader title="היסטוריית הזמנות" subtitle="הזמנות מימי מסחר קודמים, מהחדשה לישנה." />}
+      header={
+        <PageHeader title="היסטוריית הזמנות" subtitle="הזמנות מימי מסחר קודמים, מהחדשה לישנה." />
+      }
       list={
-        <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-surface">
+        <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-surface shadow-card">
           {ordersQuery.isLoading ? (
             <div className="space-y-2 p-3">
               <Skeleton className="h-10 w-full" />
@@ -106,8 +115,10 @@ export default function CustomerOrderHistoryPage() {
                   <button
                     type="button"
                     onClick={() => setSelectedId(row.id)}
-                    className={`flex w-full items-center justify-between border-b border-border px-4 py-3 text-start text-sm hover:bg-canvas ${
-                      row.id === selectedId ? "bg-canvas font-medium" : ""
+                    className={`flex w-full items-center justify-between relative border-b border-border px-4 py-2.5 text-start text-sm transition-colors ${
+                      row.id === selectedId
+                        ? "bg-accent-soft font-semibold text-accent before:absolute before:inset-y-0 before:start-0 before:w-[3px] before:bg-accent"
+                        : "hover:bg-canvas"
                     }`}
                   >
                     <span>

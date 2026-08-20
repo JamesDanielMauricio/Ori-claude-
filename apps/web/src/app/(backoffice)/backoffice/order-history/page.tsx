@@ -3,10 +3,18 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
+import { inputClassName } from "@/components/reference-data/form-field";
 import { ListDetailLayout } from "@/components/reference-data/list-detail-layout";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
-import { TableBody, TableCell, TableContainer, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { createClient } from "@/lib/supabase/client";
 
 interface OrderRow {
@@ -122,7 +130,7 @@ export default function ArrangedOrderHistoryPage() {
                 setDate(event.target.value);
                 setSelectedOrderId(null);
               }}
-              className="rounded-md border border-border bg-surface px-3 py-2 text-sm text-ink"
+              className={inputClassName}
             />
           </div>
         }
@@ -135,7 +143,7 @@ export default function ArrangedOrderHistoryPage() {
       ) : (
         <ListDetailLayout
           list={
-            <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-surface">
+            <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-surface shadow-card">
               {ordersQuery.isLoading ? (
                 <div className="space-y-2 p-3">
                   <Skeleton className="h-10 w-full" />
@@ -150,8 +158,10 @@ export default function ArrangedOrderHistoryPage() {
                       <button
                         type="button"
                         onClick={() => setSelectedOrderId(row.id)}
-                        className={`flex w-full items-center justify-between border-b border-border px-4 py-3 text-start text-sm hover:bg-canvas ${
-                          row.id === selectedOrderId ? "bg-canvas font-medium" : ""
+                        className={`flex w-full items-center justify-between relative border-b border-border px-4 py-2.5 text-start text-sm transition-colors ${
+                          row.id === selectedOrderId
+                            ? "bg-accent-soft font-semibold text-accent before:absolute before:inset-y-0 before:start-0 before:w-[3px] before:bg-accent"
+                            : "hover:bg-canvas"
                         }`}
                       >
                         <span>{row.companies?.name ?? "—"}</span>
@@ -172,7 +182,8 @@ export default function ArrangedOrderHistoryPage() {
                   <h1 className="text-lg font-semibold">{selected.companies?.name ?? "—"}</h1>
                   <p className="text-sm text-ink-muted">
                     סטטוס: {STATUS_LABEL[selected.status]}
-                    {selected.submitted_at && ` · נשלח ב-${new Date(selected.submitted_at).toLocaleString("he-IL")}`}
+                    {selected.submitted_at &&
+                      ` · נשלח ב-${new Date(selected.submitted_at).toLocaleString("he-IL")}`}
                   </p>
                 </div>
 
@@ -202,7 +213,9 @@ export default function ArrangedOrderHistoryPage() {
                                 : (line.product_varieties?.name ?? "")}
                             </TableCell>
                             <TableCell>{line.pallets_ordered}</TableCell>
-                            <TableCell className={mismatch ? "font-medium text-danger" : ""}>{arranged}</TableCell>
+                            <TableCell className={mismatch ? "font-medium text-danger" : ""}>
+                              {arranged}
+                            </TableCell>
                             <TableCell>{line.comment ?? ""}</TableCell>
                           </TableRow>
                         );

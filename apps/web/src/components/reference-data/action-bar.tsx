@@ -27,7 +27,7 @@ export function ActionBar({
   extra?: ReactNode | undefined;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4">
+    <div className="mt-1 flex flex-wrap items-center gap-2 border-t border-border pt-4">
       {editing ? (
         <>
           <Button type="button" onClick={onSave} disabled={saving}>

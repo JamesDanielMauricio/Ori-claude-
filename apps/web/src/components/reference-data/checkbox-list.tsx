@@ -20,11 +20,11 @@ export function CheckboxList({
   }
 
   return (
-    <div className="flex max-h-64 flex-col gap-1 overflow-y-auto rounded-md border border-border p-2">
+    <div className="flex max-h-64 flex-col gap-0.5 overflow-y-auto rounded-md border border-border bg-surface p-1.5">
       {options.map((option) => (
         <label
           key={option.id}
-          className="flex items-center gap-2 rounded px-2 py-1 text-sm hover:bg-canvas"
+          className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-canvas"
         >
           <input
             type="checkbox"

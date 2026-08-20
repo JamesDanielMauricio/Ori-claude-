@@ -10,10 +10,18 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { PriceEditDialog } from "@/components/arrangement/price-edit-dialog";
+import { inputClassName } from "@/components/reference-data/form-field";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
-import { TableBody, TableCell, TableContainer, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { createClient } from "@/lib/supabase/client";
 
@@ -156,7 +164,10 @@ export default function ArrangementPage() {
   const companiesQuery = useQuery({
     queryKey: ["arrangement", "companies"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("companies").select("id, name").in("type", ["grower", "customer"]);
+      const { data, error } = await supabase
+        .from("companies")
+        .select("id, name")
+        .in("type", ["grower", "customer"]);
       if (error) throw error;
       return data as Company[];
     },
@@ -173,8 +184,10 @@ export default function ArrangementPage() {
   // that has to wait for a request of its own.
   const varietyById = useMemo(() => {
     const map = new Map<string, Variety>();
-    for (const line of pickLines) if (line.product_varieties) map.set(line.product_varieties.id, line.product_varieties);
-    for (const line of orderLines) if (line.product_varieties) map.set(line.product_varieties.id, line.product_varieties);
+    for (const line of pickLines)
+      if (line.product_varieties) map.set(line.product_varieties.id, line.product_varieties);
+    for (const line of orderLines)
+      if (line.product_varieties) map.set(line.product_varieties.id, line.product_varieties);
     return map;
   }, [pickLines, orderLines]);
 
@@ -207,14 +220,21 @@ export default function ArrangementPage() {
   const supplyByVariety = useMemo(() => {
     const groups = new Map<
       string,
-      { varietyId: string; label: string; total: number; byGrower: Map<string, { name: string; pallets: number }> }
+      {
+        varietyId: string;
+        label: string;
+        total: number;
+        byGrower: Map<string, { name: string; pallets: number }>;
+      }
     >();
     for (const line of pickLines) {
       const variety = varietyById.get(line.product_variety_id);
       const growerId = growerIdByPickId.get(line.daily_pick_id);
       if (!variety || !growerId) continue;
       const pallets = Number(line.pallets_picked);
-      const label = variety.product_families?.name ? `${variety.product_families.name} — ${variety.name}` : variety.name;
+      const label = variety.product_families?.name
+        ? `${variety.product_families.name} — ${variety.name}`
+        : variety.name;
       let group = groups.get(variety.id);
       if (!group) {
         group = { varietyId: variety.id, label, total: 0, byGrower: new Map() };
@@ -223,7 +243,10 @@ export default function ArrangementPage() {
       group.total += pallets;
       const growerName = companyNameById.get(growerId) ?? growerId;
       const existing = group.byGrower.get(growerId);
-      group.byGrower.set(growerId, { name: growerName, pallets: (existing?.pallets ?? 0) + pallets });
+      group.byGrower.set(growerId, {
+        name: growerName,
+        pallets: (existing?.pallets ?? 0) + pallets,
+      });
     }
     return [...groups.values()].sort((a, b) => a.label.localeCompare(b.label));
   }, [pickLines, varietyById, growerIdByPickId, companyNameById]);
@@ -233,14 +256,21 @@ export default function ArrangementPage() {
   const demandByVariety = useMemo(() => {
     const groups = new Map<
       string,
-      { varietyId: string; label: string; total: number; byCustomer: Map<string, { name: string; pallets: number }> }
+      {
+        varietyId: string;
+        label: string;
+        total: number;
+        byCustomer: Map<string, { name: string; pallets: number }>;
+      }
     >();
     for (const line of orderLines) {
       const variety = varietyById.get(line.product_variety_id);
       const customerId = customerIdByOrderId.get(line.daily_order_id);
       if (!variety || !customerId) continue;
       const pallets = Number(line.pallets_ordered);
-      const label = variety.product_families?.name ? `${variety.product_families.name} — ${variety.name}` : variety.name;
+      const label = variety.product_families?.name
+        ? `${variety.product_families.name} — ${variety.name}`
+        : variety.name;
       let group = groups.get(variety.id);
       if (!group) {
         group = { varietyId: variety.id, label, total: 0, byCustomer: new Map() };
@@ -249,7 +279,10 @@ export default function ArrangementPage() {
       group.total += pallets;
       const customerName = companyNameById.get(customerId) ?? customerId;
       const existing = group.byCustomer.get(customerId);
-      group.byCustomer.set(customerId, { name: customerName, pallets: (existing?.pallets ?? 0) + pallets });
+      group.byCustomer.set(customerId, {
+        name: customerName,
+        pallets: (existing?.pallets ?? 0) + pallets,
+      });
     }
     return [...groups.values()].sort((a, b) => a.label.localeCompare(b.label));
   }, [orderLines, varietyById, customerIdByOrderId, companyNameById]);
@@ -277,23 +310,44 @@ export default function ArrangementPage() {
         const growerId = pickLine ? growerIdByPickId.get(pickLine.daily_pick_id) : undefined;
         return {
           record,
-          varietyLabel: variety ? (variety.product_families?.name ? `${variety.product_families.name} — ${variety.name}` : variety.name) : "—",
+          varietyLabel: variety
+            ? variety.product_families?.name
+              ? `${variety.product_families.name} — ${variety.name}`
+              : variety.name
+            : "—",
           growerName: growerId ? (companyNameById.get(growerId) ?? growerId) : "—",
-          customerName: companyNameById.get(record.customer_company_id) ?? record.customer_company_id,
+          customerName:
+            companyNameById.get(record.customer_company_id) ?? record.customer_company_id,
           pickLine,
           orderLine,
         };
       })
       .sort((a, b) => {
-        const primary = viewMode === "by-grower" ? a.growerName.localeCompare(b.growerName) : a.varietyLabel.localeCompare(b.varietyLabel);
+        const primary =
+          viewMode === "by-grower"
+            ? a.growerName.localeCompare(b.growerName)
+            : a.varietyLabel.localeCompare(b.varietyLabel);
         if (primary !== 0) return primary;
-        return viewMode === "by-grower" ? a.varietyLabel.localeCompare(b.varietyLabel) : a.growerName.localeCompare(b.growerName);
+        return viewMode === "by-grower"
+          ? a.varietyLabel.localeCompare(b.varietyLabel)
+          : a.growerName.localeCompare(b.growerName);
       });
-  }, [records, pickLineById, orderLineById, varietyById, growerIdByPickId, companyNameById, viewMode]);
+  }, [
+    records,
+    pickLineById,
+    orderLineById,
+    varietyById,
+    growerIdByPickId,
+    companyNameById,
+    viewMode,
+  ]);
 
   const deleteMutation = useMutation({
     mutationFn: async (recordId: string) => {
-      const { error } = await supabase.rpc("delete_arrangement_record", toDeleteArrangementRecordRpcArgs({ id: recordId }));
+      const { error } = await supabase.rpc(
+        "delete_arrangement_record",
+        toDeleteArrangementRecordRpcArgs({ id: recordId }),
+      );
       if (error) throw error;
     },
     onSuccess: () => {
@@ -308,9 +362,17 @@ export default function ArrangementPage() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: async (input: { id: string; quantityPallets: number; price: number | null; priceType: string | null }) => {
+    mutationFn: async (input: {
+      id: string;
+      quantityPallets: number;
+      price: number | null;
+      priceType: string | null;
+    }) => {
       const parsed = updateArrangementRecordInputSchema.parse(input);
-      const { error } = await supabase.rpc("update_arrangement_record", toUpdateArrangementRecordRpcArgs(parsed));
+      const { error } = await supabase.rpc(
+        "update_arrangement_record",
+        toUpdateArrangementRecordRpcArgs(parsed),
+      );
       if (error) throw error;
     },
     onSuccess: () => {
@@ -381,10 +443,12 @@ export default function ArrangementPage() {
       />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="rounded-lg border border-border bg-surface p-4">
+        <div className="rounded-lg border border-border bg-surface shadow-card p-4">
           <h2 className="mb-3 text-sm font-semibold text-ink-muted">היצע מאוגד (לפי זן)</h2>
           <div className="flex flex-col gap-3">
-            {supplyByVariety.length === 0 && <p className="text-sm text-ink-muted">אין היצע רשום עדיין.</p>}
+            {supplyByVariety.length === 0 && (
+              <p className="text-sm text-ink-muted">אין היצע רשום עדיין.</p>
+            )}
             {supplyByVariety.map((group) => (
               <div key={group.varietyId} className="border-b border-border pb-2 last:border-0">
                 <div className="flex items-center justify-between">
@@ -394,7 +458,11 @@ export default function ArrangementPage() {
                       <span className="ms-2 text-xs font-semibold text-danger">חוסר במלאי</span>
                     )}
                   </span>
-                  <Button type="button" variant="ghost" onClick={() => setPriceEditVarietyId(group.varietyId)}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setPriceEditVarietyId(group.varietyId)}
+                  >
                     ערוך מחיר
                   </Button>
                 </div>
@@ -410,10 +478,12 @@ export default function ArrangementPage() {
           </div>
         </div>
 
-        <div className="rounded-lg border border-border bg-surface p-4">
+        <div className="rounded-lg border border-border bg-surface shadow-card p-4">
           <h2 className="mb-3 text-sm font-semibold text-ink-muted">ביקוש מאוגד (לפי זן)</h2>
           <div className="flex flex-col gap-3">
-            {demandByVariety.length === 0 && <p className="text-sm text-ink-muted">אין ביקוש רשום עדיין.</p>}
+            {demandByVariety.length === 0 && (
+              <p className="text-sm text-ink-muted">אין ביקוש רשום עדיין.</p>
+            )}
             {demandByVariety.map((group) => (
               <div key={group.varietyId} className="border-b border-border pb-2 last:border-0">
                 <span className="text-sm font-medium">
@@ -438,7 +508,7 @@ export default function ArrangementPage() {
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-ink-muted">רשומות סידור (התאמת קווים)</h2>
-          <div className="flex gap-1 rounded-md border border-border p-1">
+          <div className="flex gap-1 rounded-md border border-border bg-surface p-1 shadow-card">
             <Button
               type="button"
               variant={viewMode === "by-product" ? "primary" : "ghost"}
@@ -521,7 +591,11 @@ function ArrangementRecordRow({
   record: ArrangementRecord;
   editable: boolean;
   saving: boolean;
-  onSave: (patch: { quantityPallets: number; price: number | null; priceType: string | null }) => void;
+  onSave: (patch: {
+    quantityPallets: number;
+    price: number | null;
+    priceType: string | null;
+  }) => void;
   onDelete: () => void;
 }) {
   const [quantity, setQuantity] = useState(String(record.quantity_pallets));
@@ -539,7 +613,7 @@ function ArrangementRecordRow({
           step="0.01"
           min={0}
           disabled={!editable}
-          className="w-24 rounded-md border border-border bg-surface px-2 py-1 text-sm disabled:bg-canvas"
+          className={`${inputClassName} w-24`}
           value={quantity}
           onChange={(event) => setQuantity(event.target.value)}
         />
@@ -550,7 +624,7 @@ function ArrangementRecordRow({
           step="0.01"
           min={0}
           disabled={!editable}
-          className="w-24 rounded-md border border-border bg-surface px-2 py-1 text-sm disabled:bg-canvas"
+          className={`${inputClassName} w-24`}
           value={price}
           onChange={(event) => setPrice(event.target.value)}
         />
@@ -558,7 +632,7 @@ function ArrangementRecordRow({
       <TableCell>
         <input
           disabled={!editable}
-          className="w-24 rounded-md border border-border bg-surface px-2 py-1 text-sm disabled:bg-canvas"
+          className={`${inputClassName} w-24`}
           value={priceType}
           onChange={(event) => setPriceType(event.target.value)}
         />

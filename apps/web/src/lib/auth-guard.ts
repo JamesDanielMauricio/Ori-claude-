@@ -1,8 +1,10 @@
 import "server-only";
 
 import type { UserRole } from "@ori/shared/roles";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
+import { VERIFIED_USER_EMAIL_HEADER, VERIFIED_USER_ID_HEADER } from "./auth-headers";
 import { createClient } from "./supabase/server";
 
 export interface CurrentUser {
@@ -14,15 +16,45 @@ export interface CurrentUser {
   mustChangePassword: boolean;
 }
 
-export async function getCurrentUser(): Promise<CurrentUser | null> {
-  const supabase = await createClient();
+// Reads the identity middleware.ts already verified for this request,
+// falling back to a real `auth.getUser()` when it isn't there.
+//
+// SECURITY: these headers are safe to read because middleware deletes any
+// client-supplied copy before writing its own (see lib/auth-headers.ts) —
+// a value here always means "middleware round-tripped to Supabase and this
+// token checked out". The fallback covers any request that somehow bypassed
+// middleware: absence means "not verified yet", never "not signed in", so
+// the guard re-verifies for real rather than assuming either way.
+//
+// Defence in depth: even if a forged id did reach this function, it grants
+// nothing. The profiles read below is RLS-gated by "profiles_select_own"
+// (user_id = auth.uid()), and auth.uid() comes from the real JWT in the
+// cookie — not from this header. A mismatched id simply selects no row,
+// and the caller is treated as signed out.
+async function verifiedIdentity(): Promise<{ id: string; email: string } | null> {
+  const headerStore = await headers();
+  const id = headerStore.get(VERIFIED_USER_ID_HEADER);
+  const email = headerStore.get(VERIFIED_USER_EMAIL_HEADER);
 
+  if (id && email) {
+    return { id, email: decodeURIComponent(email) };
+  }
+
+  const supabase = await createClient();
   // `getUser()`, not `getSession()` — it round-trips to Supabase to verify
   // the token rather than trusting whatever the cookie claims.
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user?.email) {
+
+  return user?.email ? { id: user.id, email: user.email } : null;
+}
+
+export async function getCurrentUser(): Promise<CurrentUser | null> {
+  const supabase = await createClient();
+
+  const user = await verifiedIdentity();
+  if (!user) {
     return null;
   }
 

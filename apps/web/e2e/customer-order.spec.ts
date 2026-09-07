@@ -107,11 +107,17 @@ test.describe("Customer — order + history", () => {
     // Mixed family: this grower's whole catalog is one family with two
     // varieties. The depleted one (zero supply, not in this customer's
     // cart) must not render at all — proven here by there being exactly
-    // one product row (one pallets input) on the whole page, not by
-    // asserting an absence of specific text, since variety names are
-    // random per-test strings with nothing else to distinguish them by.
-    // The family itself still renders, via its one surviving variety.
-    await expect(page.getByRole("heading", { level: 2 })).toHaveCount(1);
+    // one product row on the whole page, not by asserting an absence of
+    // specific text, since variety names are random per-test strings with
+    // nothing else to distinguish them by. The family itself still
+    // renders, via its one surviving variety.
+    const productList = page.locator("main ul li");
+    await expect(productList).toHaveCount(1);
+
+    // Rows render collapsed (image + name + chevron); the pallets input and
+    // comment control only exist once a row is expanded.
+    const productToggle = page.locator("main").getByRole("button", { expanded: false });
+    await productToggle.click();
     const palletsInput = page.locator('input[type="number"]');
     await expect(palletsInput).toHaveCount(1);
 
@@ -133,15 +139,23 @@ test.describe("Customer — order + history", () => {
     await expect(palletsInput).toHaveValue("4");
 
     // A fresh reload confirms it actually persisted server-side, not just
-    // in local draft state.
+    // in local draft state. The row collapses again on remount, so expand
+    // it before reading the input back.
     await page.reload();
+    await page.locator("main").getByRole("button", { expanded: false }).click();
     await expect(palletsInput).toHaveValue("4");
 
     await page.goto("/customer/history");
     const historyRow = page.getByRole("button", { name: "נשלח" });
     await expect(historyRow).toBeVisible();
     await historyRow.click();
-    await expect(page.getByRole("cell", { name: "4", exact: true })).toBeVisible();
-    await expect(page.getByRole("cell", { name: "gate code 4321" })).toBeVisible();
+
+    // Still today's open trading day (only submitted, not closed), so
+    // history routes back to the same live, editable editor — pre-filled
+    // with what was just submitted — rather than a read-only view.
+    await expect(page).toHaveURL(/\/customer\/order\?orderId=/);
+    await page.locator("main").getByRole("button", { expanded: false }).click();
+    await expect(page.locator('input[type="number"]')).toHaveValue("4");
+    await expect(page.getByText("הערה: gate code 4321")).toBeVisible();
   });
 });

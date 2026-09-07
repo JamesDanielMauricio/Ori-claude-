@@ -22,11 +22,19 @@ export interface CatalogRow {
   is_orderable: boolean;
   pallets_ordered: number;
   comment: string | null;
+  // The variety's FAMILY's photo (product_families.image_url, added by
+  // migration 0036_product-variety-images.sql — applied 2026-09-08). The
+  // RPC repeats the same value across every variety row in a family;
+  // groupCatalogByFamily below reads it once per group. Still null for
+  // every family until a real photo URL is set per family; ProductThumbnail
+  // falls back to a generic icon either way.
+  image_url: string | null;
 }
 
 export interface FamilyGroup {
   familyId: string;
   familyName: string;
+  imageUrl: string | null;
   varieties: CatalogRow[];
 }
 
@@ -35,7 +43,12 @@ export function groupCatalogByFamily(rows: CatalogRow[]): FamilyGroup[] {
   for (const row of rows) {
     let group = groups.get(row.family_id);
     if (!group) {
-      group = { familyId: row.family_id, familyName: row.family_name, varieties: [] };
+      group = {
+        familyId: row.family_id,
+        familyName: row.family_name,
+        imageUrl: row.image_url ?? null,
+        varieties: [],
+      };
       groups.set(row.family_id, group);
     }
     group.varieties.push(row);
@@ -49,4 +62,18 @@ export function formatPrice(row: Pick<CatalogRow, "price" | "price_range_from" |
     return `₪${row.price_range_from}–₪${row.price_range_to}`;
   }
   return null;
+}
+
+// "ליום רביעי ה- 10.7.24" — the reference design's date pill wording, used
+// by both the live order screen's header and the read-only historical
+// order view.
+export function weekdayDateLabel(isoDate: string): string {
+  const date = new Date(isoDate);
+  const weekday = new Intl.DateTimeFormat("he-IL", { weekday: "long" }).format(date);
+  const shortDate = new Intl.DateTimeFormat("he-IL", {
+    day: "numeric",
+    month: "numeric",
+    year: "2-digit",
+  }).format(date);
+  return `ל${weekday} ה- ${shortDate}`;
 }

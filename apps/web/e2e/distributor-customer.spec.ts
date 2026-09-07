@@ -74,6 +74,9 @@ test.describe("Backoffice — Customer Order Status", () => {
     await customerRow.click();
 
     await expect(page.getByRole("button", { name: "ערוך", exact: true })).toBeVisible();
+    // Rows render collapsed; expand the one product row before it has a
+    // pallets input to fill.
+    await page.locator("main").getByRole("button", { expanded: false }).click();
     await page.getByRole("button", { name: "ערוך", exact: true }).click();
     await page.locator('input[type="number"]').fill("4");
     await page.getByRole("button", { name: "שמור" }).click();
@@ -87,6 +90,8 @@ test.describe("Backoffice — Customer Order Status", () => {
 
     await page.reload();
     await customerRow.click();
+    // The row collapses again on remount.
+    await page.locator("main").getByRole("button", { expanded: false }).click();
     await expect(page.locator('input[type="number"]')).toHaveValue("4");
   });
 

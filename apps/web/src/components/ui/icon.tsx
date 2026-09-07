@@ -100,6 +100,9 @@ const PATHS: Record<string, ReactNode> = {
   // Points toward the inline start of an RTL page, i.e. visually right —
   // the "back" direction in Hebrew.
   chevronStart: <path d="m9.5 5 7 7-7 7" />,
+  // Expand/collapse affordance — direction-agnostic (unlike chevronStart),
+  // so it doesn't need an RTL-aware name.
+  chevronDown: <path d="m5 9 7 7 7-7" />,
   checkCircle: (
     <>
       <circle cx="12" cy="12" r="8.5" />
@@ -118,6 +121,19 @@ const PATHS: Record<string, ReactNode> = {
       <circle cx="12" cy="12" r="8.5" />
       <path d="M12 11.4v4.7" />
       <path d="M12 8h.01" />
+    </>
+  ),
+  calendar: (
+    <>
+      <rect x="3.5" y="5" width="17" height="15" rx="2.2" />
+      <path d="M3.5 9.5h17" />
+      <path d="M8 3.5v3M16 3.5v3" />
+    </>
+  ),
+  search: (
+    <>
+      <circle cx="10.5" cy="10.5" r="6.5" />
+      <path d="m19.5 19.5-4.3-4.3" />
     </>
   ),
 };

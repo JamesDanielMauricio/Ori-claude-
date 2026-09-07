@@ -253,6 +253,13 @@
       "when": 1787252845082,
       "tag": "0035_fix-build-arrangement-alerts-security-definer",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1788835200000,
+      "tag": "0036_product-variety-images",
+      "breakpoints": true
     }
   ]
 }

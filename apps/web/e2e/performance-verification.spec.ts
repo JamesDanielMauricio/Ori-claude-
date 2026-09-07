@@ -111,23 +111,40 @@ test.describe("Performance verification — measured against the source's docume
     await expect(page).toHaveURL(/\/customer\/order$/);
     await page.goto("/customer/history");
 
-    const rowA = page.getByRole("button", { name: /1 ביולי/ });
-    const rowB = page.getByRole("button", { name: /2 ביולי/ });
+    // Rows show the short numeric date (e.g. "1.7.26"), not a spelled-out
+    // Hebrew month — see history.tsx's shortDateLabel.
+    const rowA = page.getByRole("button", { name: "1.7.26" });
+    const rowB = page.getByRole("button", { name: "2.7.26" });
     await expect(rowA).toBeVisible();
     await expect(rowB).toBeVisible();
 
+    // Clicking a row now navigates to /customer/order?orderId=... (a
+    // read-only view, since both days are closed) instead of opening an
+    // in-page dialog — each click below is a full route change, mounting a
+    // fresh ClosedOrderView. That's fine for what this test measures:
+    // TanStack Query's cache lives on the QueryClient, not the component,
+    // so a remount alone must not force a second network round trip for a
+    // queryKey already cached within staleTime.
     await rowA.click();
-    await expect(page.getByRole("cell", { name: "2", exact: true })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`orderId=${orderA.id}`));
+    await page.locator("main").getByRole("button", { expanded: false }).click();
+    await expect(page.locator('input[type="number"]')).toHaveValue("2");
     const countAfterFirstA = lineRequestUrls.filter((url) => url.includes(orderA.id)).length;
 
+    await page.goto("/customer/history");
     await rowB.click();
-    await expect(page.getByRole("cell", { name: "3", exact: true })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`orderId=${orderB.id}`));
+    await page.locator("main").getByRole("button", { expanded: false }).click();
+    await expect(page.locator('input[type="number"]')).toHaveValue("3");
 
     // Re-selecting A: within the QueryClient's 30s staleTime window
     // (apps/web/src/lib/providers.tsx), this must reuse the cached
     // result, not fire a third round trip.
+    await page.goto("/customer/history");
     await rowA.click();
-    await expect(page.getByRole("cell", { name: "2", exact: true })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`orderId=${orderA.id}`));
+    await page.locator("main").getByRole("button", { expanded: false }).click();
+    await expect(page.locator('input[type="number"]')).toHaveValue("2");
     const countAfterRevisitA = lineRequestUrls.filter((url) => url.includes(orderA.id)).length;
 
     console.log(
@@ -184,6 +201,9 @@ test.describe("Performance verification — measured against the source's docume
     });
     const markerBefore = await page.evaluate(() => (window as unknown as { __navMarker: number }).__navMarker);
 
+    // Rows render collapsed; expand the one product row before it has a
+    // pallets input to fill.
+    await page.locator("main").getByRole("button", { expanded: false }).click();
     await page.getByRole("button", { name: "ערוך" }).click();
     await page.locator('input[type="number"]').fill("2");
     await page.getByRole("button", { name: "שמור" }).click();

@@ -1,5 +1,3 @@
-"use client";
-
 import {
   orderableCatalogInputSchema,
   submitOrderInputSchema,
@@ -10,14 +8,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
 import { ActionBar } from "@/components/reference-data/action-bar";
-import { inputClassName } from "@/components/reference-data/form-field";
-import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/ui/icon";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { createClient } from "@/lib/supabase/client";
 
 import { CommentPopup } from "./comment-popup";
-import { formatPrice, groupCatalogByFamily, type CatalogRow } from "./catalog-grouping";
+import { formatPrice, groupCatalogByFamily, weekdayDateLabel, type CatalogRow } from "./catalog-grouping";
+import { OrderProductList, type OrderFamilyRow } from "./order-product-list";
 import { SubmissionConfirmationDialog } from "./submission-confirmation-dialog";
 
 interface DraftLine {
@@ -51,10 +49,17 @@ export function OrderLinesEditor({
   tradingDayId,
   customerCompanyId,
   onSubmitted,
+  tradeDate,
 }: {
   tradingDayId: string;
   customerCompanyId?: string;
   onSubmitted?: () => void;
+  // ISO date, e.g. trading_days.trade_date. Renders the reference design's
+  // title + date-pill header inside the list card. Omitted on the
+  // backoffice on-behalf-of screen (distributor-customer.tsx), which
+  // already renders its own header (company name + order status) above
+  // this component.
+  tradeDate?: string;
 }) {
   const supabase = createClient();
   const queryClient = useQueryClient();
@@ -119,9 +124,27 @@ export function OrderLinesEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tradingDayId, customerCompanyId]);
 
-  const families = useMemo(
-    () => groupCatalogByFamily(catalogQuery.data ?? []),
-    [catalogQuery.data],
+  // The reference design's shop screen: a collapsed row per product
+  // family, expanding to that family's varieties — matches
+  // get_orderable_catalog_for_customer's own grouping (R6, see
+  // 0018_customer-order-functions.sql), not a second, divergent one.
+  const families: OrderFamilyRow[] = useMemo(
+    () =>
+      groupCatalogByFamily(catalogQuery.data ?? []).map((family) => ({
+        familyId: family.familyId,
+        familyName: family.familyName,
+        imageUrl: family.imageUrl,
+        varieties: family.varieties.map((row) => ({
+          varietyId: row.variety_id,
+          varietyName: row.variety_name,
+          priceLabel: formatPrice(row),
+          packType: row.pack_type,
+          pallets: draft[row.variety_id]?.pallets ?? "",
+          comment: draft[row.variety_id]?.comment ?? "",
+          outOfStock: !row.is_orderable,
+        })),
+      })),
+    [catalogQuery.data, draft],
   );
 
   const confirmFamilies = useMemo(() => {
@@ -192,57 +215,23 @@ export function OrderLinesEditor({
   const activeComment = commentPopupVarietyId ? (draft[commentPopupVarietyId]?.comment ?? "") : "";
 
   return (
-    <div className="flex flex-col gap-5">
-      <div className="flex flex-col gap-5">
-        {families.map((family) => (
-          <div
-            key={family.familyId}
-            className="rounded-lg border border-border bg-surface shadow-card"
-          >
-            <h2 className="border-b border-border px-4 py-2 text-sm font-semibold">
-              {family.familyName}
-            </h2>
-            <ul>
-              {family.varieties.map((row) => (
-                <li
-                  key={row.variety_id}
-                  className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 last:border-b-0"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium">
-                      {row.variety_name}
-                      {!row.is_orderable && (
-                        <span className="ms-2 text-xs text-danger">אזל מהמלאי</span>
-                      )}
-                    </p>
-                    {formatPrice(row) && (
-                      <p className="text-xs text-ink-muted">{formatPrice(row)}</p>
-                    )}
-                  </div>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    disabled={!editing}
-                    className={`${inputClassName} w-24`}
-                    value={draft[row.variety_id]?.pallets ?? ""}
-                    onChange={(event) =>
-                      updateLine(row.variety_id, { pallets: event.target.value })
-                    }
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    disabled={!editing}
-                    onClick={() => setCommentPopupVarietyId(row.variety_id)}
-                  >
-                    {draft[row.variety_id]?.comment ? "✎ הערה" : "+ הערה"}
-                  </Button>
-                </li>
-              ))}
-            </ul>
+    <div className="flex flex-col gap-4">
+      <div className="rounded-lg border border-border bg-surface shadow-card">
+        {tradeDate && (
+          <div className="flex items-center justify-between border-b border-border px-4 py-3">
+            <h2 className="text-sm font-semibold">הזמנת תוצרת</h2>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-border-strong bg-surface px-3 py-1 text-xs text-ink-muted">
+              <Icon name="calendar" className="h-3.5 w-3.5" />
+              {weekdayDateLabel(tradeDate)}
+            </span>
           </div>
-        ))}
+        )}
+        <OrderProductList
+          families={families}
+          editable={editing}
+          onChangePallets={(varietyId, value) => updateLine(varietyId, { pallets: value })}
+          onOpenComment={(varietyId) => setCommentPopupVarietyId(varietyId)}
+        />
       </div>
 
       <ActionBar

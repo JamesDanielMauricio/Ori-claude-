@@ -21,7 +21,7 @@ interface OpenDay {
   phase: Phase;
 }
 
-type ConfirmAction = "initiate" | "openShop" | "closeShop" | "closeDay" | "update" | null;
+type ConfirmAction = "initiate" | "openShop" | "closeShop" | "closeDay" | null;
 
 // The source app's persistent sidebar lifecycle panel (see the "Business
 // Day Lifecycle" semantic-layer doc and reference/prd/daily-trading-lifecycle.md),
@@ -33,10 +33,20 @@ type ConfirmAction = "initiate" | "openShop" | "closeShop" | "closeDay" | "updat
 // on every backoffice screen, matching the source.
 //
 // Unlike the source, which shows exactly one "next action" button at a
-// time, this renders all three slots always (per the actual sidebar
-// screenshots this was built against) and disables whichever isn't the
-// current step — the underlying rule ("only the phase-appropriate action
-// is actually callable") is identical; only the rendering choice differs.
+// time, this renders both slots always (per the actual sidebar screenshots
+// this was built against) and disables whichever isn't the current step —
+// the underlying rule ("only the phase-appropriate action is actually
+// callable") is identical; only the rendering choice differs.
+//
+// A third button used to sit here, "עדכון מלאי למגדלים" (update_growers_data).
+// It was the manual way to re-sync growers' pick lists after their in-season
+// list changed mid-day, and it was the only thing that did — save_grower
+// didn't touch daily_picks at all. Migration 0037 moved that reconcile into
+// save_grower itself, so the sync now happens in the same transaction as the
+// edit that requires it and there is nothing left to remember. The RPC still
+// exists as a bulk/repair path; it is deliberately no longer wired to a
+// control here, because it is a data refresh and this panel is the day's
+// lifecycle (open day → open shop → close shop → close day).
 export function BusinessDayPanel() {
   const supabase = createClient();
   const queryClient = useQueryClient();
@@ -153,28 +163,11 @@ export function BusinessDayPanel() {
     },
   });
 
-  const updateMutation = useMutation({
-    mutationFn: async () => {
-      const { error } = await supabase.rpc("update_growers_data");
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      showToast("מלאי המגדלים עודכן.", "success");
-      setConfirmAction(null);
-      invalidate();
-    },
-    onError: (error: { message?: string }) => {
-      showToast(`עדכון המלאי נכשל: ${error.message ?? "שגיאה לא ידועה"}`, "error");
-      setConfirmAction(null);
-    },
-  });
-
   const busy =
     initiateMutation.isPending ||
     openShopMutation.isPending ||
     closeShopMutation.isPending ||
-    closeDayMutation.isPending ||
-    updateMutation.isPending;
+    closeDayMutation.isPending;
 
   if (openDayQuery.isLoading) {
     return <Skeleton className="mx-3 my-3 h-28" />;
@@ -209,7 +202,6 @@ export function BusinessDayPanel() {
   // normal end of day) — never while the shop is actively taking orders,
   // where closing the shop has to happen first.
   const closeDayEnabled = phase === "initiated" || phase === "shop_closed";
-  const updateEnabled = phase !== undefined;
 
   return (
     <div className="flex flex-col gap-2 border-b border-border bg-surface-muted px-3 py-3">
@@ -234,15 +226,6 @@ export function BusinessDayPanel() {
 
       <Button disabled={busy || toggle.disabled} onClick={toggle.onClick} className="w-full">
         {toggle.label}
-      </Button>
-
-      <Button
-        variant="secondary"
-        disabled={busy || !updateEnabled}
-        onClick={() => setConfirmAction("update")}
-        className="w-full"
-      >
-        עדכון מלאי למגדלים
       </Button>
 
       {phase === "initiated" && (
@@ -323,19 +306,6 @@ export function BusinessDayPanel() {
         />
       </Dialog>
 
-      <Dialog
-        open={confirmAction === "update"}
-        onClose={() => setConfirmAction(null)}
-        title="עדכון מלאי למגדלים"
-      >
-        <ConfirmBody
-          text="רשימות הקטיף של כל המגדלים הפעילים יסונכרנו מחדש מול רשימת המוצרים העונתית העדכנית שלהם. שינויים שכבר נכללו בסידור לא יימחקו."
-          confirmLabel="עדכן מלאי"
-          busy={updateMutation.isPending}
-          onCancel={() => setConfirmAction(null)}
-          onConfirm={() => updateMutation.mutate()}
-        />
-      </Dialog>
     </div>
   );
 }

@@ -24,7 +24,7 @@ export default defineConfig({
   workers: 1,
   reporter: "list",
   // The default 5s assertion timeout is tight for the very first
-  // interactive request against a freshly-spawned `next start` process
+  // interactive request against a freshly-spawned `vite preview` process
   // talking to a real hosted Postgres/Supabase project — production
   // servers have a genuine cold-start cost (module instantiation, DB
   // connection pool warmup) that local dev's lazy per-route compilation
@@ -53,13 +53,25 @@ export default defineConfig({
       },
     },
     {
-      command: "pnpm start",
+      // Build and then serve the built bundle. The build has to happen
+      // *here*, with these env values, because Vite inlines VITE_* into the
+      // bundle at build time rather than reading it when the server starts —
+      // so serving a bundle built earlier would silently test against
+      // whatever Supabase project that build was pointed at (for a
+      // developer with apps/web/.env.local set up, the real hosted one).
+      // Values passed in process.env take precedence over .env files, which
+      // is what makes this override reliable.
+      command: "pnpm build && pnpm preview",
       url: "http://localhost:3000",
       reuseExistingServer: !process.env.CI,
+      // `vite preview` serves a static SPA, so it needs a generous startup
+      // budget: this command builds first, and a cold Vite build of
+      // seventeen lazily-split routes is the slow part, not the serving.
+      timeout: 180000,
       env: {
-        NEXT_PUBLIC_API_URL: API_URL,
-        NEXT_PUBLIC_SUPABASE_URL: SUPABASE_URL,
-        NEXT_PUBLIC_SUPABASE_ANON_KEY: SUPABASE_ANON_KEY,
+        VITE_API_URL: API_URL,
+        VITE_SUPABASE_URL: SUPABASE_URL,
+        VITE_SUPABASE_ANON_KEY: SUPABASE_ANON_KEY,
       },
     },
   ],

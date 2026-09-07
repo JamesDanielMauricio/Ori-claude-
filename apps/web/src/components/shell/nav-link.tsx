@@ -1,13 +1,13 @@
-"use client";
-
-import Link from "next/link";
-import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
+import { Link, useLocation } from "react-router-dom";
 
 // A plain <Link> — not a client-side tab switch. Each destination is a real
-// route Next.js code-splits and renders independently; this component only
-// adds "which one is active" styling, it doesn't own any content-swapping
-// logic itself (see docs/ARCHITECTURE.md — R8).
+// route, lazily imported and code-split in app-routes.tsx, that renders
+// independently; this component only adds "which one is active" styling, it
+// doesn't own any content-swapping logic itself (see docs/ARCHITECTURE.md — R8).
+//
+// Keeps `href` as its prop name rather than React Router's `to` so every
+// caller (RoleShell, BackofficeNav) and their nav-item arrays stay unchanged.
 export function NavLink({
   href,
   children,
@@ -22,7 +22,7 @@ export function NavLink({
   // only by BackofficeNav, so this stays a no-op for every other caller.
   variant?: "filled" | "outline";
 }) {
-  const pathname = usePathname();
+  const { pathname } = useLocation();
   const active = pathname === href || pathname.startsWith(`${href}/`);
 
   // The outline variant's active state is a soft tint plus a bar pinned to
@@ -37,7 +37,7 @@ export function NavLink({
 
   return (
     <Link
-      href={href}
+      to={href}
       aria-current={active ? "page" : undefined}
       className={`relative flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors ${
         active ? activeClasses : "text-ink-muted hover:bg-canvas hover:text-ink"

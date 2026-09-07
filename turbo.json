@@ -6,14 +6,20 @@
     "SUPABASE_URL",
     "SUPABASE_ANON_KEY",
     "SUPABASE_SERVICE_ROLE_KEY",
-    "NEXT_PUBLIC_API_URL",
-    "NEXT_PUBLIC_SUPABASE_URL",
-    "NEXT_PUBLIC_SUPABASE_ANON_KEY"
+    "VITE_API_URL",
+    "VITE_SUPABASE_URL",
+    "VITE_SUPABASE_ANON_KEY"
   ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+      "outputs": ["dist/**"],
+      // Vite inlines VITE_* into the bundle at build time, so the output
+      // genuinely depends on these values and they must be part of the cache
+      // key. Listed only in globalPassThroughEnv they are passed through but
+      // NOT hashed, so a build cached against one Supabase project could be
+      // replayed for another.
+      "env": ["VITE_*"]
     },
     "dev": {
       "cache": false,

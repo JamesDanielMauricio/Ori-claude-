@@ -33,7 +33,7 @@ TypeScript throughout, in a pnpm + Turborepo monorepo:
 
 ```
 apps/
-  web/          Next.js (App Router) — role-scoped, file-based routing
+  web/          React SPA on Vite — role-scoped routing via React Router
   api/          Fastify host exposing a tRPC router
 packages/
   domain/       Framework-agnostic business logic, one folder per module boundary
@@ -54,9 +54,15 @@ supporting it.
 public API — tRPC removes the need to hand-maintain a REST/OpenAPI contract in parallel with
 the code, while still giving the frontend full type inference on every procedure.
 
-**Next.js (App Router).** File-based routing maps directly onto R8: each role's screen is
-its own route, not a tab inside one page. Route groups separate the auth, backoffice,
-grower, and customer surfaces at the filesystem level.
+**React + Vite (single-page app).** Each role's screen is its own route, not a tab inside one
+page (R8) — the route tree in `apps/web/src/app-routes.tsx` nests every screen under its role's
+layout, and each one is a lazily imported chunk so a customer never downloads the backoffice.
+
+Migrated from Next.js (App Router) on 2026-09-08. Next was carrying almost none of its weight
+here: no screen fetched data on the server, there were no server actions and no static
+generation, and 37 of 66 source files were already `"use client"`. Its server components did
+exactly two things — call `requireRole()` and redirect — so the framework's cost was landing
+mostly on the auth path (see "Route gating" below), not buying rendering the app used.
 
 **pg-boss for background work.** Postgres-backed job queue — no separate broker to run. Its
 job is enqueuing inside the same transaction as the write that triggers it, which is what
@@ -78,6 +84,27 @@ design. RLS — see `packages/db/migrations/0003_row-level-security.sql` and
 (R7): every table has RLS enabled, with a `current_role()` helper and a self-row/
 backoffice-row pattern on `profiles` that later modules extend per-table.
 
+**Route gating, and where the authorization boundary actually is.** Under Next.js each role
+layout called a server-side `requireRole()`, so an unauthorized user never received the page.
+In the SPA that check is `RequireAuth` (`apps/web/src/lib/require-role.tsx`), declared once per
+role area on the parent route and evaluated in the browser.
+
+This is a deliberate, documented trade-off, and it is worth being precise about what changed
+and what did not. What changed: route *visibility*. An unauthorized user now downloads the JS
+bundle and gets bounced client-side instead of being refused the page — defence in depth that
+the server used to add is gone. What did not change: the authorization boundary. RLS was always
+the thing enforcing who can read and write which rows, keyed off `auth.uid()` from the signed
+JWT rather than off anything the client asserts, so a user who forces past the client guard
+reaches a layout whose every query returns an empty set. The two service-role operations, which
+bypass RLS by design, were never covered by the layout guard either — they are gated
+server-side by `apps/api`'s own `requireRole`, and that is untouched.
+
+Session refresh moved with it. `@supabase/ssr`'s cookie-based client, the `middleware.ts` that
+refreshed the token on every request, and the verified-identity request headers it forwarded to
+Server Components all existed because a Server Component can read cookies but not write them.
+With no server render, `supabase-js` keeps the session in localStorage and refreshes it on a
+timer in the browser, and that entire mechanism — along with the per-navigation `requireRole()`
+round trips it was built to avoid — is deleted rather than replaced.
 **Vitest + Playwright.** Vitest for unit/integration tests run against a real Postgres
 instance, not mocks. Playwright for end-to-end coverage of the three role-based flows
 (grower picking, customer ordering, distributor running the day).
@@ -151,7 +178,8 @@ system directly.
 Scaffolding is complete — linting, formatting, tests, CI, and environment config are wired
 up end-to-end (`pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build` all pass).
 
-**A real `pnpm build` regression and its root cause, for the record.** `.env` briefly set
+**A real `pnpm build` regression and its root cause, for the record** (predates the move to
+Vite; kept because it is why `NODE_ENV` is absent from `.env`). `.env` briefly set
 `NODE_ENV=development` (present from the initial scaffolding). Because every command in this
 project sources `.env` into the shell before running (to avoid typing secrets directly — see
 the credential-handling note below), that value got exported into every `next build` invocation
@@ -168,29 +196,29 @@ version (single resolved version of each across the whole workspace — `pnpm -r
 /react-dom` shows no mismatch). Fixed by removing `NODE_ENV` from `.env`/`.env.example`
 entirely — nothing in the codebase actually reads `process.env.NODE_ENV` (grep confirms the one
 place it was validated, `apps/api/src/env.ts`, never consumed the parsed value), and every tool
-here (`next dev`/`build`/`start`, `vitest`) sets it correctly on its own per command. No
-`next.config.ts` workaround was needed or kept.
+here (`vite` and `vite build`, previously `next dev`/`build`/`start`; `vitest`) sets it
+correctly on its own per command. No Next config workaround was needed or kept.
 
 **A known, external e2e characteristic — not a code bug, and not fixable from the client side.**
-Running the reference-data e2e specs against a real production build (`next start`) surfaced a
-row created on one page (`/backoffice/users/import`) taking a few seconds to show up after
-navigating straight to a different page (`/backoffice/users`) that lists it. Root-caused as far
-as possible from the client: Postgres itself has no replication lag (single primary, no read
-replicas — confirmed a direct, immediate `.eq()` read after the same write is always instant);
-it isn't the browser's HTTP cache (`cache: "no-store"` on every request changed nothing); and it
-isn't an ordinary cache respecting request headers either (an explicit `Cache-Control: no-store`
-request header, sent correctly, also changed nothing). That combination points at short-lived
-caching on Supabase's own hosted REST gateway for a repeated identical GET URL — the unfiltered,
-identically-parameterized list query — which nothing sent from the client can force it to
-bypass. The four other reference-data screens never hit this because their create-then-list is
-same-page (`queryClient.invalidateQueries()` right after the mutation resolves), not a fresh
-cross-page navigation. `reference-data-users.spec.ts` accommodates this with one reload-and-retry
-rather than a longer fixed timeout (silently waiting longer wouldn't be honest about what's
-actually happening) or a client-side header hack (tried and confirmed ineffective).
-`playwright.config.ts`'s default assertion timeout is also 10s rather than the 5s default — a
-freshly-spawned `next start` process's first real request (DB connection pool warmup, module
-instantiation) genuinely needs more headroom than local dev's lazy per-route compilation timing
-implied.
+Running the reference-data e2e specs against a real production build (now `vite build` +
+`vite preview`) surfaced a row created on one page (`/backoffice/users/import`) taking a few
+seconds to show up after navigating straight to a different page (`/backoffice/users`) that
+lists it. Root-caused as far as possible from the client: Postgres itself has no replication
+lag (single primary, no read replicas — confirmed a direct, immediate `.eq()` read after the
+same write is always instant); it isn't the browser's HTTP cache (`cache: "no-store"` on every
+request changed nothing); and it isn't an ordinary cache respecting request headers either (an
+explicit `Cache-Control: no-store` request header, sent correctly, also changed nothing). That
+combination points at short-lived caching on Supabase's own hosted REST gateway for a repeated
+identical GET URL — the unfiltered, identically-parameterized list query — which nothing sent
+from the client can force it to bypass. The four other reference-data screens never hit this
+because their create-then-list is same-page (`queryClient.invalidateQueries()` right after the
+mutation resolves), not a fresh cross-page navigation. `reference-data-users.spec.ts`
+accommodates this with one reload-and-retry rather than a longer fixed timeout (silently
+waiting longer wouldn't be honest about what's actually happening) or a client-side header hack
+(tried and confirmed ineffective). `playwright.config.ts`'s default assertion timeout is also
+10s rather than the 5s default — the first real request of a run round-trips to a remote hosted
+Supabase project, and under Next it also paid a server cold start (module instantiation, DB
+connection pool warmup). That genuinely needs more headroom than local dev timing implied.
 
 The **auth module** is implemented on Supabase Auth: sign-in with role-based redirect, forced
 password change on first login (`profiles.must_change_password`), self-service password reset
@@ -201,7 +229,7 @@ Postgres helper plus baseline self/backoffice policies on every table, establish
 `packages/db/migrations/0003_row-level-security.sql` for later modules to extend). See
 `packages/domain/src/auth/` for the two admin operations and their tests (including RLS
 tests exercised through the real anon-key + signed-in-JWT path, never the service-role
-client), `apps/api/src/routers/auth.ts` for the API surface, and `apps/web/src/app/(auth)/`
+client), `apps/api/src/routers/auth.ts` for the API surface, and `apps/web/src/routes/{login,change-password,reset-password}.tsx`
 plus the `(backoffice)/(grower)/(customer)` layouts for the UI.
 
 The **application shell** (R8) is in place: one route group per role (`(backoffice)`,
@@ -223,7 +251,7 @@ via a `version` column checked and incremented in the same statement that writes
 raising a catchable conflict instead of silently overwriting a concurrent edit. See
 `packages/db/src/schema/`, `packages/db/migrations/0005`-`0008`, `packages/domain/src/reference-data/`
 (input schemas + test fixtures + the concurrent-edit/partial-failure test suite), and
-`apps/web/src/app/(backoffice)/backoffice/{growers,customers,products,transporters,users}/`.
+`apps/web/src/routes/backoffice/{growers,customers,products,transporters,users}.tsx`.
 
 The **lifecycle engine** is implemented: the four-phase daily trading lifecycle (Initiate
 Business Day → Open Shop → Close Shop → Close Arrangement) as an explicit state machine anchored
@@ -294,8 +322,8 @@ rows, mirroring the reference-data screens' existing `editing`/`toFormState`/`ha
 pattern. See `packages/db/migrations/0014`-`0015`, `packages/domain/src/grower/` (input
 schemas, test fixtures, and direct tests of `bootstrap_grower_pick`'s idempotency/pruning and
 `close_out_pick_leftovers`'s computation — independent of the full lifecycle, since neither
-function reads `trading_days.phase`), and `apps/web/src/app/(grower)/grower/picks/` +
-`apps/web/src/app/(backoffice)/backoffice/distributor-grower/`.
+function reads `trading_days.phase`), and `apps/web/src/routes/grower/picks.tsx` +
+`apps/web/src/routes/backoffice/distributor-grower.tsx`.
 
 Both screens are also covered end to end (`apps/web/e2e/grower-picks.spec.ts`,
 `apps/web/e2e/distributor-grower.spec.ts`): a real edit-and-reload on each screen (driven through
@@ -362,7 +390,7 @@ history, and the v1.3 submission audit log. Two things were the explicit point o
   `submit_order`'s prune step makes "no zero-quantity `daily_order_products` row ever persists"
   hold by construction, so there is nothing left for a sweep to clean up.
 
-Submission is optimistic on the client (`apps/web/src/app/(customer)/customer/order/`): the
+Submission is optimistic on the client (`apps/web/src/routes/customer/order.tsx`): the
 confirmation dialog is built from the same local draft state that's about to be submitted, and a
 successful `submit_order` call updates the UI directly (invalidate + re-render) rather than a
 full-page reload — the source's submit button froze the page for 1–3 seconds and then forced a
@@ -374,7 +402,7 @@ itself, only uses it as a signal to re-run `get_orderable_catalog_for_customer` 
 caller's own RLS-governed session, keeping the same privacy boundary that function already has.
 See `packages/db/migrations/0017`-`0019`, `packages/domain/src/customer/` (input schemas, test
 fixtures, and direct tests of the mixed-family orderable-catalog rule and concurrent submissions
-against a depleting variety), and `apps/web/src/app/(customer)/customer/{order,history}/`.
+against a depleting variety), and `apps/web/src/routes/customer/{order,history}.tsx`.
 
 **A test-cleanup bug, found and fixed — not an external Supabase issue after all.**
 `packages/domain/src/customer/customer.test.ts`'s actual assertions (the RPC calls and their
@@ -455,14 +483,14 @@ No new read-side RPC was needed for the pooled supply/demand views: unlike the c
 can't read another tenant's rows), a backoffice session already has full `SELECT` access to
 `daily_pick_products`/`daily_order_products`/`arrangement_records`/`product_varieties`/
 `companies` via the existing RLS policies from Prompts 5-7. The workspace
-(`apps/web/src/app/(backoffice)/backoffice/arrangement/`) reads those tables directly with
+(`apps/web/src/routes/backoffice/arrangement.tsx`) reads those tables directly with
 plain `.from().select()` calls, same as every other backoffice list/detail screen (e.g.
 `distributor-grower/page.tsx`), and does its by-variety/by-grower grouping client-side —
 matching the customer catalog's "one function, two groupings" precedent from Prompt 7, just one
 level higher (one set of queries, two client-side sort orders) since there's no privacy boundary
 here to also collapse. The PRD's "by-grower view" and "by-product view" are this one screen's
 view-mode toggle, not two routes; `/backoffice/new-arrangement`
-(`apps/web/src/app/(backoffice)/backoffice/new-arrangement/`) is a separate, focused
+(`apps/web/src/routes/backoffice/new-arrangement.tsx`) is a separate, focused
 single-record creation wizard, per the PRD's own `new-arrangement-wizard.md` treating it as its
 own screen. Price configuration reuses `save_product` (the same version-guarded, full-row RPC
 the Products screen already uses) rather than a new price-only function — a price is just one

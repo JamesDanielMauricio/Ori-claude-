@@ -1,5 +1,3 @@
-"use client";
-
 import { createContext, useCallback, useContext, useState, type ReactNode } from "react";
 
 import { Icon, type IconName } from "./icon";

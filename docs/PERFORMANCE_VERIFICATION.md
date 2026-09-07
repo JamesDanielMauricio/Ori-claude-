@@ -2,9 +2,16 @@
 
 Measured, not assumed. Source: st4ck spec "Performance Issues — Identified Bugs & Fixes" (5
 issues, effort/gain-ranked). Measurements captured via
-`apps/web/e2e/performance-verification.spec.ts`, run with `pnpm --filter web exec playwright test
-e2e/performance-verification.spec.ts` against a real production build (`next build` + `next
-start`), not `next dev`. Numbers below are from the run on 2026-07-12.
+`apps/web/e2e/performance-verification.spec.ts` against a real production build, not a dev
+server. Numbers below are from the run on 2026-07-12.
+
+> **These numbers are a pre-migration baseline.** They were taken against the Next.js
+> production build (`next build` + `next start`), which `apps/web` no longer uses — it moved to
+> a Vite/React SPA on 2026-09-08 (see `docs/ARCHITECTURE.md`). The measured *criteria* still
+> apply and the spec still runs; re-run it against `vite build` + `vite preview` to get current
+> figures. Expect navigation timings to improve rather than regress: the dominant cost in the
+> table below was a per-navigation server round trip (`requireRole()`'s two sequential Supabase
+> calls on every protected layout render) that the SPA does not make at all.
 
 ## Scope note — read before the results
 
@@ -30,7 +37,8 @@ the architecture that produced them does.
 **Source claim:** all 11 tabs live on one page; switching forces a full condition sweep across 142
 repeating groups, up to 16 nested per tab. Acceptance criterion: **≤ 1 second, no visible freeze.**
 
-**Rebuild:** each backoffice screen is a real Next.js route (`app/(backoffice)/backoffice/*`), not
+**Rebuild:** each backoffice screen is a real route (`src/routes/backoffice/*`, lazily code-split
+in `src/app-routes.tsx`), not
 a tab inside one page. Navigating between them is a client-side route transition; the destination
 route's own data fetch is the only work that happens.
 

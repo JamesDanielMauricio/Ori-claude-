@@ -1,5 +1,3 @@
-"use client";
-
 import { Icon, type IconName } from "@/components/ui/icon";
 import { useAuth } from "@/lib/auth-context";
 

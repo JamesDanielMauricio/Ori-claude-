@@ -1,10 +1,10 @@
 {
-  "extends": "@ori/config/typescript/nextjs.json",
+  "extends": "@ori/config/typescript/vite.json",
   "compilerOptions": {
     "paths": {
       "@/*": ["./src/*"]
     }
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  "include": ["src", "vite.config.ts", "vitest.config.ts", "playwright.config.ts", "e2e"],
+  "exclude": ["node_modules", "dist"]
 }

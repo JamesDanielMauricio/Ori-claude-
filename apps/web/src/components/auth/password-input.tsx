@@ -1,5 +1,3 @@
-"use client";
-
 import { useState } from "react";
 
 import { inputClassName } from "@/components/reference-data/form-field";

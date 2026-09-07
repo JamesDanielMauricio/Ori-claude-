@@ -1,5 +1,5 @@
-import { nextConfig } from "@ori/config/eslint/next";
+import { reactConfig } from "@ori/config/eslint/react";
 
-const config = [...nextConfig, { ignores: ["next-env.d.ts"] }];
+const config = [...reactConfig, { ignores: ["dist/**"] }];
 
 export default config;

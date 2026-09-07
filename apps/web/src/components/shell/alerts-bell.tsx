@@ -1,8 +1,6 @@
-"use client";
-
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import { Dialog } from "@/components/ui/dialog";
 import { Icon } from "@/components/ui/icon";
@@ -33,7 +31,7 @@ interface AlertRow {
 export function AlertsBell() {
   const supabase = createClient();
   const queryClient = useQueryClient();
-  const router = useRouter();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
 
   const alertsQuery = useQuery({
@@ -72,7 +70,7 @@ export function AlertsBell() {
         url_parameter && alert.display_record_id
           ? `${app_screen}?${url_parameter}=${encodeURIComponent(alert.display_record_id)}`
           : app_screen;
-      router.push(target);
+      navigate(target);
     }
   }
 

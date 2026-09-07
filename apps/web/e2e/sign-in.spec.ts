@@ -29,7 +29,7 @@ test.describe("sign-in", () => {
     await page.getByRole("button", { name: "התחברות" }).click();
 
     // `/grower` itself immediately redirects to the default tab — see
-    // apps/web/src/app/(grower)/grower/page.tsx.
+    // the index route in apps/web/src/app-routes.tsx.
     await expect(page).toHaveURL(/\/grower\/picks$/);
   });
 
@@ -48,7 +48,7 @@ test.describe("sign-in", () => {
     await page.getByRole("button", { name: "התחברות" }).click();
 
     // `/backoffice` itself immediately redirects to the default tab — see
-    // apps/web/src/app/(backoffice)/backoffice/page.tsx.
+    // the index route in apps/web/src/app-routes.tsx.
     await expect(page).toHaveURL(/\/backoffice\/shop$/);
   });
 

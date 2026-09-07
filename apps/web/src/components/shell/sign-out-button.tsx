@@ -1,7 +1,5 @@
-"use client";
-
-import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import { createClient } from "@/lib/supabase/client";
 
@@ -15,14 +13,14 @@ export function SignOutButton({
   // by BackofficeNav.
   variant?: "text" | "solid";
 }) {
-  const router = useRouter();
+  const navigate = useNavigate();
   const [isSigningOut, setIsSigningOut] = useState(false);
 
   async function handleSignOut() {
     setIsSigningOut(true);
     const supabase = createClient();
     await supabase.auth.signOut();
-    router.push("/login");
+    navigate("/login");
   }
 
   // Sign-out is deliberately NOT the accent green it used to be. Filled

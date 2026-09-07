@@ -1,0 +1,25 @@
+<!doctype html>
+<!--
+  The source product is Hebrew-only, RTL-only — see known-gaps.md G14 ("the
+  platform is a Hebrew-only private business app, not a SaaS. There is no
+  localization or translation rigor target"). RTL is therefore a
+  document-level, first-class setting here, not a per-component patch
+  applied after the fact.
+
+  This file replaces the old app/layout.tsx: in a SPA the <html> shell is
+  static, so lang/dir/title are plain markup rather than something React
+  renders on every request.
+-->
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- The source titles its pages "אורי והבננות" — the product's real name. -->
+    <title>אורי והבננות</title>
+    <meta name="description" content="ניהול הזמנות ומלאי לשיווק תוצרת חקלאית" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,5 +1,3 @@
-"use client";
-
 import { saveProductInputSchema, toSaveProductRpcArgs } from "@ori/domain/reference-data";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";

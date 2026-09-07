@@ -4,6 +4,9 @@ import { useMemo } from "react";
 
 import { PickLinesEditor } from "@/components/grower/pick-lines-editor";
 import { Button } from "@/components/ui/button";
+import { StatusPill, type StatusTone } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Icon } from "@/components/ui/icon";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
@@ -25,6 +28,15 @@ const STATUS_LABEL: Record<DailyPickSummary["status"], string> = {
   draft: "טיוטה",
   submitted: "נשלח",
   closed: "סגור",
+};
+
+// Draft is the only state that still needs something from the grower, so it
+// is the one that gets an attention color; submitted is a success, closed is
+// simply over.
+const PICK_STATUS_TONE: Record<DailyPickSummary["status"], StatusTone> = {
+  draft: "warning",
+  submitted: "accent",
+  closed: "neutral",
 };
 
 // Grower-facing daily picking input (PRD: manage-today-s-daily-pick.md).
@@ -101,28 +113,75 @@ export default function GrowerDailyPicksPage() {
   }
 
   if (!openDayQuery.data) {
-    return <p className="text-sm text-ink-muted">אין יום מסחר פתוח כרגע.</p>;
+    return (
+      <div className="rounded-xl bg-surface shadow-raised ring-1 ring-inset ring-border/70">
+        <EmptyState
+          icon="clock"
+          title="אין יום מסחר פתוח"
+          hint="כשהמפיץ יפתח את יום העסקים, רשימת הליקוט שלך תופיע כאן."
+        />
+      </div>
+    );
   }
 
   if (!pickQuery.data) {
-    return <p className="text-sm text-ink-muted">אין עדיין ליקוט עבורך היום — פנה למפיץ.</p>;
+    return (
+      <div className="rounded-xl bg-surface shadow-raised ring-1 ring-inset ring-border/70">
+        <EmptyState
+          icon="sprout"
+          title="אין ליקוט עבורך היום"
+          hint="לא נוצרה עבורך רשימת ליקוט ליום המסחר הנוכחי. פנה למפיץ כדי לבדוק את שיוך המוצרים שלך."
+        />
+      </div>
+    );
   }
 
   const pick = pickQuery.data;
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-5">
       <PageHeader
-        title={`עדכון יומי — ${tradeDateLabel}`}
-        subtitle={`סטטוס: ${STATUS_LABEL[pick.status]}${pick.submitted_at ? ` · נשלח ב-${new Date(pick.submitted_at).toLocaleString("he-IL")}` : ""}`}
+        title="עדכון יומי"
+        subtitle="עדכן את הכמויות שנקטפו ושעת האיסוף לכל מוצר, ושלח את הליקוט למפיץ."
         actions={
           pick.status === "draft" ? (
-            <Button type="button" onClick={() => submitMutation.mutate()} disabled={submitMutation.isPending}>
+            <Button
+              type="button"
+              onClick={() => submitMutation.mutate()}
+              disabled={submitMutation.isPending}
+            >
+              {submitMutation.isPending && (
+                <span
+                  aria-hidden
+                  className="animate-spin-loop h-3.5 w-3.5 rounded-full border-2 border-current border-t-transparent"
+                />
+              )}
               {submitMutation.isPending ? "שולח…" : "שלח ליקוט"}
             </Button>
           ) : undefined
         }
       />
+
+      {/* Status moved out of the subtitle and onto its own strip. "טיוטה" vs
+          "נשלח" is the single most important fact on this screen — whether
+          the grower still has work to do — and it was previously a fragment
+          of a grey sentence under the title. */}
+      <div className="animate-rise-in flex flex-wrap items-center justify-between gap-3 rounded-xl bg-surface px-5 py-4 shadow-card ring-1 ring-inset ring-border/70">
+        <div className="flex items-center gap-2.5 text-sm text-ink-muted">
+          <Icon name="calendar" className="h-4 w-4 shrink-0 text-ink-subtle" />
+          <span>{tradeDateLabel}</span>
+        </div>
+        <div className="flex items-center gap-3">
+          {pick.submitted_at && (
+            <span className="text-xs text-ink-muted">
+              נשלח ב-{new Date(pick.submitted_at).toLocaleString("he-IL")}
+            </span>
+          )}
+          <StatusPill tone={PICK_STATUS_TONE[pick.status]} dot>
+            {STATUS_LABEL[pick.status]}
+          </StatusPill>
+        </div>
+      </div>
 
       <PickLinesEditor dailyPickId={pick.id} pickStatus={pick.status} />
     </div>

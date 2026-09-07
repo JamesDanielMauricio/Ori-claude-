@@ -1,14 +1,16 @@
 import { saveCustomerInputSchema, toSaveCustomerRpcArgs } from "@ori/domain/reference-data";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { ActionBar } from "@/components/reference-data/action-bar";
 import { FormField, inputClassName } from "@/components/reference-data/form-field";
 import { ListDetailLayout } from "@/components/reference-data/list-detail-layout";
+import { RecordList } from "@/components/reference-data/record-list";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
-import { Skeleton } from "@/components/ui/skeleton";
+import { FormSection, StatusPill } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/components/ui/toast";
 import { createClient } from "@/lib/supabase/client";
 
@@ -73,6 +75,19 @@ export default function CustomersPage() {
   });
 
   const selected = customersQuery.data?.find((row) => row.id === selectedId) ?? null;
+
+  // "לא פעיל" as a trailing pill rather than a parenthetical glued to the
+  // name — scannable down the column instead of hiding at the end of a line
+  // that may already be truncated.
+  const listItems = useMemo(
+    () =>
+      (customersQuery.data ?? []).map((row) => ({
+        id: row.id,
+        label: row.name,
+        badge: row.status === "inactive" ? "לא פעיל" : null,
+      })),
+    [customersQuery.data],
+  );
 
   useEffect(() => {
     if (!editing && selected) {
@@ -152,100 +167,120 @@ export default function CustomersPage() {
             <Button type="button" onClick={handleNew}>
               לקוח חדש
             </Button>
-            <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-surface shadow-card">
-              {customersQuery.isLoading ? (
-                <div className="space-y-2 p-3">
-                  <Skeleton className="h-10 w-full" />
-                  <Skeleton className="h-10 w-full" />
-                  <Skeleton className="h-10 w-full" />
-                </div>
-              ) : (
-                <ul>
-                  {customersQuery.data?.map((row) => (
-                    <li key={row.id}>
-                      <button
-                        type="button"
-                        onClick={() => handleSelect(row.id)}
-                        className={`block w-full relative border-b border-border px-4 py-2.5 text-start text-sm transition-colors ${
-                          row.id === selectedId
-                            ? "bg-accent-soft font-semibold text-accent before:absolute before:inset-y-0 before:start-0 before:w-[3px] before:bg-accent"
-                            : "hover:bg-canvas"
-                        }`}
-                      >
-                        {row.name}
-                        {row.status === "inactive" && (
-                          <span className="ms-2 text-xs text-ink-muted">(לא פעיל)</span>
-                        )}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+            <RecordList
+              icon="briefcase"
+              items={listItems}
+              selectedId={selectedId}
+              onSelect={handleSelect}
+              loading={customersQuery.isLoading}
+              searchPlaceholder="חיפוש לקוח"
+              emptyLabel="אין לקוחות עדיין."
+            />
           </div>
         }
         detail={
           selectedId === null && !editing ? (
-            <p className="text-sm text-ink-muted">בחר לקוח מהרשימה, או צור לקוח חדש.</p>
+            <EmptyState
+              icon="briefcase"
+              title="לא נבחר לקוח"
+              hint="בחר לקוח מהרשימה כדי לערוך את פרטיו, או צור לקוח חדש."
+              action={
+                <Button type="button" onClick={handleNew}>
+                  לקוח חדש
+                </Button>
+              }
+            />
           ) : (
-            <div className="flex flex-col gap-4">
-              <FormField label="שם" htmlFor="customer-name">
-                <input
-                  id="customer-name"
-                  required
-                  disabled={!editing}
-                  className={inputClassName}
-                  value={form.name}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, name: event.target.value }))
-                  }
-                />
-              </FormField>
-
-              <FormField label="סטטוס" htmlFor="customer-status">
-                <select
-                  id="customer-status"
-                  disabled={!editing}
-                  className={inputClassName}
-                  value={form.status}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      status: event.target.value as "active" | "inactive",
-                    }))
-                  }
+            <div className="flex flex-col gap-6">
+              <div className="flex items-center gap-3.5 border-b border-border pb-5">
+                <span
+                  aria-hidden
+                  className="font-display flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-accent-soft text-xl text-accent ring-1 ring-inset ring-accent/25"
                 >
-                  <option value="active">פעיל</option>
-                  <option value="inactive">לא פעיל</option>
-                </select>
-              </FormField>
+                  {form.name.trim().charAt(0) || "+"}
+                </span>
+                <h2 className="font-display min-w-0 flex-1 truncate text-xl text-ink">
+                  {form.name || "לקוח חדש"}
+                </h2>
+                <StatusPill tone={form.status === "active" ? "accent" : "neutral"} dot>
+                  {form.status === "active" ? "פעיל" : "לא פעיל"}
+                </StatusPill>
+              </div>
 
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  disabled={!editing}
-                  checked={form.canSeeProductPrices}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      canSeeProductPrices: event.target.checked,
-                    }))
-                  }
-                />
-                מציג מחירים בהתראות WhatsApp
-              </label>
+              <FormSection title="פרטי לקוח" columns={2}>
+                <FormField label="שם" htmlFor="customer-name">
+                  <input
+                    id="customer-name"
+                    required
+                    disabled={!editing}
+                    className={`${inputClassName} w-full`}
+                    value={form.name}
+                    onChange={(event) =>
+                      setForm((current) => ({ ...current, name: event.target.value }))
+                    }
+                  />
+                </FormField>
 
-              <FormField label="קבוצת WhatsApp" htmlFor="customer-whatsapp">
-                <input
-                  id="customer-whatsapp"
-                  disabled={!editing}
-                  className={inputClassName}
-                  value={form.whatsappGroupId}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, whatsappGroupId: event.target.value }))
-                  }
-                />
-              </FormField>
+                <FormField label="סטטוס" htmlFor="customer-status">
+                  <select
+                    id="customer-status"
+                    disabled={!editing}
+                    className={`${inputClassName} w-full`}
+                    value={form.status}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        status: event.target.value as "active" | "inactive",
+                      }))
+                    }
+                  >
+                    <option value="active">פעיל</option>
+                    <option value="inactive">לא פעיל</option>
+                  </select>
+                </FormField>
+              </FormSection>
+
+              <FormSection title="התראות WhatsApp">
+                <FormField label="קבוצת WhatsApp" htmlFor="customer-whatsapp">
+                  <input
+                    id="customer-whatsapp"
+                    disabled={!editing}
+                    className={`${inputClassName} w-full`}
+                    value={form.whatsappGroupId}
+                    onChange={(event) =>
+                      setForm((current) => ({ ...current, whatsappGroupId: event.target.value }))
+                    }
+                  />
+                </FormField>
+
+                {/* The bare checkbox floating between two labelled fields
+                    read as an orphan. Boxed and given the same weight as a
+                    field label, it becomes a setting rather than a stray. */}
+                <label
+                  className={`flex items-start gap-2.5 rounded-lg bg-surface-muted/60 px-3.5 py-3 text-sm ring-1 ring-inset ring-border ${
+                    editing ? "cursor-pointer" : "cursor-default"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    disabled={!editing}
+                    checked={form.canSeeProductPrices}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        canSeeProductPrices: event.target.checked,
+                      }))
+                    }
+                  />
+                  <span>
+                    <span className="block font-medium text-ink">מציג מחירים בהתראות</span>
+                    <span className="mt-0.5 block text-xs text-ink-muted">
+                      כשמכובה, הודעות ה-WhatsApp ללקוח זה יישלחו ללא מחירים.
+                    </span>
+                  </span>
+                </label>
+              </FormSection>
 
               <ActionBar
                 editing={editing}

@@ -5,6 +5,9 @@ import { Link } from "react-router-dom";
 
 import { FormField, inputClassName } from "@/components/reference-data/form-field";
 import { Button } from "@/components/ui/button";
+import { Card, FormSection } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
+import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { createClient } from "@/lib/supabase/client";
@@ -277,122 +280,174 @@ export default function NewArrangementPage() {
   }
 
   if (!day || !arrangement) {
-    return <p className="text-sm text-ink-muted">אין יום מסחר פתוח כרגע.</p>;
+    return (
+      <div className="max-w-xl rounded-xl bg-surface shadow-raised ring-1 ring-inset ring-border/70">
+        <EmptyState
+          icon="clock"
+          title="אין יום מסחר פתוח"
+          hint="פתח יום עסקים בסרגל הצד כדי להתחיל לסדר ליקוטים מול הזמנות."
+        />
+      </div>
+    );
   }
 
   if (arrangement.status !== "open") {
-    return <p className="text-sm text-ink-muted">הסידור להיום כבר נסגר.</p>;
+    return (
+      <div className="max-w-xl rounded-xl bg-surface shadow-raised ring-1 ring-inset ring-border/70">
+        <EmptyState
+          icon="clipboard"
+          title="הסידור להיום כבר נסגר"
+          hint="לא ניתן להוסיף רשומות סידור אחרי סגירת הסידור."
+          action={
+            <Link
+              to="/backoffice/arrangement"
+              className="inline-flex h-10 items-center justify-center rounded-md bg-accent px-5 text-sm font-semibold text-accent-ink shadow-accent transition-colors duration-200 hover:bg-accent-hover"
+            >
+              לסידור המלא
+            </Link>
+          }
+        />
+      </div>
+    );
   }
 
   const canSave = !!growerPickLineId && !!customerOrderLineId && Number(quantity) > 0;
 
   return (
-    <div className="flex max-w-xl flex-col gap-5">
-      <div>
-        <h1 className="text-xl font-bold tracking-tight">
-          סידור חדש — {new Intl.DateTimeFormat("he-IL", { dateStyle: "long" }).format(new Date(day.trade_date))}
-        </h1>
-        <p className="mt-1 text-sm text-ink-muted">
-          התאם קו ליקוט של מגדל לקו הזמנה של לקוח.{" "}
-          <Link to="/backoffice/arrangement" className="text-accent underline">
-            חזרה לסידור המלא
+    <div className="flex max-w-xl flex-col gap-6">
+      <PageHeader
+        title="סידור חדש"
+        subtitle={`התאם קו ליקוט של מגדל לקו הזמנה של לקוח, ליום ${new Intl.DateTimeFormat("he-IL", { dateStyle: "long" }).format(new Date(day.trade_date))}.`}
+        actions={
+          <Link
+            to="/backoffice/arrangement"
+            className="inline-flex h-10 items-center justify-center rounded-md bg-surface px-5 text-sm font-semibold text-ink shadow-card ring-1 ring-inset ring-border-strong transition-colors duration-200 hover:bg-surface-muted hover:text-accent hover:ring-accent/40"
+          >
+            לסידור המלא
           </Link>
-        </p>
-      </div>
+        }
+      />
 
-      <FormField label="זן" htmlFor="new-arr-variety">
-        <select
-          id="new-arr-variety"
-          className={inputClassName}
-          value={varietyId}
-          onChange={(event) => setVarietyId(event.target.value)}
-        >
-          <option value="">בחר זן…</option>
-          {varietyOptions.map((option) => (
-            <option key={option.id} value={option.id}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </FormField>
+      {/* Split into "what is being matched" and "on what terms". The form was
+          a flat run of six controls where the two halves — the three-step
+          variety→grower→customer match, and its commercial terms — carry
+          completely different questions. */}
+      <Card padded={false}>
+        <div className="flex flex-col gap-6 p-6">
+          <FormSection
+            title="התאמה"
+            hint="בחר זן תחילה — רשימות המגדל והלקוח מסוננות לפיו."
+          >
+            <FormField label="זן" htmlFor="new-arr-variety">
+              <select
+                id="new-arr-variety"
+                className={`${inputClassName} w-full`}
+                value={varietyId}
+                onChange={(event) => setVarietyId(event.target.value)}
+              >
+                <option value="">בחר זן…</option>
+                {varietyOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </FormField>
 
-      <FormField label="מגדל (קו ליקוט)" htmlFor="new-arr-grower">
-        <select
-          id="new-arr-grower"
-          className={inputClassName}
-          disabled={!varietyId}
-          value={growerPickLineId}
-          onChange={(event) => setGrowerPickLineId(event.target.value)}
-        >
-          <option value="">בחר מגדל…</option>
-          {growerLineOptions.map((option) => (
-            <option key={option.id} value={option.id}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </FormField>
+            <FormField label="מגדל (קו ליקוט)" htmlFor="new-arr-grower">
+              <select
+                id="new-arr-grower"
+                className={`${inputClassName} w-full`}
+                disabled={!varietyId}
+                value={growerPickLineId}
+                onChange={(event) => setGrowerPickLineId(event.target.value)}
+              >
+                <option value="">בחר מגדל…</option>
+                {growerLineOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </FormField>
 
-      <FormField label="לקוח (קו הזמנה)" htmlFor="new-arr-customer">
-        <select
-          id="new-arr-customer"
-          className={inputClassName}
-          disabled={!varietyId}
-          value={customerOrderLineId}
-          onChange={(event) => setCustomerOrderLineId(event.target.value)}
-        >
-          <option value="">בחר לקוח…</option>
-          {customerLineOptions.map((option) => (
-            <option key={option.id} value={option.id}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </FormField>
+            <FormField label="לקוח (קו הזמנה)" htmlFor="new-arr-customer">
+              <select
+                id="new-arr-customer"
+                className={`${inputClassName} w-full`}
+                disabled={!varietyId}
+                value={customerOrderLineId}
+                onChange={(event) => setCustomerOrderLineId(event.target.value)}
+              >
+                <option value="">בחר לקוח…</option>
+                {customerLineOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </FormField>
+          </FormSection>
 
-      <FormField label="כמות (משטחים)" htmlFor="new-arr-quantity">
-        <input
-          id="new-arr-quantity"
-          type="number"
-          step="0.01"
-          min={0}
-          className={inputClassName}
-          value={quantity}
-          onChange={(event) => setQuantity(event.target.value)}
-        />
-      </FormField>
+          <FormSection title="כמות ותמחור" columns={2}>
+            <FormField label="כמות (משטחים)" htmlFor="new-arr-quantity">
+              <input
+                id="new-arr-quantity"
+                type="number"
+                step="0.01"
+                min={0}
+                className={`${inputClassName} w-full`}
+                value={quantity}
+                onChange={(event) => setQuantity(event.target.value)}
+              />
+            </FormField>
+            <div className="hidden sm:block" />
+            <FormField label="מחיר" htmlFor="new-arr-price">
+              <input
+                id="new-arr-price"
+                type="number"
+                step="0.01"
+                className={`${inputClassName} w-full`}
+                value={price}
+                onChange={(event) => setPrice(event.target.value)}
+              />
+            </FormField>
+            <FormField label="סוג תמחור" htmlFor="new-arr-price-type">
+              <input
+                id="new-arr-price-type"
+                className={`${inputClassName} w-full`}
+                value={priceType}
+                onChange={(event) => setPriceType(event.target.value)}
+              />
+            </FormField>
+          </FormSection>
+        </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <FormField label="מחיר" htmlFor="new-arr-price">
-          <input
-            id="new-arr-price"
-            type="number"
-            step="0.01"
-            className={inputClassName}
-            value={price}
-            onChange={(event) => setPrice(event.target.value)}
-          />
-        </FormField>
-        <FormField label="סוג תמחור" htmlFor="new-arr-price-type">
-          <input
-            id="new-arr-price-type"
-            className={inputClassName}
-            value={priceType}
-            onChange={(event) => setPriceType(event.target.value)}
-          />
-        </FormField>
-      </div>
-
-      <Button
-        type="button"
-        disabled={!canSave || saving}
-        onClick={() => {
-          setSaving(true);
-          createMutation.mutate(undefined, { onSettled: () => setSaving(false) });
-        }}
-      >
-        {saving ? "שומר…" : "צור רשומת סידור"}
-      </Button>
+        {/* The submit sits on its own tinted footer rather than floating as
+            the last item in the field stack, so "the form ends here" is a
+            visible edge and not just more whitespace. */}
+        <div className="flex items-center justify-end gap-3 border-t border-border bg-surface-muted/60 px-6 py-4">
+          {!canSave && (
+            <p className="text-xs text-ink-muted">בחר מגדל, לקוח וכמות גדולה מאפס.</p>
+          )}
+          <Button
+            type="button"
+            disabled={!canSave || saving}
+            onClick={() => {
+              setSaving(true);
+              createMutation.mutate(undefined, { onSettled: () => setSaving(false) });
+            }}
+          >
+            {saving && (
+              <span
+                aria-hidden
+                className="animate-spin-loop h-3.5 w-3.5 rounded-full border-2 border-current border-t-transparent"
+              />
+            )}
+            {saving ? "שומר…" : "צור רשומת סידור"}
+          </Button>
+        </div>
+      </Card>
     </div>
   );
 }

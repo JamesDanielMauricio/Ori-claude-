@@ -3,6 +3,10 @@ import { useMemo, useState } from "react";
 
 import { inputClassName } from "@/components/reference-data/form-field";
 import { ListDetailLayout } from "@/components/reference-data/list-detail-layout";
+import { RecordList } from "@/components/reference-data/record-list";
+import { StatusPill } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Icon } from "@/components/ui/icon";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -110,6 +114,24 @@ export default function ArrangedOrderHistoryPage() {
     return line.arrangement_records.reduce((sum, record) => sum + record.quantity_pallets, 0);
   }
 
+  const listItems = useMemo(
+    () =>
+      sortedOrders.map((row) => ({
+        id: row.id,
+        label: row.companies?.name ?? "—",
+        badge: STATUS_LABEL[row.status],
+      })),
+    [sortedOrders],
+  );
+
+  // How many lines were arranged in a quantity other than the one ordered —
+  // the number this whole screen exists to surface.
+  const mismatchCount = useMemo(
+    () =>
+      (linesQuery.data ?? []).filter((line) => arrangedTotal(line) !== line.pallets_ordered).length,
+    [linesQuery.data],
+  );
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
       <PageHeader
@@ -135,91 +157,118 @@ export default function ArrangedOrderHistoryPage() {
       />
 
       {dayQuery.isLoading ? (
-        <Skeleton className="h-10 w-full" />
+        <Skeleton className="h-40 w-full rounded-xl" />
       ) : !dayId ? (
-        <p className="text-sm text-ink-muted">אין יום מסחר בתאריך זה.</p>
+        <div className="rounded-xl bg-surface shadow-raised ring-1 ring-inset ring-border/70">
+          <EmptyState
+            icon="calendar"
+            title="אין יום מסחר בתאריך זה"
+            hint="בחר תאריך אחר בבורר שלמעלה כדי לראות את ההזמנות שנרשמו בו."
+          />
+        </div>
       ) : (
         <ListDetailLayout
           list={
-            <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-surface shadow-card">
-              {ordersQuery.isLoading ? (
-                <div className="space-y-2 p-3">
-                  <Skeleton className="h-10 w-full" />
-                  <Skeleton className="h-10 w-full" />
-                </div>
-              ) : sortedOrders.length === 0 ? (
-                <p className="p-4 text-sm text-ink-muted">אין הזמנות ליום זה.</p>
-              ) : (
-                <ul>
-                  {sortedOrders.map((row) => (
-                    <li key={row.id}>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedOrderId(row.id)}
-                        className={`flex w-full items-center justify-between relative border-b border-border px-4 py-2.5 text-start text-sm transition-colors ${
-                          row.id === selectedOrderId
-                            ? "bg-accent-soft font-semibold text-accent before:absolute before:inset-y-0 before:start-0 before:w-[3px] before:bg-accent"
-                            : "hover:bg-canvas"
-                        }`}
-                      >
-                        <span>{row.companies?.name ?? "—"}</span>
-                        <span className="text-xs text-ink-muted">{STATUS_LABEL[row.status]}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+            <RecordList
+              icon="briefcase"
+              items={listItems}
+              selectedId={selectedOrderId}
+              onSelect={setSelectedOrderId}
+              loading={ordersQuery.isLoading}
+              searchPlaceholder="חיפוש לקוח"
+              emptyLabel="אין הזמנות ליום זה."
+            />
           }
           detail={
             !selected ? (
-              <p className="text-sm text-ink-muted">בחר הזמנה מהרשימה.</p>
+              <EmptyState
+                icon="clipboard"
+                title="לא נבחרה הזמנה"
+                hint="בחר לקוח מהרשימה כדי להשוות שורה מול שורה מה הוזמן ומה סודר בפועל."
+              />
             ) : (
-              <div className="flex flex-col gap-4">
-                <div>
-                  <h1 className="text-lg font-semibold">{selected.companies?.name ?? "—"}</h1>
-                  <p className="text-sm text-ink-muted">
-                    סטטוס: {STATUS_LABEL[selected.status]}
-                    {selected.submitted_at &&
-                      ` · נשלח ב-${new Date(selected.submitted_at).toLocaleString("he-IL")}`}
-                  </p>
+              <div className="flex flex-col gap-5">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h2 className="font-display text-2xl text-ink">
+                      {selected.companies?.name ?? "—"}
+                    </h2>
+                    {selected.submitted_at && (
+                      <p className="mt-1 text-sm text-ink-muted">
+                        נשלח ב-{new Date(selected.submitted_at).toLocaleString("he-IL")}
+                      </p>
+                    )}
+                  </div>
+                  <StatusPill tone={selected.status === "submitted" ? "accent" : "warning"} dot>
+                    {STATUS_LABEL[selected.status]}
+                  </StatusPill>
                 </div>
 
                 {linesQuery.isLoading ? (
-                  <Skeleton className="h-24 w-full" />
+                  <Skeleton className="h-40 w-full rounded-xl" />
                 ) : !linesQuery.data || linesQuery.data.length === 0 ? (
-                  <p className="text-sm text-ink-muted">אין שורות בהזמנה זו.</p>
+                  <EmptyState icon="package" title="אין שורות בהזמנה זו" />
                 ) : (
-                  <TableContainer>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>מוצר</TableHead>
-                        <TableHead>הוזמן</TableHead>
-                        <TableHead>סודר</TableHead>
-                        <TableHead>הערה</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {linesQuery.data.map((line) => {
-                        const arranged = arrangedTotal(line);
-                        const mismatch = arranged !== line.pallets_ordered;
-                        return (
-                          <TableRow key={line.id}>
-                            <TableCell>
-                              {line.product_varieties?.product_families?.name
-                                ? `${line.product_varieties.product_families.name} — ${line.product_varieties.name}`
-                                : (line.product_varieties?.name ?? "")}
-                            </TableCell>
-                            <TableCell>{line.pallets_ordered}</TableCell>
-                            <TableCell className={mismatch ? "font-medium text-danger" : ""}>
-                              {arranged}
-                            </TableCell>
-                            <TableCell>{line.comment ?? ""}</TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </TableContainer>
+                  <>
+                    {/* A count of the disputed lines above the table. On a
+                        screen whose entire purpose is finding where ordered
+                        and arranged disagree, that number is the answer — it
+                        should not require scanning every row to obtain. */}
+                    {mismatchCount > 0 && (
+                      <div className="flex items-center gap-2.5 rounded-lg bg-danger-soft px-4 py-3 text-sm text-danger ring-1 ring-inset ring-danger/20">
+                        <Icon name="alertCircle" className="h-4 w-4 shrink-0" />
+                        <span>
+                          {mismatchCount === 1
+                            ? "שורה אחת סודרה בכמות שונה מזו שהוזמנה."
+                            : `${mismatchCount} שורות סודרו בכמות שונה מזו שהוזמנה.`}
+                        </span>
+                      </div>
+                    )}
+
+                    <TableContainer>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>מוצר</TableHead>
+                          <TableHead className="text-end">הוזמן</TableHead>
+                          <TableHead className="text-end">סודר</TableHead>
+                          <TableHead>הערה</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {linesQuery.data.map((line) => {
+                          const arranged = arrangedTotal(line);
+                          const mismatch = arranged !== line.pallets_ordered;
+                          return (
+                            <TableRow key={line.id}>
+                              <TableCell>
+                                <span className="block font-medium text-ink">
+                                  {line.product_varieties?.name ?? ""}
+                                </span>
+                                {line.product_varieties?.product_families?.name && (
+                                  <span className="mt-0.5 block text-xs text-ink-muted">
+                                    {line.product_varieties.product_families.name}
+                                  </span>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-end tabular-nums">
+                                {line.pallets_ordered}
+                              </TableCell>
+                              <TableCell className="text-end tabular-nums">
+                                {mismatch ? (
+                                  <span className="inline-flex items-center gap-1.5 rounded-md bg-danger-soft px-2 py-0.5 font-semibold text-danger">
+                                    {arranged}
+                                  </span>
+                                ) : (
+                                  arranged
+                                )}
+                              </TableCell>
+                              <TableCell className="text-ink-muted">{line.comment ?? ""}</TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </TableContainer>
+                  </>
                 )}
               </div>
             )

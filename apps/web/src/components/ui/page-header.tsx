@@ -18,16 +18,23 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    // A hairline rule under the header gives the title block a floor, so a
-    // screen whose body is one big table doesn't start with the table
-    // hanging directly off the heading. `items-center` on the wrap axis
-    // keeps the action buttons optically aligned to the title, not to the
-    // top of a two-line subtitle.
-    <header className="mb-5 flex flex-wrap items-center justify-between gap-x-4 gap-y-3 border-b border-border pb-4">
+    // No rule under the header any more, and no accent bar beside the title.
+    // Both were doing the job that space and type contrast should do: with a
+    // 30px serif title over a 14px sans subtitle, the hierarchy is already
+    // unmistakable, and a divider on top of that just adds a line to look at.
+    // The generous bottom margin is the separator.
+    <header className="mb-8 flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
       <div className="min-w-0">
-        <h1 className="text-xl font-bold tracking-tight text-ink sm:text-2xl">{title}</h1>
+        <h1 className="animate-title-settle font-display text-[1.75rem] text-ink sm:text-[2.125rem]">
+          {title}
+        </h1>
         {subtitle && (
-          <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-ink-muted">{subtitle}</p>
+          // Capped at ~68 characters per line. Long measures are the other
+          // thing that makes an interface read as unconsidered — a subtitle
+          // running the full width of a 1440px screen has no shape.
+          <p className="animate-rise-in mt-2.5 max-w-[52ch] text-sm leading-relaxed text-ink-muted">
+            {subtitle}
+          </p>
         )}
       </div>
       {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}

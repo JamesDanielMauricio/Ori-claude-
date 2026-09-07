@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { inputClassName } from "@/components/reference-data/form-field";
 import { Button } from "@/components/ui/button";
+import { StatusPill } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { TableBody, TableCell, TableContainer, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { trpc } from "@/lib/trpc-client";
@@ -127,44 +128,61 @@ export default function BulkImportUsersPage() {
             הוסף שורה
           </Button>
           <Button type="submit" disabled={bulkCreate.isPending}>
+            {bulkCreate.isPending && (
+              <span
+                aria-hidden
+                className="animate-spin-loop h-3.5 w-3.5 rounded-full border-2 border-current border-t-transparent"
+              />
+            )}
             {bulkCreate.isPending ? "יוצר…" : "צור משתמשים"}
           </Button>
         </div>
       </form>
 
       {bulkCreate.data && (
-        <TableContainer className="bg-surface">
-          <TableHeader>
-            <TableRow>
-              <TableHead>אימייל</TableHead>
-              <TableHead>סטטוס</TableHead>
-              <TableHead>קישור חד-פעמי</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {bulkCreate.data.map((result) => (
-              <TableRow key={result.email}>
-                <TableCell dir="ltr" className="text-left">
-                  {result.email}
-                </TableCell>
-                <TableCell>
-                  {result.status === "created" ? (
-                    <span className="rounded-full bg-accent-soft px-2 py-0.5 text-xs font-medium text-accent">
-                      נוצר
-                    </span>
-                  ) : (
-                    <span className="rounded-full bg-warning-soft px-2 py-0.5 text-xs font-medium text-warning">
-                      דולג ({result.reason})
-                    </span>
-                  )}
-                </TableCell>
-                <TableCell dir="ltr" className="max-w-xs truncate text-left font-mono text-xs">
-                  {result.status === "created" ? result.recoveryLink : ""}
-                </TableCell>
+        // The results get their own titled section. Previously a second
+        // unlabelled table appeared directly under the first, and it was not
+        // obvious at a glance which one was input and which was outcome.
+        <section className="animate-rise-in mt-2 flex flex-col gap-3">
+          <div>
+            <h2 className="font-display text-xl text-ink">תוצאות הייבוא</h2>
+            <p className="mt-1 text-sm text-ink-muted">
+              כל קישור חד-פעמי מוצג כאן פעם אחת בלבד — העתק אותו ושלח למשתמש לפני שתעזוב את הדף.
+            </p>
+          </div>
+          <TableContainer className="bg-surface">
+            <TableHeader>
+              <TableRow>
+                <TableHead>אימייל</TableHead>
+                <TableHead>סטטוס</TableHead>
+                <TableHead>קישור חד-פעמי</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </TableContainer>
+            </TableHeader>
+            <TableBody>
+              {bulkCreate.data.map((result) => (
+                <TableRow key={result.email}>
+                  <TableCell dir="ltr" className="text-left">
+                    {result.email}
+                  </TableCell>
+                  <TableCell>
+                    {result.status === "created" ? (
+                      <StatusPill tone="accent" dot>
+                        נוצר
+                      </StatusPill>
+                    ) : (
+                      <StatusPill tone="warning" dot>
+                        דולג ({result.reason})
+                      </StatusPill>
+                    )}
+                  </TableCell>
+                  <TableCell dir="ltr" className="max-w-xs truncate text-left font-mono text-xs">
+                    {result.status === "created" ? result.recoveryLink : ""}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </TableContainer>
+        </section>
       )}
     </div>
   );

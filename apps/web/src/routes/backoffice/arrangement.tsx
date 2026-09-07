@@ -10,6 +10,8 @@ import { Link } from "react-router-dom";
 import { PriceEditDialog } from "@/components/arrangement/price-edit-dialog";
 import { inputClassName } from "@/components/reference-data/form-field";
 import { Button } from "@/components/ui/button";
+import { Card, StatusPill } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -409,16 +411,26 @@ export default function ArrangementPage() {
   }
 
   if (!day || !arrangement) {
-    return <p className="text-sm text-ink-muted">אין יום מסחר פתוח כרגע.</p>;
+    return (
+      <div className="max-w-xl rounded-xl bg-surface shadow-raised ring-1 ring-inset ring-border/70">
+        <EmptyState
+          icon="clock"
+          title="אין יום מסחר פתוח"
+          hint="פתח יום עסקים בסרגל הצד כדי לראות את היצע וביקוש היום ולסדר ביניהם."
+        />
+      </div>
+    );
   }
 
   const canClose = day.phase === "shop_closed" && arrangement.status === "open";
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-6">
       <PageHeader
-        title={`סידור — ${new Intl.DateTimeFormat("he-IL", { dateStyle: "long" }).format(new Date(day.trade_date))}`}
-        subtitle={`שלב יום: ${PHASE_LABEL[day.phase]} · סטטוס סידור: ${arrangement.status === "open" ? "פתוח" : "סגור"}`}
+        title="סידור"
+        subtitle={new Intl.DateTimeFormat("he-IL", { dateStyle: "long" }).format(
+          new Date(day.trade_date),
+        )}
         actions={
           <>
             <Link to="/backoffice/new-arrangement">
@@ -440,87 +452,155 @@ export default function ArrangementPage() {
         }
       />
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="rounded-lg border border-border bg-surface shadow-card p-4">
-          <h2 className="mb-3 text-sm font-semibold text-ink-muted">היצע מאוגד (לפי זן)</h2>
-          <div className="flex flex-col gap-3">
-            {supplyByVariety.length === 0 && (
-              <p className="text-sm text-ink-muted">אין היצע רשום עדיין.</p>
-            )}
-            {supplyByVariety.map((group) => (
-              <div key={group.varietyId} className="border-b border-border pb-2 last:border-0">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">
-                    {group.label} — {group.total} משטחים
-                    {outOfStockVarietyIds.has(group.varietyId) && (
-                      <span className="ms-2 text-xs font-semibold text-danger">חוסר במלאי</span>
-                    )}
-                  </span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={() => setPriceEditVarietyId(group.varietyId)}
-                  >
-                    ערוך מחיר
-                  </Button>
-                </div>
-                <ul className="ms-4 mt-1 text-xs text-ink-muted">
-                  {[...group.byGrower.values()].map((g, i) => (
-                    <li key={i}>
-                      {g.name}: {g.pallets} משטחים
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
+      {/* Day phase and arrangement status were a grey run-on sentence under
+          the title. They are the two facts that decide whether "סגור סידור"
+          is even available, so they get their own strip and their own
+          semantics. */}
+      <div className="animate-rise-in flex flex-wrap items-center gap-x-6 gap-y-3 rounded-xl bg-surface px-5 py-4 shadow-card ring-1 ring-inset ring-border/70">
+        <div className="flex items-center gap-2.5">
+          <span className="text-[11px] font-semibold tracking-[0.08em] text-ink-subtle">
+            שלב יום
+          </span>
+          <StatusPill tone={day.phase === "shop_closed" ? "brass" : "accent"} dot>
+            {PHASE_LABEL[day.phase]}
+          </StatusPill>
         </div>
-
-        <div className="rounded-lg border border-border bg-surface shadow-card p-4">
-          <h2 className="mb-3 text-sm font-semibold text-ink-muted">ביקוש מאוגד (לפי זן)</h2>
-          <div className="flex flex-col gap-3">
-            {demandByVariety.length === 0 && (
-              <p className="text-sm text-ink-muted">אין ביקוש רשום עדיין.</p>
-            )}
-            {demandByVariety.map((group) => (
-              <div key={group.varietyId} className="border-b border-border pb-2 last:border-0">
-                <span className="text-sm font-medium">
-                  {group.label} — {group.total} משטחים
-                  {outOfStockVarietyIds.has(group.varietyId) && (
-                    <span className="ms-2 text-xs font-semibold text-danger">חוסר במלאי</span>
-                  )}
-                </span>
-                <ul className="ms-4 mt-1 text-xs text-ink-muted">
-                  {[...group.byCustomer.values()].map((c, i) => (
-                    <li key={i}>
-                      {c.name}: {c.pallets} משטחים
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
+        <div className="flex items-center gap-2.5">
+          <span className="text-[11px] font-semibold tracking-[0.08em] text-ink-subtle">
+            סטטוס סידור
+          </span>
+          <StatusPill tone={arrangement.status === "open" ? "accent" : "neutral"} dot>
+            {arrangement.status === "open" ? "פתוח" : "סגור"}
+          </StatusPill>
         </div>
       </div>
 
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        <Card title="היצע מאוגד" padded={false}>
+          {supplyByVariety.length === 0 ? (
+            <p className="px-5 py-8 text-center text-sm text-ink-muted">אין היצע רשום עדיין.</p>
+          ) : (
+            <ul>
+              {supplyByVariety.map((group) => (
+                <li
+                  key={group.varietyId}
+                  className="border-b border-border px-5 py-4 last:border-b-0"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-ink">{group.label}</p>
+                      {outOfStockVarietyIds.has(group.varietyId) && (
+                        <span className="mt-1.5 inline-block">
+                          <StatusPill tone="danger">חוסר במלאי</StatusPill>
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      {/* The total is the number being scanned down this
+                          column, so it is set as a numeral, not buried
+                          mid-sentence after an em dash. */}
+                      <p className="text-end" dir="ltr">
+                        <span className="font-display text-xl leading-none text-ink">
+                          {group.total}
+                        </span>
+                        <span className="ms-1 text-xs text-ink-subtle">משטחים</span>
+                      </p>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setPriceEditVarietyId(group.varietyId)}
+                      >
+                        ערוך מחיר
+                      </Button>
+                    </div>
+                  </div>
+                  <ul className="mt-2.5 flex flex-col gap-1 border-t border-border/60 pt-2.5">
+                    {[...group.byGrower.values()].map((g, i) => (
+                      <li key={i} className="flex items-baseline justify-between gap-3 text-xs">
+                        <span className="truncate text-ink-muted">{g.name}</span>
+                        <span className="shrink-0 tabular-nums text-ink">{g.pallets}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+
+        <Card title="ביקוש מאוגד" padded={false}>
+          {demandByVariety.length === 0 ? (
+            <p className="px-5 py-8 text-center text-sm text-ink-muted">אין ביקוש רשום עדיין.</p>
+          ) : (
+            <ul>
+              {demandByVariety.map((group) => (
+                <li
+                  key={group.varietyId}
+                  className="border-b border-border px-5 py-4 last:border-b-0"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-ink">{group.label}</p>
+                      {outOfStockVarietyIds.has(group.varietyId) && (
+                        <span className="mt-1.5 inline-block">
+                          <StatusPill tone="danger">חוסר במלאי</StatusPill>
+                        </span>
+                      )}
+                    </div>
+                    <p className="shrink-0 text-end" dir="ltr">
+                      <span className="font-display text-xl leading-none text-ink">
+                        {group.total}
+                      </span>
+                      <span className="ms-1 text-xs text-ink-subtle">משטחים</span>
+                    </p>
+                  </div>
+                  <ul className="mt-2.5 flex flex-col gap-1 border-t border-border/60 pt-2.5">
+                    {[...group.byCustomer.values()].map((c, i) => (
+                      <li key={i} className="flex items-baseline justify-between gap-3 text-xs">
+                        <span className="truncate text-ink-muted">{c.name}</span>
+                        <span className="shrink-0 tabular-nums text-ink">{c.pallets}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
+
       <div className="flex flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-ink-muted">רשומות סידור (התאמת קווים)</h2>
-          <div className="flex gap-1 rounded-md border border-border bg-surface p-1 shadow-card">
-            <Button
-              type="button"
-              variant={viewMode === "by-product" ? "primary" : "ghost"}
-              onClick={() => setViewMode("by-product")}
-            >
-              לפי מוצר
-            </Button>
-            <Button
-              type="button"
-              variant={viewMode === "by-grower" ? "primary" : "ghost"}
-              onClick={() => setViewMode("by-grower")}
-            >
-              לפי מגדל
-            </Button>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="font-display text-xl text-ink">רשומות סידור</h2>
+          {/* A real segmented control: one track, one moving selection —
+              rather than two buttons where the inactive one was a ghost and
+              the pair read as "a button and some text". */}
+          <div
+            role="group"
+            aria-label="תצוגת רשומות"
+            className="inline-flex gap-1 rounded-lg bg-surface-muted p-1 ring-1 ring-inset ring-border"
+          >
+            {(
+              [
+                ["by-product", "לפי מוצר"],
+                ["by-grower", "לפי מגדל"],
+              ] as const
+            ).map(([mode, label]) => (
+              <button
+                key={mode}
+                type="button"
+                aria-pressed={viewMode === mode}
+                onClick={() => setViewMode(mode)}
+                className={`rounded-md px-3.5 py-1.5 text-xs font-semibold transition-colors duration-200 ${
+                  viewMode === mode
+                    ? "bg-surface text-ink shadow-card"
+                    : "text-ink-muted hover:text-ink"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
         </div>
 

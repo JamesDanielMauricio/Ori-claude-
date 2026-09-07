@@ -20,21 +20,35 @@ export function CheckboxList({
   }
 
   return (
-    <div className="flex max-h-64 flex-col gap-0.5 overflow-y-auto rounded-md border border-border bg-surface p-1.5">
-      {options.map((option) => (
-        <label
-          key={option.id}
-          className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-canvas"
-        >
-          <input
-            type="checkbox"
-            checked={selectedIds.has(option.id)}
-            disabled={disabled}
-            onChange={() => onToggle(option.id)}
-          />
-          {option.label}
-        </label>
-      ))}
+    <div className="flex max-h-64 flex-col gap-0.5 overflow-y-auto rounded-lg bg-surface-muted/60 p-2 ring-1 ring-inset ring-border">
+      {options.map((option) => {
+        const checked = selectedIds.has(option.id);
+        return (
+          <label
+            key={option.id}
+            // The whole row tints when checked, not just the box. In a list
+            // of a dozen near-identical product names, a 16px tick at the
+            // start of the line is very easy to lose; a tinted row is not.
+            // `cursor-default` while disabled so the row doesn't advertise
+            // itself as clickable when it isn't.
+            className={`flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm transition-colors ${
+              disabled ? "cursor-default" : "cursor-pointer"
+            } ${
+              checked
+                ? "bg-accent-soft font-medium text-accent"
+                : "text-ink hover:bg-surface"
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={checked}
+              disabled={disabled}
+              onChange={() => onToggle(option.id)}
+            />
+            <span className="min-w-0 truncate">{option.label}</span>
+          </label>
+        );
+      })}
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { FormField, inputClassName } from "@/components/reference-data/form-field";
+import { Card, FormSection } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -108,37 +109,68 @@ export default function UserProfilePage() {
         title="פרופיל משתמש"
         subtitle="שם התצוגה והטלפון שלך. שינוי סיסמה מתבצע בנפרד, במסך קביעת הסיסמה."
       />
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <FormField label="שם תצוגה" htmlFor="displayName">
-          <input
-            id="displayName"
-            type="text"
-            required
-            className={inputClassName}
-            value={displayName}
-            onChange={(event) => setDisplayName(event.target.value)}
-          />
-        </FormField>
-
-        <FormField label="טלפון" htmlFor="phoneNumber">
-          <input
-            id="phoneNumber"
-            type="tel"
-            className={inputClassName}
-            value={phoneNumber}
-            onChange={(event) => setPhoneNumber(event.target.value)}
-          />
-        </FormField>
-
-        <div className="flex gap-2 border-t border-border pt-4">
-          <Button type="submit" disabled={saveMutation.isPending}>
-            {saveMutation.isPending ? "שומר…" : "שמור"}
-          </Button>
-          <Button type="button" variant="secondary" onClick={handleCancel} disabled={saveMutation.isPending}>
-            ביטול
-          </Button>
+      <Card padded={false}>
+        {/* An identity banner above the fields. This page is about "you", and
+            a form with no subject at the top of it is just two inputs — the
+            avatar and name give it one. */}
+        <div className="flex items-center gap-4 border-b border-border bg-surface-muted/60 px-6 py-5">
+          <span
+            aria-hidden
+            className="font-display flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-accent-soft text-2xl text-accent ring-1 ring-inset ring-accent/25"
+          >
+            {displayName.trim().charAt(0)}
+          </span>
+          <div className="min-w-0">
+            <p className="font-display truncate text-xl text-ink">{displayName || "—"}</p>
+            <p className="mt-0.5 truncate text-sm text-ink-muted">{phoneNumber || "ללא טלפון"}</p>
+          </div>
         </div>
-      </form>
+
+        <form onSubmit={handleSubmit} className="flex flex-col gap-6 p-6">
+          <FormSection title="פרטים אישיים">
+            <FormField label="שם תצוגה" htmlFor="displayName">
+              <input
+                id="displayName"
+                type="text"
+                required
+                className={`${inputClassName} w-full`}
+                value={displayName}
+                onChange={(event) => setDisplayName(event.target.value)}
+              />
+            </FormField>
+
+            <FormField label="טלפון" htmlFor="phoneNumber">
+              <input
+                id="phoneNumber"
+                type="tel"
+                className={`${inputClassName} w-full`}
+                value={phoneNumber}
+                onChange={(event) => setPhoneNumber(event.target.value)}
+              />
+            </FormField>
+          </FormSection>
+
+          <div className="flex gap-2">
+            <Button type="submit" disabled={saveMutation.isPending}>
+              {saveMutation.isPending && (
+                <span
+                  aria-hidden
+                  className="animate-spin-loop h-3.5 w-3.5 rounded-full border-2 border-current border-t-transparent"
+                />
+              )}
+              {saveMutation.isPending ? "שומר…" : "שמור"}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={handleCancel}
+              disabled={saveMutation.isPending}
+            >
+              ביטול
+            </Button>
+          </div>
+        </form>
+      </Card>
     </div>
   );
 }

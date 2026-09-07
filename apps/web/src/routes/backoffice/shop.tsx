@@ -1,5 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
+import { StatusPill } from "@/components/ui/card";
+import { Icon, type IconName } from "@/components/ui/icon";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { createClient } from "@/lib/supabase/client";
@@ -78,69 +80,91 @@ export default function ShopManagementPage() {
     ? new Intl.DateTimeFormat("he-IL", { dateStyle: "full" }).format(new Date(day.trade_date))
     : null;
 
+  const phase = day?.phase ?? "none";
+
   return (
-    <div className="flex max-w-3xl flex-col gap-5">
+    <div className="flex max-w-4xl flex-col gap-6">
       <PageHeader
         title="ניהול חנות"
         subtitle="מחזור יום המסחר: פתיחת יום ← פתיחת חנות ← סגירת חנות ← סגירת יום עסקים. הפעולות עצמן נמצאות בסרגל הצד."
       />
 
       {openDayQuery.isLoading ? (
-        <Skeleton className="h-24 w-full" />
+        <Skeleton className="h-40 w-full rounded-xl" />
       ) : (
-        <section className="rounded-lg border border-border bg-surface shadow-card p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-sm text-ink-muted">{tradeDateLabel ?? "מוכן ליום חדש"}</p>
-              <p className="mt-1 text-lg font-semibold">{PHASE_LABEL[day?.phase ?? "none"]}</p>
+        // The day's state is the whole point of this screen, so it gets a
+        // hero panel rather than a line of text in a bordered box: the date
+        // as a kicker, the phase as display type, and a live dot when the
+        // shop is actually taking orders.
+        <section className="animate-rise-in overflow-hidden rounded-xl bg-surface shadow-raised ring-1 ring-inset ring-border/70">
+          <div className="flex flex-wrap items-start justify-between gap-4 p-6">
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold tracking-[0.08em] text-ink-subtle">
+                {tradeDateLabel ?? "אין יום פעיל"}
+              </p>
+              <h2 className="font-display mt-2 text-2xl text-ink">{PHASE_LABEL[phase]}</h2>
             </div>
-            <PhaseStepper phase={day?.phase ?? "none"} />
+            {phase === "shop_open" ? (
+              <span className="inline-flex shrink-0 items-center gap-2 rounded-full bg-accent-soft px-3 py-1.5 text-xs font-semibold text-accent ring-1 ring-inset ring-accent/25">
+                {/* The ring pulses out from behind a static dot, so nothing
+                    reflows — see globals.css's `ping-ring`. */}
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping-ring absolute inset-0 rounded-full bg-accent" />
+                  <span className="relative h-2 w-2 rounded-full bg-accent" />
+                </span>
+                פעיל
+              </span>
+            ) : (
+              <StatusPill tone={phase === "none" ? "neutral" : "brass"}>
+                {phase === "none" ? "לא פעיל" : "בתהליך"}
+              </StatusPill>
+            )}
+          </div>
+          <div className="border-t border-border bg-surface-muted/50 px-6 py-4">
+            <PhaseStepper phase={phase} />
           </div>
         </section>
       )}
 
       {day && (
-        <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <MetricCard
-            label="ליקוטים שנשלחו"
-            value={
-              metricsQuery.data
-                ? `${metricsQuery.data.picksSubmitted}/${metricsQuery.data.picksTotal}`
-                : null
-            }
-          />
-          <MetricCard
-            label="הזמנות שנשלחו"
-            value={
-              metricsQuery.data
-                ? `${metricsQuery.data.ordersSubmitted}/${metricsQuery.data.ordersTotal}`
-                : null
-            }
-          />
-          <MetricCard
-            label="הודעות WhatsApp"
-            value={
-              settingsQuery.data ? (settingsQuery.data.whatsapp_enabled ? "פעיל" : "כבוי") : null
-            }
-          />
-          <MetricCard
-            label="WhatsApp בסגירת סידור"
-            value={
-              settingsQuery.data
-                ? settingsQuery.data.close_arrangement_whatsapp_enabled
-                  ? "פעיל"
-                  : "כבוי"
-                : null
-            }
-          />
-        </section>
+        <div className="flex flex-col gap-3">
+          <h2 className="text-[11px] font-semibold tracking-[0.08em] text-ink-subtle">
+            מצב היום
+          </h2>
+          <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <MetricCard
+              label="ליקוטים שנשלחו"
+              value={metricsQuery.data?.picksSubmitted ?? null}
+              total={metricsQuery.data?.picksTotal ?? null}
+              icon="sprout"
+            />
+            <MetricCard
+              label="הזמנות שנשלחו"
+              value={metricsQuery.data?.ordersSubmitted ?? null}
+              total={metricsQuery.data?.ordersTotal ?? null}
+              icon="briefcase"
+            />
+            <ToggleCard
+              label="הודעות WhatsApp"
+              enabled={settingsQuery.data?.whatsapp_enabled ?? null}
+            />
+            <ToggleCard
+              label="WhatsApp בסגירת סידור"
+              enabled={settingsQuery.data?.close_arrangement_whatsapp_enabled ?? null}
+            />
+          </section>
+        </div>
       )}
     </div>
   );
 }
 
 // The four-phase progress strip — pure display, driven by the day's real
-// phase column.
+// phase column. Rebuilt as a numbered track rather than a row of pills: pills
+// separated by a "‹" glyph didn't communicate progress, only sequence. Here
+// completed steps are filled, the current one is ringed, and the connecting
+// line between them fills in behind — so "where are we in the day" is
+// readable without comparing tint values.
 function PhaseStepper({ phase }: { phase: Phase | "none" }) {
   const steps: Array<{ key: Phase; label: string }> = [
     { key: "initiated", label: "פתיחת יום" },
@@ -158,33 +182,114 @@ function PhaseStepper({ phase }: { phase: Phase | "none" }) {
   const current = order[phase];
 
   return (
-    <ol className="flex items-center gap-1.5" aria-label="שלבי יום המסחר">
-      {steps.map((step, index) => (
-        <li key={step.key} className="flex items-center gap-1.5">
-          <span
-            className={`rounded-full px-2.5 py-1 text-xs font-medium ${
-              index <= current ? "bg-accent-soft text-accent" : "bg-canvas text-ink-muted"
-            }`}
-          >
-            {step.label}
-          </span>
-          {index < steps.length - 1 && <span className="text-xs text-ink-muted">‹</span>}
-        </li>
-      ))}
+    <ol className="flex items-center" aria-label="שלבי יום המסחר">
+      {steps.map((step, index) => {
+        const done = index < current;
+        const active = index === current;
+        return (
+          <li key={step.key} className="flex min-w-0 flex-1 items-center last:flex-none">
+            <div className="flex min-w-0 items-center gap-2">
+              <span
+                aria-hidden
+                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold transition-colors ${
+                  done
+                    ? "bg-accent text-accent-ink"
+                    : active
+                      ? "bg-surface text-accent ring-2 ring-accent"
+                      : "bg-surface text-ink-subtle ring-1 ring-inset ring-border-strong"
+                }`}
+              >
+                {done ? "✓" : index + 1}
+              </span>
+              <span
+                className={`truncate text-xs ${
+                  active ? "font-semibold text-accent" : done ? "text-ink" : "text-ink-subtle"
+                }`}
+              >
+                {step.label}
+              </span>
+            </div>
+            {index < steps.length - 1 && (
+              <span
+                aria-hidden
+                className={`mx-2 h-px min-w-4 flex-1 ${done ? "bg-accent" : "bg-border-strong"}`}
+              />
+            )}
+          </li>
+        );
+      })}
     </ol>
   );
 }
 
-function MetricCard({ label, value }: { label: string; value: string | null }) {
+// A count against a total, shown as a big numeral plus a progress bar. The
+// previous version printed "2/3" as one string, which is a number the eye has
+// to parse; the bar answers "are we nearly there?" before it is read.
+function MetricCard({
+  label,
+  value,
+  total,
+  icon,
+}: {
+  label: string;
+  value: number | null;
+  total: number | null;
+  icon: IconName;
+}) {
+  const loading = value === null || total === null;
+  const pct = !loading && total > 0 ? Math.round((value / total) * 100) : 0;
+  const complete = !loading && total > 0 && value === total;
+
   return (
-    <div className="rounded-lg border border-border bg-surface shadow-card p-4">
-      <p className="text-xs text-ink-muted">{label}</p>
-      {value === null ? (
-        <Skeleton className="mt-1 h-6 w-14" />
+    <div className="animate-rise-in rounded-xl bg-surface p-5 shadow-card ring-1 ring-inset ring-border/70">
+      <div className="flex items-center gap-2 text-ink-subtle">
+        <Icon name={icon} className="h-4 w-4 shrink-0" />
+        <p className="truncate text-xs font-medium">{label}</p>
+      </div>
+      {loading ? (
+        <Skeleton className="mt-3 h-8 w-16" />
       ) : (
-        <p className="mt-1 text-lg font-semibold" dir="ltr">
-          {value}
-        </p>
+        <>
+          <p className="mt-2.5 flex items-baseline gap-1" dir="ltr">
+            <span
+              className={`font-display text-3xl leading-none ${complete ? "text-accent" : "text-ink"}`}
+            >
+              {value}
+            </span>
+            <span className="text-sm text-ink-subtle">/ {total}</span>
+          </p>
+          <div className="mt-3 h-1 overflow-hidden rounded-full bg-surface-muted">
+            <div
+              // `scaleX` on a full-width bar rather than a percentage width,
+              // so the fill is a compositor transform and never triggers
+              // layout when the number updates on refetch.
+              className={`h-full origin-right rounded-full transition-transform duration-500 ease-[cubic-bezier(0.22,0.61,0.36,1)] ${complete ? "bg-accent" : "bg-brass"}`}
+              style={{ transform: `scaleX(${pct / 100})` }}
+            />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// A boolean setting. Reads as on/off at a glance via a dot rather than
+// requiring the words "פעיל" / "כבוי" to be read first.
+function ToggleCard({ label, enabled }: { label: string; enabled: boolean | null }) {
+  return (
+    <div className="animate-rise-in rounded-xl bg-surface p-5 shadow-card ring-1 ring-inset ring-border/70">
+      <div className="flex items-center gap-2 text-ink-subtle">
+        <Icon name="bell" className="h-4 w-4 shrink-0" />
+        <p className="truncate text-xs font-medium">{label}</p>
+      </div>
+      {enabled === null ? (
+        <Skeleton className="mt-3 h-7 w-20" />
+      ) : (
+        <div className="mt-3">
+          <StatusPill tone={enabled ? "accent" : "neutral"} dot>
+            {enabled ? "פעיל" : "כבוי"}
+          </StatusPill>
+        </div>
       )}
     </div>
   );

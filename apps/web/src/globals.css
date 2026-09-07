@@ -1,73 +1,160 @@
 @import "tailwindcss";
 
 /*
- * Design tokens — the one place the palette/type/spacing decisions live.
- * Everything else composes Tailwind utilities from these tokens; no screen
- * defines its own hex values.
+ * ---------------------------------------------------------------------------
+ * Design tokens
+ * ---------------------------------------------------------------------------
+ * The one place the palette/type/spacing decisions live. Everything else
+ * composes Tailwind utilities from these tokens; no screen defines its own
+ * hex values.
  *
- * Palette rationale: an earthy green accent (produce business), warm
- * neutral canvas, and three semantic colors (accent = act/confirm,
- * warning = attention/out-of-stock, danger = destructive/error). The
- * -soft variants are for tinted backgrounds (selected rows, status
- * chips) so screens stop improvising with opacity hacks; the -hover
- * variants exist so filled controls darken on hover instead of fading
- * with `opacity`, which washes a button out against the canvas rather
- * than making it look pressed.
+ * The app has two surface worlds, and that split is the whole design:
+ *
+ *   PAPER — the content area. A warm ivory field with near-white cards.
+ *           Warm, not gray: this is a produce business, and a cool neutral
+ *           made the food photography on the customer screens look dead.
+ *
+ *   RAIL  — the navigation chrome. Deep forest, almost black. It frames the
+ *           paper rather than sitting beside it as another light panel, which
+ *           is what the previous all-light version did: with the nav and the
+ *           content the same value, the app had no edges and read as one
+ *           undifferentiated sheet.
+ *
+ * The RAIL block further down does NOT introduce a second set of utility
+ * classes. It re-points the same token names at dark values for its own
+ * subtree, so a `Button variant="secondary"` or a `text-ink-muted` label
+ * inside the rail becomes the dark-surface version of itself automatically.
+ * That is why the sidebar's day-lifecycle panel, alerts bell and sign-out
+ * button needed no dark-mode branches of their own.
  */
 @theme {
-  /* Neutrals. The canvas is deliberately a touch deeper than the old
-     value so white surfaces read as raised cards against it — this app
-     is card-and-table dense, and separation has to come from the
-     background, not from heavy borders on every box. */
-  --color-canvas: #f2f0ea;
-  --color-surface: #ffffff;
-  /* Second surface step: table headers, list rows, inert/disabled fills —
-     anything that should read as "surface, but recessed". */
-  --color-surface-muted: #faf8f4;
-  --color-border: #e5e2d9;
-  /* For edges that carry meaning on their own (input outlines, dividers
-     inside a card) where the hairline border is too faint. */
-  --color-border-strong: #d3cfc4;
-  --color-ink: #1d1b17;
-  --color-ink-muted: #696560;
-  /* Tertiary only — placeholders and decorative glyphs. Below AA for
-     body text on white, so never use it for content a user must read. */
-  --color-ink-subtle: #948f86;
+  /* ---- Paper: neutrals ---------------------------------------------- */
+  /* Warm ivory. Everything here is on the yellow side of neutral; the
+     previous revision's sage-gray canvas is what made the app read as
+     generic dashboard rather than as something with a material. */
+  --color-canvas: #f4f1e9;
+  --color-surface: #fffdf8;
+  /* Second surface step: table headers, inert fills, recessed inputs. */
+  --color-surface-muted: #f0ece1;
+  /* Hairlines. Deliberately faint — structure is carried by shadow and
+     spacing, and a card outlined in a visible line reads as a wireframe. */
+  --color-border: #e7e1d3;
+  /* For edges that carry meaning on their own (input outlines, dividers). */
+  --color-border-strong: #d3cab6;
+  --color-ink: #1b1915;
+  --color-ink-muted: #6a6358;
+  /* Tertiary only — placeholders, decorative glyphs, table headers. Below AA
+     for body text, so never use it for content a user must read. */
+  --color-ink-subtle: #9b9284;
 
-  --color-accent: #2f6b3a;
-  --color-accent-hover: #24542d;
-  --color-accent-soft: #e7f0e8;
+  /* ---- Paper: brand ------------------------------------------------- */
+  --color-accent: #1d6b45;
+  --color-accent-hover: #155334;
+  --color-accent-soft: #e3eee5;
   --color-accent-ink: #ffffff;
+  /* Brass, not "citrus". A muted antique gold is the one color that reads as
+     expensive next to a deep green, and it gives highlights (the brand mark,
+     a live-day indicator, an editorial rule) somewhere to go that isn't a
+     second shade of the accent. */
+  --color-brass: #a97e23;
+  --color-brass-soft: #f4ebd5;
+
   --color-warning: #8a5f00;
-  --color-warning-soft: #f8efd9;
-  --color-danger: #b3261e;
-  --color-danger-hover: #8e1d17;
-  --color-danger-soft: #fbeae8;
+  --color-warning-soft: #f7efd8;
+  --color-danger: #a8261e;
+  --color-danger-hover: #851c16;
+  --color-danger-soft: #fae9e7;
 
-  /* Elevation. Warm-tinted rather than neutral black so shadows sit in
-     the same color family as the canvas instead of graying it out. */
-  --shadow-card: 0 1px 2px rgb(29 27 23 / 0.04), 0 1px 3px rgb(29 27 23 / 0.05);
-  --shadow-raised: 0 1px 2px rgb(29 27 23 / 0.06), 0 4px 12px -2px rgb(29 27 23 / 0.08);
-  --shadow-overlay: 0 4px 12px rgb(29 27 23 / 0.08), 0 16px 40px -12px rgb(29 27 23 / 0.28);
+  /* ---- Elevation ---------------------------------------------------- */
+  /* Warm-tinted and wide. On an ivory field a tight gray shadow looks like
+     dirt; a broad, very low-opacity warm one reads as light falling across
+     paper. Each step pairs a contact shadow with an ambient one — that
+     pairing is what reads as depth; a single blur just looks smudged. */
+  --shadow-card: 0 1px 2px rgb(60 48 26 / 0.04), 0 2px 8px -2px rgb(60 48 26 / 0.06);
+  --shadow-raised: 0 1px 2px rgb(60 48 26 / 0.04), 0 8px 24px -6px rgb(60 48 26 / 0.10);
+  --shadow-float: 0 2px 4px rgb(60 48 26 / 0.05), 0 16px 40px -12px rgb(60 48 26 / 0.16);
+  --shadow-overlay: 0 8px 20px rgb(28 24 14 / 0.10), 0 40px 80px -24px rgb(28 24 14 / 0.34);
+  --shadow-accent: 0 1px 2px rgb(21 83 52 / 0.22), 0 8px 20px -8px rgb(21 83 52 / 0.42);
 
-  /* Radii are softened one step from Tailwind's defaults across the
-     board. These override the built-ins, so every existing `rounded-md`
-     / `rounded-lg` in the app inherits the new curvature without a
-     single class changing. */
-  --radius-sm: 0.3125rem;
-  --radius-md: 0.5rem;
-  --radius-lg: 0.75rem;
-  --radius-xl: 1rem;
+  /* ---- Radii -------------------------------------------------------- */
+  /* These override Tailwind's built-ins, so every existing `rounded-md` /
+     `rounded-lg` in the app inherits the new curvature without a single
+     class changing. */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5625rem;
+  --radius-lg: 0.875rem;
+  --radius-xl: 1.25rem;
 
-  /* Self-hosted via @fontsource-variable/assistant (hebrew + latin
-     subsets), imported in main.tsx — the woff2 files ship in our own
-     bundle, so there's still no runtime request to Google. "Assistant
-     Variable" is the family name Fontsource's @font-face declares; plain
-     "Assistant" follows it so a machine with the font installed locally
-     still matches. */
+  /* ---- Type --------------------------------------------------------- */
+  /* Body: Assistant, self-hosted via @fontsource-variable/assistant. */
   --font-sans:
     "Assistant Variable", "Assistant", "Segoe UI", system-ui, -apple-system, "Helvetica Neue",
     Arial, sans-serif;
+
+  /* Display: Frank Ruhl Libre — a Hebrew serif, self-hosted the same way.
+     This is the single largest reason the app no longer reads as a template.
+     Every generic admin panel is set entirely in one grotesque; pairing a
+     serif for page titles with a sans for everything else is the oldest
+     editorial move there is, and Hebrew has few serifs that work on screen —
+     Frank Ruhl is the one that does. Titles only: it is a display face and
+     gets illegible below ~20px, so body copy, labels and table data all stay
+     on Assistant. */
+  --font-display: "Frank Ruhl Libre Variable", "Frank Ruhl Libre", Georgia, "Times New Roman",
+    serif;
+
+  /* ---- Motion ------------------------------------------------------- */
+  /* One easing curve for the whole app. A fast-out, long-tail settle is what
+     makes a 200ms transition feel considered rather than abrupt; using the
+     same curve everywhere is most of what makes separate animations feel
+     like one system. */
+  --ease-settle: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.36, 0.64, 1);
+}
+
+/*
+ * ---------------------------------------------------------------------------
+ * RAIL — the dark navigation chrome
+ * ---------------------------------------------------------------------------
+ * Re-points the token names above at dark values for this subtree only.
+ * Unlayered, so it beats Tailwind's theme layer without !important.
+ *
+ * Applied via `data-surface="rail"` on the sidebar/header elements. Anything
+ * rendered inside them — including shared components that know nothing about
+ * the rail — picks these up automatically.
+ *
+ * Note `--color-accent-ink` flips to near-black: on dark chrome the call to
+ * action is a BRIGHT green chip with dark text, which is legible and looks
+ * deliberate, where white-on-mid-green goes muddy against a dark field.
+ */
+[data-surface="rail"] {
+  --color-canvas: #1a3927;
+  --color-surface: #112419;
+  --color-surface-muted: #17301f;
+  --color-border: #22412d;
+  --color-border-strong: #2f5740;
+  --color-ink: #f1f5ef;
+  --color-ink-muted: #9cb0a2;
+  --color-ink-subtle: #6d8477;
+
+  --color-accent: #43ad6e;
+  --color-accent-hover: #55c081;
+  --color-accent-soft: #1c4029;
+  --color-accent-ink: #06170e;
+
+  --color-brass: #d9ac4e;
+  --color-brass-soft: #33290f;
+
+  --color-danger: #e5675c;
+  --color-danger-hover: #f07d72;
+  --color-danger-soft: #3a1c19;
+
+  /* Shadows do not read on a near-black field — depth there comes from the
+     border tokens above. Kept as near-nothing rather than removed so any
+     `shadow-card` inside the rail degrades quietly instead of casting a
+     black smear. */
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.20);
+  --shadow-raised: 0 2px 10px rgb(0 0 0 / 0.26);
+  --shadow-accent: 0 2px 12px -4px rgb(67 173 110 / 0.5);
 }
 
 html,
@@ -76,18 +163,39 @@ body {
 }
 
 body {
-  background-color: var(--color-canvas);
   color: var(--color-ink);
   font-family: var(--font-sans);
   /* Assistant is a light-stemmed Hebrew face; without smoothing hints it
      renders noticeably chunkier on Windows than the type scale assumes. */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* A single very wide warm wash rather than the previous two competing
+     radial tints. Painted once on a fixed layer, never animated, never
+     repainted on scroll — it just stops a full-bleed screen from reading as
+     a flat slab. */
+  background-color: var(--color-canvas);
+  background-image: radial-gradient(70rem 40rem at 82% -12%, rgb(169 126 35 / 0.07), transparent 62%);
+  background-attachment: fixed;
 }
 
-/* Headings wrap at a sensible point instead of leaving one orphaned word
-   on the last line — this matters more than usual here because Hebrew
-   screen titles are long ("היסטוריית הזמנות", "עדכון מלאי למגדלים"). */
+/*
+ * Display type. Applied through the `font-display` utility on page titles.
+ * Hebrew serifs need slightly tighter tracking than their Latin counterparts
+ * at display sizes, and Frank Ruhl's default line-height is generous enough
+ * that headings need it pulled in or they float away from their subtitles.
+ */
+.font-display {
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  /* The variable axis goes to 900; 500 is the weight that reads as
+     "confident" rather than "bold" at 30px+, which is the difference between
+     editorial and shouty. */
+  font-weight: 500;
+}
+
+/* Headings wrap at a sensible point instead of leaving one orphaned word on
+   the last line — this matters more than usual here because Hebrew screen
+   titles are long ("היסטוריית הזמנות", "סידור חדש"). */
 h1,
 h2,
 h3 {
@@ -95,8 +203,8 @@ h3 {
 }
 
 /* Tabular figures wherever numbers are compared vertically. This app is
-   pallet counts and prices in columns; proportional digits make a column
-   of "11" and "44" different widths and the eye can no longer scan it. */
+   pallet counts and prices in columns; proportional digits make a column of
+   "11" and "44" different widths and the eye can no longer scan it. */
 table,
 input,
 .tabular {
@@ -112,6 +220,7 @@ input[type="radio"] {
   /* The default ~13px control is undersized next to 14px text. */
   width: 1rem;
   height: 1rem;
+  cursor: pointer;
 }
 
 ::placeholder {
@@ -119,21 +228,24 @@ input[type="radio"] {
 }
 
 ::selection {
-  background-color: var(--color-accent-soft);
+  background-color: var(--color-brass-soft);
   color: var(--color-ink);
 }
 
 /* One consistent keyboard-focus treatment everywhere, instead of each
-   browser's default (or nothing, where a reset removed it). */
+   browser's default (or nothing, where a reset removed it). Kept as a real
+   `outline` rather than a box-shadow ring so it still renders in
+   forced-colors / high-contrast mode, where box-shadows are dropped. */
 :focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
+  border-radius: var(--radius-sm);
 }
 
 /* Slim, low-contrast scrollbars for the app's many internal scroll areas
-   (sticky-header tables, the reference-data list pane, the alerts list).
-   The chunky default bar reads as a page-level control and visually cuts
-   a card in half; these sit quietly inside the box they belong to. */
+   (sticky-header tables, the reference-data list pane, the alerts list). The
+   chunky default bar reads as a page-level control and visually cuts a card
+   in half; these sit quietly inside the box they belong to. */
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--color-border-strong) transparent;
@@ -170,15 +282,25 @@ input[type="email"] {
 }
 
 /*
- * Loading shimmer — GPU-composited (transform on a pseudo-element), not
- * `background-position` or SVG SMIL. Both of those force a full repaint on
- * the main thread every animation frame; this is the largest documented
- * performance finding against the source app (Backoffice tab-switch lag was
- * compounded by exactly this class of animation). `transform` and `opacity`
- * are the only properties the compositor can animate without triggering
- * layout/paint, so the shimmer sweep is implemented as a translated
- * gradient overlay instead of a moving background position.
+ * ---------------------------------------------------------------------------
+ * Motion
+ * ---------------------------------------------------------------------------
+ * House rule, and the reason every keyframe below animates only `transform`
+ * or `opacity`: those are the properties the compositor can handle without
+ * asking the main thread to re-run layout or paint. Animating `height`,
+ * `top`, `width` or `background-position` on a repainting element is the
+ * single largest documented performance finding against the source app
+ * (Backoffice tab-switch lag was compounded by exactly that), so it stays
+ * banned here.
+ *
+ * Every animation is one-shot and user-initiated unless noted — nothing loops
+ * except the two loading indicators, which are only mounted while a request
+ * is genuinely in flight.
  */
+
+/* Loading shimmer — a translated gradient overlay, never a
+   `background-position` tween or SVG SMIL, both of which repaint on the main
+   thread every frame. */
 @keyframes shimmer-sweep {
   from {
     transform: translateX(-100%);
@@ -189,12 +311,24 @@ input[type="email"] {
 }
 
 .animate-shimmer-sweep {
-  animation: shimmer-sweep 1.6s ease-in-out infinite;
+  animation: shimmer-sweep 1.5s var(--ease-settle) infinite;
 }
 
-/* Toast enter transition — transform + opacity only, same GPU-compositing
-   reasoning as the shimmer above. */
-@keyframes toast-in {
+/* Indeterminate spinner for in-flight buttons. */
+@keyframes spin-loop {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin-loop {
+  animation: spin-loop 0.6s linear infinite;
+}
+
+/* The workhorse entrance: content fades up a few pixels as it mounts. Used
+   for page bodies, cards and list rows — one motion for "this just arrived",
+   so the app has a single vocabulary instead of a flourish per screen. */
+@keyframes rise-in {
   from {
     transform: translateY(0.5rem);
     opacity: 0;
@@ -205,19 +339,152 @@ input[type="email"] {
   }
 }
 
+.animate-rise-in {
+  animation: rise-in 0.34s var(--ease-settle) both;
+}
+
+/* Route transition. Deliberately shorter and smaller than `rise-in`: a whole
+   page sliding a long way reads as sluggish, because the user is waiting for
+   it before they can act. */
+@keyframes page-in {
+  from {
+    transform: translateY(0.375rem);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-page-in {
+  animation: page-in 0.26s var(--ease-settle) both;
+}
+
+/* Staggered list entrance. The delay is read from a custom property the
+   component sets per row, so the cascade is data-driven rather than a wall of
+   nth-child rules. Capped at ~8 rows' worth at the call sites: past that the
+   last row arrives late enough to feel broken rather than choreographed, and
+   long tables would still be animating after the user starts scrolling. */
+.animate-stagger-in {
+  animation: rise-in 0.36s var(--ease-settle) both;
+  animation-delay: calc(var(--stagger-index, 0) * 40ms);
+}
+
+/* An editorial touch for page titles: the heading resolves from slightly
+   heavier and tighter, which reads as type settling into place rather than
+   as an element flying in. Weight is animated via the variable axis, which
+   costs a repaint of one short line of text — bounded and one-shot. */
+@keyframes title-settle {
+  from {
+    opacity: 0;
+    transform: translateY(0.25rem);
+    letter-spacing: 0.01em;
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    letter-spacing: -0.02em;
+  }
+}
+
+.animate-title-settle {
+  animation: title-settle 0.5s var(--ease-settle) both;
+}
+
+/* Chips, badges and counters that appear in response to an action. The spring
+   easing gives a small overshoot, which is what makes a 3mm element register
+   at all — a linear fade at this size is invisible. */
+@keyframes pop-in {
+  from {
+    transform: scale(0.82);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-pop-in {
+  animation: pop-in 0.24s var(--ease-spring) both;
+}
+
+/* Toast enter. */
+@keyframes toast-in {
+  from {
+    transform: translateY(0.75rem) scale(0.96);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
 .animate-toast-in {
-  animation: toast-in 0.18s ease-out;
+  animation: toast-in 0.28s var(--ease-spring) both;
+}
+
+/* Attention pulse for live status (an open trading day). A ring scales out
+   and fades from a pseudo-element, so the dot itself never moves and nothing
+   around it reflows. */
+@keyframes ping-ring {
+  from {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  to {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
+.animate-ping-ring {
+  animation: ping-ring 2s var(--ease-settle) infinite;
 }
 
 /*
- * Modal entrance. Same compositor-only rule as the two animations above:
- * the dialog scales and fades, the backdrop only fades — neither touches a
- * property that would force layout. Scoped to [open] so it plays when the
- * dialog opens and never on the first paint of a closed one.
+ * Accordion expand/collapse (the customer order screen's family → variety
+ * rows). This is the one place the app animates a layout-affecting property:
+ * `grid-template-rows: 0fr → 1fr` is the only technique that transitions to a
+ * content-derived height without JavaScript measuring it first.
+ *
+ * A deliberate, bounded exception to the rule at the top of this section: one
+ * subtree at a time, only on a click the user made, over 280ms. The banned
+ * case was continuous animation across a whole screen, which this is not. The
+ * alternatives were worse — a hard height snap, or a JS measure/rAF loop that
+ * reads layout every frame on the main thread anyway.
+ */
+.accordion-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition:
+    grid-template-rows 0.28s var(--ease-settle),
+    opacity 0.22s var(--ease-settle);
+  opacity: 0;
+}
+
+.accordion-panel[data-open="true"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+/* The inner wrapper must clip, or the collapsed content still paints and
+   receives clicks at zero height. */
+.accordion-panel > * {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/*
+ * Modal entrance. The dialog scales and fades, the backdrop only fades.
+ * Scoped to [open] so it plays when the dialog opens and never on the first
+ * paint of a closed one.
  */
 @keyframes dialog-in {
   from {
-    transform: translateY(0.75rem) scale(0.98);
+    transform: translateY(1rem) scale(0.97);
     opacity: 0;
   }
   to {
@@ -236,21 +503,22 @@ input[type="email"] {
 }
 
 dialog[open] {
-  animation: dialog-in 0.16s ease-out;
+  animation: dialog-in 0.28s var(--ease-spring);
 }
 
 dialog[open]::backdrop {
-  animation: backdrop-in 0.16s ease-out;
+  animation: backdrop-in 0.24s var(--ease-settle);
   /* Blur behind the modal so a dense table underneath stops competing with
      the dialog's own content for attention. */
-  backdrop-filter: blur(2px);
+  backdrop-filter: blur(4px) saturate(0.85);
 }
 
 /*
  * Respect the OS "reduce motion" setting. Every animation in this file is
- * decorative — the shimmer, the toast slide, the dialog scale — so the
- * honest response is to drop them rather than merely shorten them. The
- * shimmer keeps its static placeholder color; nothing loses meaning.
+ * decorative — the shimmer, the entrances, the dialog scale — so the honest
+ * response is to drop them rather than merely shorten them. Nothing loses
+ * meaning: the shimmer keeps its static placeholder color, and the accordion
+ * still opens and closes, just instantly.
  */
 @media (prefers-reduced-motion: reduce) {
   *,

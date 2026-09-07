@@ -19,11 +19,13 @@ export interface RoleShellProps {
   children: ReactNode;
 }
 
-// The primary action is the one filled-accent control in the shell, so it
-// needs `justify-center` to override NavLink's leading-icon flex alignment
-// and read as a button rather than as another nav row.
-const PRIMARY_ACTION_CLASSES =
-  "justify-center bg-accent font-semibold text-accent-ink shadow-card hover:bg-accent-hover hover:text-accent-ink";
+// The primary action's appearance now lives in NavLink's `primary` variant
+// rather than in an override string appended here. Concatenating utilities
+// onto a component that already sets the same properties only works when the
+// generated stylesheet happens to order them favorably — and it did not: on
+// any screen where this route was not the active one, the idle state's
+// `text-ink-muted` beat the override's `text-accent-ink` and the button
+// rendered muted green on solid green. See NavLink's `variant` comment.
 
 // The single component both Grower Home and Customer Home mount — per the
 // PRD, the two roles see the identical header + floating-sidebar shape;
@@ -41,8 +43,14 @@ export function RoleShell({ navItems, primaryAction, children }: RoleShellProps)
     <div className="flex min-h-dvh flex-col md:flex-row">
       {/* Header and the menu it opens are one sticky unit, so the menu can't
           scroll away from the button that opened it — and on a long order
-          form the alerts bell stays reachable without scrolling back up. */}
-      <div className="sticky top-0 z-30 border-b border-border bg-surface shadow-card md:hidden">
+          form the alerts bell stays reachable without scrolling back up.
+          Translucent + blurred rather than solid: content scrolling beneath
+          stays faintly readable through it, which keeps the page feeling
+          continuous instead of clipped at a hard edge. */}
+      <div
+        data-surface="rail"
+        className="sticky top-0 z-30 bg-surface text-ink shadow-raised md:hidden"
+      >
         {/* Hidden until identity has loaded, matching the source's "no flash
             of header without identity" rule. */}
         <header className="flex items-center justify-between px-4 py-2.5">
@@ -61,7 +69,7 @@ export function RoleShell({ navItems, primaryAction, children }: RoleShellProps)
               aria-label="תפריט"
               aria-expanded={menuOpen}
               onClick={() => setMenuOpen((open) => !open)}
-              className="flex h-9 w-9 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-canvas hover:text-ink"
+              className="flex h-9 w-9 items-center justify-center rounded-md text-ink-muted transition-[background-color,color,transform] duration-200 hover:bg-accent-soft hover:text-accent active:scale-95"
             >
               <Icon name={menuOpen ? "close" : "menu"} />
             </button>
@@ -69,7 +77,7 @@ export function RoleShell({ navItems, primaryAction, children }: RoleShellProps)
         </header>
 
         {menuOpen && (
-          <div className="border-t border-border px-3 py-3">
+          <div className="animate-rise-in border-t border-border px-3 py-3">
             <HamburgerMenuContents
               navItems={navItems}
               primaryAction={primaryAction}
@@ -82,19 +90,23 @@ export function RoleShell({ navItems, primaryAction, children }: RoleShellProps)
       {/* Desktop floating sidebar — replaces the header entirely on wide
           viewports, per the PRD. Pinned to the viewport so it stays put
           while a long list scrolls beside it. */}
-      <aside className="hidden w-64 shrink-0 border-e border-border bg-surface p-4 md:sticky md:top-0 md:flex md:h-dvh md:flex-col md:gap-4">
-        <div className="flex items-center gap-2">
+      <aside
+        // Same dark-rail token switch as BackofficeNav — see globals.css.
+        data-surface="rail"
+        className="hidden w-64 shrink-0 bg-surface p-5 text-ink md:sticky md:top-0 md:flex md:h-dvh md:flex-col md:gap-5"
+      >
+        <div className="flex items-center gap-2.5">
           {/* Letter mark rather than an icon-set glyph — see BackofficeNav. */}
           <span
             aria-hidden
-            className="flex h-7 w-7 select-none items-center justify-center rounded-md bg-accent text-sm font-bold text-accent-ink"
+            className="font-display flex h-9 w-9 select-none items-center justify-center rounded-lg text-lg text-brass ring-1 ring-inset ring-brass/40"
           >
             א
           </span>
-          <p className="text-base font-bold tracking-tight text-ink">אורי והבננות</p>
+          <p className="font-display text-lg text-ink">אורי והבננות</p>
         </div>
 
-        <div className="flex items-center justify-between gap-2 border-y border-border py-3">
+        <div className="flex items-center justify-between gap-2 rounded-lg bg-surface-muted px-3 py-2.5 ring-1 ring-inset ring-border">
           {loading ? (
             <Skeleton className="h-10 w-full" />
           ) : (
@@ -106,9 +118,16 @@ export function RoleShell({ navItems, primaryAction, children }: RoleShellProps)
           <AlertsBell />
         </div>
 
+        {/* `outline` rather than the solid `filled` active state these rows
+            used to have. The shells' primary action is itself a solid green
+            row, and on the customer shell it points at the same route as the
+            first nav item — so with both solid, the sidebar showed two
+            identical green "הזמנה" buttons stacked on top of each other. Only
+            the call to action is solid now; the current page is marked with a
+            soft tint and an edge bar, exactly as in the backoffice rail. */}
         <nav aria-label="ניווט" className="flex flex-col gap-0.5">
           {navItems.map((item) => (
-            <NavLink key={item.href} href={item.href}>
+            <NavLink key={item.href} href={item.href} variant="outline">
               {item.label}
             </NavLink>
           ))}
@@ -118,14 +137,17 @@ export function RoleShell({ navItems, primaryAction, children }: RoleShellProps)
             already exist) is real product logic that lands with the
             grower/customer domain modules — this shell only wires the
             control itself, per this prompt's "no product logic yet" scope. */}
-        <NavLink href={primaryAction.href} className={PRIMARY_ACTION_CLASSES}>
+        <NavLink href={primaryAction.href} variant="primary">
           {primaryAction.label}
         </NavLink>
 
         <SignOutButton className="mt-auto self-start" />
       </aside>
 
-      <main className="flex-1 p-4 md:p-6">{children}</main>
+      {/* More generous than the previous p-6. Space is most of what separates
+          a premium layout from a dense one, and the content column here is
+          rarely wide enough to need the extra pixels for data. */}
+      <main className="min-w-0 flex-1 p-5 md:p-8 lg:p-10">{children}</main>
     </div>
   );
 }
@@ -146,7 +168,7 @@ function IdentityStrip({
     <div className="flex min-w-0 items-center gap-2.5">
       <div
         aria-hidden
-        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent-soft text-sm font-bold text-accent"
+        className="font-display flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent-soft text-base text-accent ring-1 ring-inset ring-accent/25"
       >
         {initial}
       </div>
@@ -169,11 +191,11 @@ function HamburgerMenuContents({
 }) {
   return (
     <div className="flex flex-col gap-1" onClick={onNavigate}>
-      <NavLink href={primaryAction.href} className={PRIMARY_ACTION_CLASSES}>
+      <NavLink href={primaryAction.href} variant="primary">
         {primaryAction.label}
       </NavLink>
       {navItems.map((item) => (
-        <NavLink key={item.href} href={item.href}>
+        <NavLink key={item.href} href={item.href} variant="outline">
           {item.label}
         </NavLink>
       ))}

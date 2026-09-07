@@ -4,15 +4,17 @@ import {
   toSaveProductRpcArgs,
 } from "@ori/domain/reference-data";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { ActionBar } from "@/components/reference-data/action-bar";
 import { FormField, inputClassName } from "@/components/reference-data/form-field";
 import { ListDetailLayout } from "@/components/reference-data/list-detail-layout";
+import { RecordList } from "@/components/reference-data/record-list";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
-import { Skeleton } from "@/components/ui/skeleton";
+import { FormSection, StatusPill } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/components/ui/toast";
 import { createClient } from "@/lib/supabase/client";
 
@@ -165,6 +167,21 @@ export default function ProductsPage() {
 
   const selected = productsQuery.data?.find((row) => row.id === selectedId) ?? null;
 
+  // The variety is the row's identity; its family is context, so it goes on
+  // the second line instead of being joined to the front with an em dash.
+  // That also means the family name no longer eats the width every row needs
+  // for the variety itself.
+  const listItems = useMemo(
+    () =>
+      (productsQuery.data ?? []).map((row) => ({
+        id: row.id,
+        label: row.name,
+        meta: row.product_families?.name ?? null,
+        badge: row.is_seasonal_available ? null : "לא בעונה",
+      })),
+    [productsQuery.data],
+  );
+
   useEffect(() => {
     if (!editing && selected && capsQuery.data) {
       setForm(toFormState(selected, capsQuery.data));
@@ -304,204 +321,234 @@ export default function ProductsPage() {
             <Button type="button" onClick={handleNew} disabled={!familiesQuery.data?.length}>
               מוצר חדש
             </Button>
-            <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-surface shadow-card">
-              {productsQuery.isLoading ? (
-                <div className="space-y-2 p-3">
-                  <Skeleton className="h-10 w-full" />
-                  <Skeleton className="h-10 w-full" />
-                  <Skeleton className="h-10 w-full" />
-                </div>
-              ) : (
-                <ul>
-                  {productsQuery.data?.map((row) => (
-                    <li key={row.id}>
-                      <button
-                        type="button"
-                        onClick={() => handleSelect(row.id)}
-                        className={`block w-full relative border-b border-border px-4 py-2.5 text-start text-sm transition-colors ${
-                          row.id === selectedId
-                            ? "bg-accent-soft font-semibold text-accent before:absolute before:inset-y-0 before:start-0 before:w-[3px] before:bg-accent"
-                            : "hover:bg-canvas"
-                        }`}
-                      >
-                        {row.product_families?.name
-                          ? `${row.product_families.name} — ${row.name}`
-                          : row.name}
-                        {!row.is_seasonal_available && (
-                          <span className="ms-2 text-xs text-ink-muted">(לא בעונה)</span>
-                        )}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+            <RecordList
+              icon="package"
+              items={listItems}
+              selectedId={selectedId}
+              onSelect={handleSelect}
+              loading={productsQuery.isLoading}
+              searchPlaceholder="חיפוש מוצר או זן"
+              emptyLabel="אין מוצרים עדיין."
+            />
           </div>
         }
         detail={
           selectedId === null && !editing ? (
-            <p className="text-sm text-ink-muted">בחר מוצר מהרשימה, או צור מוצר חדש.</p>
+            <EmptyState
+              icon="package"
+              title="לא נבחר מוצר"
+              hint="בחר זן מהרשימה כדי לערוך מחירים, אוברבוקינג ועונתיות, או צור מוצר חדש."
+              action={
+                <Button type="button" onClick={handleNew} disabled={!familiesQuery.data?.length}>
+                  מוצר חדש
+                </Button>
+              }
+            />
           ) : (
-            <div className="flex flex-col gap-4">
-              <FormField label="משפחה" htmlFor="product-family">
-                <select
-                  id="product-family"
-                  disabled={!editing}
-                  className={inputClassName}
-                  value={form.familyId}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, familyId: event.target.value }))
-                  }
+            <div className="flex flex-col gap-6">
+              <div className="flex items-center gap-3.5 border-b border-border pb-5">
+                <span
+                  aria-hidden
+                  className="font-display flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-accent-soft text-xl text-accent ring-1 ring-inset ring-accent/25"
                 >
-                  {familiesQuery.data?.map((family) => (
-                    <option key={family.id} value={family.id}>
-                      {family.name}
-                    </option>
-                  ))}
-                </select>
-              </FormField>
-
-              <FormField label="זן / שם" htmlFor="product-name">
-                <input
-                  id="product-name"
-                  required
-                  disabled={!editing}
-                  className={inputClassName}
-                  value={form.name}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, name: event.target.value }))
-                  }
-                />
-              </FormField>
-
-              <FormField label="גדלים" htmlFor="product-sizes">
-                <input
-                  id="product-sizes"
-                  disabled={!editing}
-                  className={inputClassName}
-                  value={form.sizes}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, sizes: event.target.value }))
-                  }
-                />
-              </FormField>
-
-              <FormField label="סוג אריזה" htmlFor="product-pack-type">
-                <select
-                  id="product-pack-type"
-                  disabled={!editing}
-                  className={inputClassName}
-                  value={form.packType}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      packType: event.target.value as PackType | "",
-                    }))
-                  }
-                >
-                  <option value="">—</option>
-                  <option value="pallets">משטחים</option>
-                  <option value="crates">ארגזים</option>
-                </select>
-              </FormField>
-
-              <div className="grid grid-cols-3 gap-3">
-                <FormField label="מחיר" htmlFor="product-price">
-                  <input
-                    id="product-price"
-                    type="number"
-                    step="0.01"
-                    disabled={!editing}
-                    className={inputClassName}
-                    value={form.price}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, price: event.target.value }))
-                    }
-                  />
-                </FormField>
-                <FormField label="טווח מ-" htmlFor="product-price-from">
-                  <input
-                    id="product-price-from"
-                    type="number"
-                    step="0.01"
-                    disabled={!editing}
-                    className={inputClassName}
-                    value={form.priceRangeFrom}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, priceRangeFrom: event.target.value }))
-                    }
-                  />
-                </FormField>
-                <FormField label="טווח עד" htmlFor="product-price-to">
-                  <input
-                    id="product-price-to"
-                    type="number"
-                    step="0.01"
-                    disabled={!editing}
-                    className={inputClassName}
-                    value={form.priceRangeTo}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, priceRangeTo: event.target.value }))
-                    }
-                  />
-                </FormField>
+                  {form.name.trim().charAt(0) || "+"}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <h2 className="font-display truncate text-xl text-ink">
+                    {form.name || "מוצר חדש"}
+                  </h2>
+                  <p className="mt-0.5 truncate text-sm text-ink-muted">
+                    {familiesQuery.data?.find((family) => family.id === form.familyId)?.name ?? "—"}
+                  </p>
+                </div>
+                <StatusPill tone={form.isSeasonalAvailable ? "accent" : "neutral"} dot>
+                  {form.isSeasonalAvailable ? "בעונה" : "לא בעונה"}
+                </StatusPill>
               </div>
 
-              <FormField label="סוג תמחור" htmlFor="product-price-type">
-                <input
-                  id="product-price-type"
-                  disabled={!editing}
-                  className={inputClassName}
-                  value={form.priceType}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, priceType: event.target.value }))
-                  }
-                />
-              </FormField>
+              <FormSection title="זיהוי" columns={2}>
+                <FormField label="משפחה" htmlFor="product-family">
+                  <select
+                    id="product-family"
+                    disabled={!editing}
+                    className={`${inputClassName} w-full`}
+                    value={form.familyId}
+                    onChange={(event) =>
+                      setForm((current) => ({ ...current, familyId: event.target.value }))
+                    }
+                  >
+                    {familiesQuery.data?.map((family) => (
+                      <option key={family.id} value={family.id}>
+                        {family.name}
+                      </option>
+                    ))}
+                  </select>
+                </FormField>
 
-              <FormField label="חריגת הזמנה מותרת (No Overbooking)" htmlFor="product-overbooking">
-                <input
-                  id="product-overbooking"
-                  type="number"
-                  step="0.01"
-                  disabled={!editing}
-                  className={inputClassName}
-                  value={form.noOverbooking}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, noOverbooking: event.target.value }))
-                  }
-                />
-              </FormField>
+                <FormField label="זן / שם" htmlFor="product-name">
+                  <input
+                    id="product-name"
+                    required
+                    disabled={!editing}
+                    className={`${inputClassName} w-full`}
+                    value={form.name}
+                    onChange={(event) =>
+                      setForm((current) => ({ ...current, name: event.target.value }))
+                    }
+                  />
+                </FormField>
 
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  disabled={!editing}
-                  checked={form.isSeasonalAvailable}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      isSeasonalAvailable: event.target.checked,
-                    }))
-                  }
-                />
-                זמין בעונה הנוכחית
-              </label>
+                <FormField label="גדלים" htmlFor="product-sizes">
+                  <input
+                    id="product-sizes"
+                    disabled={!editing}
+                    className={`${inputClassName} w-full`}
+                    value={form.sizes}
+                    onChange={(event) =>
+                      setForm((current) => ({ ...current, sizes: event.target.value }))
+                    }
+                  />
+                </FormField>
 
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  disabled={!editing}
-                  checked={form.highlightPriceFluctuations}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      highlightPriceFluctuations: event.target.checked,
-                    }))
-                  }
-                />
-                הדגש תנודות מחיר
-              </label>
+                <FormField label="סוג אריזה" htmlFor="product-pack-type">
+                  <select
+                    id="product-pack-type"
+                    disabled={!editing}
+                    className={`${inputClassName} w-full`}
+                    value={form.packType}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        packType: event.target.value as PackType | "",
+                      }))
+                    }
+                  >
+                    <option value="">—</option>
+                    <option value="pallets">משטחים</option>
+                    <option value="crates">ארגזים</option>
+                  </select>
+                </FormField>
+              </FormSection>
+
+              <FormSection
+                title="תמחור"
+                hint="מחיר קבוע, או טווח מ-/עד. השאר ריק את מה שלא רלוונטי."
+              >
+                <div className="grid grid-cols-3 gap-4">
+                  <FormField label="מחיר" htmlFor="product-price">
+                    <input
+                      id="product-price"
+                      type="number"
+                      step="0.01"
+                      disabled={!editing}
+                      className={`${inputClassName} w-full`}
+                      value={form.price}
+                      onChange={(event) =>
+                        setForm((current) => ({ ...current, price: event.target.value }))
+                      }
+                    />
+                  </FormField>
+                  <FormField label="טווח מ-" htmlFor="product-price-from">
+                    <input
+                      id="product-price-from"
+                      type="number"
+                      step="0.01"
+                      disabled={!editing}
+                      className={`${inputClassName} w-full`}
+                      value={form.priceRangeFrom}
+                      onChange={(event) =>
+                        setForm((current) => ({ ...current, priceRangeFrom: event.target.value }))
+                      }
+                    />
+                  </FormField>
+                  <FormField label="טווח עד" htmlFor="product-price-to">
+                    <input
+                      id="product-price-to"
+                      type="number"
+                      step="0.01"
+                      disabled={!editing}
+                      className={`${inputClassName} w-full`}
+                      value={form.priceRangeTo}
+                      onChange={(event) =>
+                        setForm((current) => ({ ...current, priceRangeTo: event.target.value }))
+                      }
+                    />
+                  </FormField>
+                </div>
+
+                <FormField label="סוג תמחור" htmlFor="product-price-type">
+                  <input
+                    id="product-price-type"
+                    disabled={!editing}
+                    className={`${inputClassName} w-full`}
+                    value={form.priceType}
+                    onChange={(event) =>
+                      setForm((current) => ({ ...current, priceType: event.target.value }))
+                    }
+                  />
+                </FormField>
+
+                <label
+                  className={`flex items-start gap-2.5 rounded-lg bg-surface-muted/60 px-3.5 py-3 text-sm ring-1 ring-inset ring-border ${
+                    editing ? "cursor-pointer" : "cursor-default"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    disabled={!editing}
+                    checked={form.highlightPriceFluctuations}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        highlightPriceFluctuations: event.target.checked,
+                      }))
+                    }
+                  />
+                  <span className="font-medium text-ink">הדגש תנודות מחיר</span>
+                </label>
+              </FormSection>
+
+              <FormSection title="זמינות ומלאי">
+                <FormField label="חריגת הזמנה מותרת (No Overbooking)" htmlFor="product-overbooking">
+                  <input
+                    id="product-overbooking"
+                    type="number"
+                    step="0.01"
+                    disabled={!editing}
+                    className={`${inputClassName} w-full`}
+                    value={form.noOverbooking}
+                    onChange={(event) =>
+                      setForm((current) => ({ ...current, noOverbooking: event.target.value }))
+                    }
+                  />
+                </FormField>
+
+                <label
+                  className={`flex items-start gap-2.5 rounded-lg bg-surface-muted/60 px-3.5 py-3 text-sm ring-1 ring-inset ring-border ${
+                    editing ? "cursor-pointer" : "cursor-default"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    disabled={!editing}
+                    checked={form.isSeasonalAvailable}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        isSeasonalAvailable: event.target.checked,
+                      }))
+                    }
+                  />
+                  <span>
+                    <span className="block font-medium text-ink">זמין בעונה הנוכחית</span>
+                    <span className="mt-0.5 block text-xs text-ink-muted">
+                      כשמכובה, הזן לא יופיע בחנות ולא ברשימות הליקוט.
+                    </span>
+                  </span>
+                </label>
+              </FormSection>
 
               <FormField label="תקרת משטחים ללקוח" htmlFor="product-pallet-caps">
                 <div className="flex flex-col gap-2">

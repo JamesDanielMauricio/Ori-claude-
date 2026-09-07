@@ -11,10 +11,11 @@ import { useEffect, useMemo, useState } from "react";
 import { PickLinesEditor } from "@/components/grower/pick-lines-editor";
 import { CheckboxList } from "@/components/reference-data/checkbox-list";
 import { ListDetailLayout } from "@/components/reference-data/list-detail-layout";
+import { RecordList } from "@/components/reference-data/record-list";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
-import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/components/ui/toast";
 import { createClient } from "@/lib/supabase/client";
 
@@ -151,6 +152,22 @@ export default function DistributorAsGrowerPage() {
   const selected = growersQuery.data?.find((row) => row.id === selectedId) ?? null;
   const selectedPick = selectedId ? (pickByGrowerId.get(selectedId) ?? null) : null;
 
+  // Pick status as a trailing pill per grower, so "who still hasn't sent a
+  // pick" is scannable down the list — the question this oversight screen
+  // exists to answer.
+  const listItems = useMemo(
+    () =>
+      (growersQuery.data ?? []).map((row) => {
+        const pick = pickByGrowerId.get(row.id);
+        return {
+          id: row.id,
+          label: row.name,
+          badge: pick ? STATUS_LABEL[pick.status] : "אין ליקוט",
+        };
+      }),
+    [growersQuery.data, pickByGrowerId],
+  );
+
   const saveProductsMutation = useMutation({
     mutationFn: async () => {
       if (!selected) throw new Error("no grower selected");
@@ -244,43 +261,23 @@ export default function DistributorAsGrowerPage() {
           />
         }
         list={
-          <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-surface shadow-card">
-            {growersQuery.isLoading || (openDayId && picksForDayQuery.isLoading) ? (
-              <div className="space-y-2 p-3">
-                <Skeleton className="h-10 w-full" />
-                <Skeleton className="h-10 w-full" />
-                <Skeleton className="h-10 w-full" />
-              </div>
-            ) : (
-              <ul>
-                {growersQuery.data?.map((row) => {
-                  const pick = pickByGrowerId.get(row.id);
-                  return (
-                    <li key={row.id}>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedId(row.id)}
-                        className={`flex w-full items-center justify-between relative border-b border-border px-4 py-2.5 text-start text-sm transition-colors ${
-                          row.id === selectedId
-                            ? "bg-accent-soft font-semibold text-accent before:absolute before:inset-y-0 before:start-0 before:w-[3px] before:bg-accent"
-                            : "hover:bg-canvas"
-                        }`}
-                      >
-                        <span>{row.name}</span>
-                        <span className="text-xs text-ink-muted">
-                          {pick ? STATUS_LABEL[pick.status] : "אין ליקוט"}
-                        </span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
+          <RecordList
+            icon="sprout"
+            items={listItems}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            loading={growersQuery.isLoading || (!!openDayId && picksForDayQuery.isLoading)}
+            searchPlaceholder="חיפוש מגדל"
+            emptyLabel="אין מגדלים פעילים."
+          />
         }
         detail={
           !selected ? (
-            <p className="text-sm text-ink-muted">בחר מגדל מהרשימה.</p>
+            <EmptyState
+              icon="sprout"
+              title="לא נבחר מגדל"
+              hint="בחר מגדל מהרשימה כדי לצפות בליקוט היום שלו, לערוך אותו בשמו או לשלוח תזכורת."
+            />
           ) : (
             <div className="flex flex-col gap-5">
               <div className="flex flex-wrap items-center justify-between gap-3">

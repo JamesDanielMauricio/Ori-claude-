@@ -4,9 +4,10 @@ import { useMemo, useState } from "react";
 
 import { OrderLinesEditor } from "@/components/customer/order-lines-editor";
 import { ListDetailLayout } from "@/components/reference-data/list-detail-layout";
+import { RecordList } from "@/components/reference-data/record-list";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/components/ui/toast";
 import { createClient } from "@/lib/supabase/client";
 
@@ -104,6 +105,22 @@ export default function DistributorAsCustomerPage() {
   }, [ordersForDayQuery.data]);
 
   const selected = customersQuery.data?.find((row) => row.id === selectedId) ?? null;
+
+  // Order status as a trailing pill per customer, so "who still hasn't
+  // ordered" is scannable down the list — which is the question this
+  // oversight screen exists to answer.
+  const listItems = useMemo(
+    () =>
+      (customersQuery.data ?? []).map((row) => {
+        const order = orderByCustomerId.get(row.id);
+        return {
+          id: row.id,
+          label: row.name,
+          badge: order ? STATUS_LABEL[order.status] : "אין הזמנה",
+        };
+      }),
+    [customersQuery.data, orderByCustomerId],
+  );
   const selectedOrder = selectedId ? (orderByCustomerId.get(selectedId) ?? null) : null;
 
   const reminderMutation = useMutation({
@@ -136,45 +153,29 @@ export default function DistributorAsCustomerPage() {
         />
       }
       list={
-        <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-surface shadow-card">
-          {customersQuery.isLoading || (openDayId && ordersForDayQuery.isLoading) ? (
-            <div className="space-y-2 p-3">
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-            </div>
-          ) : (
-            <ul>
-              {customersQuery.data?.map((row) => {
-                const order = orderByCustomerId.get(row.id);
-                return (
-                  <li key={row.id}>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedId(row.id)}
-                      className={`flex w-full items-center justify-between relative border-b border-border px-4 py-2.5 text-start text-sm transition-colors ${
-                        row.id === selectedId
-                          ? "bg-accent-soft font-semibold text-accent before:absolute before:inset-y-0 before:start-0 before:w-[3px] before:bg-accent"
-                          : "hover:bg-canvas"
-                      }`}
-                    >
-                      <span>{row.name}</span>
-                      <span className="text-xs text-ink-muted">
-                        {order ? STATUS_LABEL[order.status] : "אין הזמנה"}
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
+        <RecordList
+          icon="briefcase"
+          items={listItems}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+          loading={customersQuery.isLoading || (!!openDayId && ordersForDayQuery.isLoading)}
+          searchPlaceholder="חיפוש לקוח"
+          emptyLabel="אין לקוחות פעילים."
+        />
       }
       detail={
         !selected ? (
-          <p className="text-sm text-ink-muted">בחר לקוח מהרשימה.</p>
+          <EmptyState
+            icon="briefcase"
+            title="לא נבחר לקוח"
+            hint="בחר לקוח מהרשימה כדי לצפות בהזמנת היום שלו, לערוך אותה בשמו או לשלוח תזכורת."
+          />
         ) : !openDayId ? (
-          <p className="text-sm text-ink-muted">אין יום מסחר פתוח כרגע.</p>
+          <EmptyState
+            icon="clock"
+            title="אין יום מסחר פתוח"
+            hint="פתח יום עסקים בסרגל הצד כדי לנהל הזמנות בשם לקוחות."
+          />
         ) : (
           <div className="flex flex-col gap-5">
             <div className="flex flex-wrap items-center justify-between gap-3">

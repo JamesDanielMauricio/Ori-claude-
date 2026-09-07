@@ -6,10 +6,12 @@ import { ActionBar } from "@/components/reference-data/action-bar";
 import { CheckboxList } from "@/components/reference-data/checkbox-list";
 import { FormField, inputClassName } from "@/components/reference-data/form-field";
 import { ListDetailLayout } from "@/components/reference-data/list-detail-layout";
+import { RecordList } from "@/components/reference-data/record-list";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { PageHeader } from "@/components/ui/page-header";
-import { Skeleton } from "@/components/ui/skeleton";
+import { FormSection, StatusPill } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/components/ui/toast";
 import { createClient } from "@/lib/supabase/client";
 
@@ -130,6 +132,19 @@ export default function GrowersPage() {
 
   const selected = growersQuery.data?.find((row) => row.id === selectedId) ?? null;
 
+  // "לא פעיל" becomes a trailing pill rather than a parenthetical glued to
+  // the name, so an inactive record is scannable down the column instead of
+  // hiding at the end of a line that may already be truncated.
+  const listItems = useMemo(
+    () =>
+      (growersQuery.data ?? []).map((row) => ({
+        id: row.id,
+        label: row.name,
+        badge: row.status === "inactive" ? "לא פעיל" : null,
+      })),
+    [growersQuery.data],
+  );
+
   useEffect(() => {
     if (!editing && selected && selectionQuery.data) {
       setForm(toFormState(selected, selectionQuery.data));
@@ -237,126 +252,143 @@ export default function GrowersPage() {
             <Button type="button" onClick={handleNew}>
               מגדל חדש
             </Button>
-            <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-surface shadow-card">
-              {growersQuery.isLoading ? (
-                <div className="space-y-2 p-3">
-                  <Skeleton className="h-10 w-full" />
-                  <Skeleton className="h-10 w-full" />
-                  <Skeleton className="h-10 w-full" />
-                </div>
-              ) : (
-                <ul>
-                  {growersQuery.data?.map((row) => (
-                    <li key={row.id}>
-                      <button
-                        type="button"
-                        onClick={() => handleSelect(row.id)}
-                        className={`block w-full relative border-b border-border px-4 py-2.5 text-start text-sm transition-colors ${
-                          row.id === selectedId
-                            ? "bg-accent-soft font-semibold text-accent before:absolute before:inset-y-0 before:start-0 before:w-[3px] before:bg-accent"
-                            : "hover:bg-canvas"
-                        }`}
-                      >
-                        {row.name}
-                        {row.status === "inactive" && (
-                          <span className="ms-2 text-xs text-ink-muted">(לא פעיל)</span>
-                        )}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+            <RecordList
+              icon="sprout"
+              items={listItems}
+              selectedId={selectedId}
+              onSelect={handleSelect}
+              loading={growersQuery.isLoading}
+              searchPlaceholder="חיפוש מגדל"
+              emptyLabel="אין מגדלים עדיין."
+            />
           </div>
         }
         detail={
           selectedId === null && !editing ? (
-            <p className="text-sm text-ink-muted">בחר מגדל מהרשימה, או צור מגדל חדש.</p>
+            <EmptyState
+              icon="sprout"
+              title="לא נבחר מגדל"
+              hint="בחר מגדל מהרשימה כדי לערוך את פרטיו, או צור מגדל חדש."
+              action={
+                <Button type="button" onClick={handleNew}>
+                  מגדל חדש
+                </Button>
+              }
+            />
           ) : (
-            <div className="flex flex-col gap-4">
-              <FormField label="שם" htmlFor="grower-name">
-                <input
-                  id="grower-name"
-                  required
-                  disabled={!editing}
-                  className={inputClassName}
-                  value={form.name}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, name: event.target.value }))
-                  }
-                />
-              </FormField>
-
-              <FormField label="סטטוס" htmlFor="grower-status">
-                <select
-                  id="grower-status"
-                  disabled={!editing}
-                  className={inputClassName}
-                  value={form.status}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      status: event.target.value as "active" | "inactive",
-                    }))
-                  }
+            <div className="flex flex-col gap-6">
+              {/* Identity strip, so the pane states which grower is open
+                  rather than making the user read it back out of the first
+                  input. `selectedId` is null while creating a new record, so
+                  the heading falls back to the draft name. */}
+              <div className="flex items-center gap-3.5 border-b border-border pb-5">
+                <span
+                  aria-hidden
+                  className="font-display flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-accent-soft text-xl text-accent ring-1 ring-inset ring-accent/25"
                 >
-                  <option value="active">פעיל</option>
-                  <option value="inactive">לא פעיל</option>
-                </select>
-              </FormField>
+                  {form.name.trim().charAt(0) || "+"}
+                </span>
+                <h2 className="font-display min-w-0 flex-1 truncate text-xl text-ink">
+                  {form.name || "מגדל חדש"}
+                </h2>
+                <StatusPill tone={form.status === "active" ? "accent" : "neutral"} dot>
+                  {form.status === "active" ? "פעיל" : "לא פעיל"}
+                </StatusPill>
+              </div>
 
-              <FormField label="שעת איסוף ברירת מחדל" htmlFor="grower-pickup">
-                <input
-                  id="grower-pickup"
-                  type="time"
-                  disabled={!editing}
-                  className={inputClassName}
-                  value={form.defaultPickupTime}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, defaultPickupTime: event.target.value }))
-                  }
-                />
-              </FormField>
+              <FormSection title="פרטי מגדל" columns={2}>
+                <FormField label="שם" htmlFor="grower-name">
+                  <input
+                    id="grower-name"
+                    required
+                    disabled={!editing}
+                    className={`${inputClassName} w-full`}
+                    value={form.name}
+                    onChange={(event) =>
+                      setForm((current) => ({ ...current, name: event.target.value }))
+                    }
+                  />
+                </FormField>
 
-              <FormField label="קבוצת WhatsApp" htmlFor="grower-whatsapp">
-                <input
-                  id="grower-whatsapp"
-                  disabled={!editing}
-                  className={inputClassName}
-                  value={form.whatsappGroupId}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, whatsappGroupId: event.target.value }))
-                  }
-                />
-              </FormField>
+                <FormField label="סטטוס" htmlFor="grower-status">
+                  <select
+                    id="grower-status"
+                    disabled={!editing}
+                    className={`${inputClassName} w-full`}
+                    value={form.status}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        status: event.target.value as "active" | "inactive",
+                      }))
+                    }
+                  >
+                    <option value="active">פעיל</option>
+                    <option value="inactive">לא פעיל</option>
+                  </select>
+                </FormField>
+              </FormSection>
 
-              <FormField label="מוביל" htmlFor="grower-transporter">
-                <select
-                  id="grower-transporter"
-                  disabled={!editing}
-                  className={inputClassName}
-                  value={form.transporterCompanyId}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, transporterCompanyId: event.target.value }))
-                  }
-                >
-                  <option value="">— ללא —</option>
-                  {transportersQuery.data?.map((transporter) => (
-                    <option key={transporter.id} value={transporter.id}>
-                      {transporter.name}
-                    </option>
-                  ))}
-                </select>
-              </FormField>
+              <FormSection title="לוגיסטיקה ותקשורת" columns={2}>
+                <FormField label="שעת איסוף ברירת מחדל" htmlFor="grower-pickup">
+                  <input
+                    id="grower-pickup"
+                    type="time"
+                    disabled={!editing}
+                    className={`${inputClassName} w-full`}
+                    value={form.defaultPickupTime}
+                    onChange={(event) =>
+                      setForm((current) => ({ ...current, defaultPickupTime: event.target.value }))
+                    }
+                  />
+                </FormField>
 
-              <FormField label="מוצרים בעונה" htmlFor="grower-products">
+                <FormField label="מוביל" htmlFor="grower-transporter">
+                  <select
+                    id="grower-transporter"
+                    disabled={!editing}
+                    className={`${inputClassName} w-full`}
+                    value={form.transporterCompanyId}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        transporterCompanyId: event.target.value,
+                      }))
+                    }
+                  >
+                    <option value="">— ללא —</option>
+                    {transportersQuery.data?.map((transporter) => (
+                      <option key={transporter.id} value={transporter.id}>
+                        {transporter.name}
+                      </option>
+                    ))}
+                  </select>
+                </FormField>
+
+                <FormField label="קבוצת WhatsApp" htmlFor="grower-whatsapp">
+                  <input
+                    id="grower-whatsapp"
+                    disabled={!editing}
+                    className={`${inputClassName} w-full`}
+                    value={form.whatsappGroupId}
+                    onChange={(event) =>
+                      setForm((current) => ({ ...current, whatsappGroupId: event.target.value }))
+                    }
+                  />
+                </FormField>
+              </FormSection>
+
+              <FormSection
+                title="מוצרים בעונה"
+                hint="הזנים שהמגדל הזה מספק כרגע. רק הם ייכללו ברשימת הליקוט היומית שלו."
+              >
                 <CheckboxList
                   options={catalogOptions}
                   selectedIds={form.productVarietyIds}
                   onToggle={toggleProduct}
                   disabled={!editing}
                 />
-              </FormField>
+              </FormSection>
 
               <ActionBar
                 editing={editing}

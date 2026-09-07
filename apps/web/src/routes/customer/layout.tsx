@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { Outlet } from "react-router-dom";
 
+import { PageTransition } from "@/components/shell/page-transition";
 import { RoleShell } from "@/components/shell/role-shell";
 
 const CUSTOMER_NAV = [
@@ -15,7 +16,9 @@ export default function CustomerLayout() {
     <RoleShell navItems={CUSTOMER_NAV} primaryAction={{ href: "/customer/order", label: "הזמנה" }}>
       {/* Inside the shell, so switching screens keeps the sidebar mounted. */}
       <Suspense fallback={null}>
-        <Outlet />
+        <PageTransition>
+          <Outlet />
+        </PageTransition>
       </Suspense>
     </RoleShell>
   );

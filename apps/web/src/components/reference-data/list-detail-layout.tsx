@@ -22,11 +22,19 @@ export function ListDetailLayout({
   detail: ReactNode;
 }) {
   return (
-    <div className="flex h-full min-h-0 flex-col md:h-[calc(100dvh-3rem)]">
+    // The subtracted value must track the main area's vertical padding in the
+    // route layouts (md:p-8 = 4rem total, lg:p-10 = 5rem). If those change,
+    // change these with them or the list pane overflows the viewport.
+    <div className="flex h-full min-h-0 flex-col md:h-[calc(100dvh-4rem)] lg:h-[calc(100dvh-5rem)]">
       {header && <div className="shrink-0">{header}</div>}
       <div className="flex min-h-0 flex-1 flex-col gap-4 md:flex-row">
         <div className="flex min-h-0 w-full flex-col md:w-80 md:shrink-0">{list}</div>
-        <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-surface p-5 shadow-card">
+        {/* The detail pane is the screen's focus — it's where every edit
+            happens — so it carries the heavier of the two elevations. The
+            list beside it keeps whatever its own screen gives it, and the
+            difference in depth is what tells the eye which side is the
+            subject and which is the index. */}
+        <div className="animate-rise-in min-h-0 flex-1 overflow-y-auto rounded-xl bg-surface p-6 shadow-raised ring-1 ring-inset ring-border/70">
           {detail}
         </div>
       </div>

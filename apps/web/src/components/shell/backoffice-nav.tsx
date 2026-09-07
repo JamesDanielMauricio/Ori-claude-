@@ -43,7 +43,13 @@ const SYSTEM_NAV: Array<{ href: string; label: string; icon: IconName }> = [
 function BackofficeNavLink({ href, label, icon }: { href: string; label: string; icon: IconName }) {
   return (
     <NavLink href={href} variant="outline">
-      <Icon name={icon} className="h-[18px] w-[18px] shrink-0" />
+      {/* The icon scales up a hair on hover. It's a 2px change on an 18px
+          glyph — not readable as movement, but enough that the row feels
+          responsive under the pointer rather than merely tinted. */}
+      <Icon
+        name={icon}
+        className="h-[18px] w-[18px] shrink-0 transition-transform duration-200 group-hover:scale-110"
+      />
       <span className="truncate">{label}</span>
     </NavLink>
   );
@@ -63,22 +69,34 @@ export function BackofficeNav() {
     // height and its own middle section is what scrolls.
     <nav
       aria-label="ניווט מערכת"
-      className="sticky top-0 flex h-dvh w-64 shrink-0 flex-col border-e border-border bg-surface"
+      // `data-surface="rail"` re-points the color tokens to the dark palette
+      // for this whole subtree (see globals.css). Everything below — the day
+      // panel's buttons, the alerts bell, sign-out, the nav rows — picks that
+      // up without knowing anything about it.
+      data-surface="rail"
+      className="sticky top-0 flex h-dvh w-64 shrink-0 flex-col bg-surface text-ink"
     >
-      <div className="border-b border-border px-4 py-4">
-        <div className="mb-3 flex items-center gap-2">
+      <div className="px-5 pb-4 pt-5">
+        <div className="mb-4 flex items-center gap-2.5">
           {/* A letter mark, not a glyph from the icon set: every icon in that
               set is spoken for by a nav row, and reusing one for the brand
-              made the logo read as a twelfth destination. */}
+              made the logo read as a twelfth destination. Set in the display
+              serif and outlined in brass rather than filled in accent green —
+              on the dark rail a solid green chip competed with the active nav
+              row, which is the one thing here that should be green. */}
           <span
             aria-hidden
-            className="flex h-7 w-7 select-none items-center justify-center rounded-md bg-accent text-sm font-bold text-accent-ink"
+            className="font-display flex h-9 w-9 select-none items-center justify-center rounded-lg text-lg text-brass ring-1 ring-inset ring-brass/40"
           >
             א
           </span>
-          <p className="text-base font-bold tracking-tight text-ink">אורי והבננות</p>
+          <p className="font-display text-lg text-ink">אורי והבננות</p>
         </div>
-        <div className="flex items-center justify-between gap-2">
+        {/* The identity block is boxed rather than bare, so "who am I signed
+            in as" reads as a distinct object from the brand above it and the
+            day controls below — three unrelated things that were previously
+            three undifferentiated rows of text. */}
+        <div className="flex items-center justify-between gap-2 rounded-lg bg-surface-muted px-3 py-2.5 ring-1 ring-inset ring-border">
           {loading ? (
             <Skeleton className="h-10 w-full" />
           ) : (
@@ -95,7 +113,7 @@ export function BackofficeNav() {
 
       <BusinessDayPanel />
 
-      <div className="flex-1 space-y-5 overflow-y-auto px-2 py-3">
+      <div className="flex-1 space-y-6 overflow-y-auto px-3 py-4">
         <ul className="space-y-0.5">
           {OPERATIONAL_NAV.map((item) => (
             <li key={item.href}>
@@ -105,8 +123,12 @@ export function BackofficeNav() {
         </ul>
 
         <div>
-          <p className="px-3 pb-1.5 text-[11px] font-semibold tracking-wide text-ink-subtle">
-            ניהול מערכת
+          {/* The group label gets a hairline rule trailing off to the inline
+              end, so it separates the two nav groups on its own instead of
+              needing a full divider row above it. */}
+          <p className="mb-2 flex items-center gap-2.5 px-3 text-[11px] font-semibold tracking-[0.08em] text-ink-subtle">
+            <span className="shrink-0">ניהול מערכת</span>
+            <span aria-hidden className="h-px flex-1 bg-border" />
           </p>
           <ul className="space-y-0.5">
             {SYSTEM_NAV.map((item) => (
@@ -118,7 +140,7 @@ export function BackofficeNav() {
         </div>
       </div>
 
-      <div className="border-t border-border px-4 py-3">
+      <div className="border-t border-border px-5 py-4">
         <SignOutButton variant="solid" />
       </div>
     </nav>

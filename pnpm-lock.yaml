@@ -78,6 +78,9 @@ importers:
       '@fontsource-variable/assistant':
         specifier: ^5.3.0
         version: 5.3.0
+      '@fontsource-variable/frank-ruhl-libre':
+        specifier: ^5.3.0
+        version: 5.3.0
       '@ori/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -981,6 +984,9 @@ packages:
 
   '@fontsource-variable/assistant@5.3.0':
     resolution: {integrity: sha512-rH3USV32Zb1TmyFIkuvJfL/ySKWgDAxEDsso5fY5Pnsgg8rzKk3TSNWiCZllFrDwRiJjEgUgMlaoR+PsYdAnZA==}
+
+  '@fontsource-variable/frank-ruhl-libre@5.3.0':
+    resolution: {integrity: sha512-BgE4pEPDSXfg7741yQYdxB7XShRgdMTYoP4sdoRXfo0FCDWlQdDUm+o1xPcISC8+TTmC6ytvq+u/QmnpQ+EhpQ==}
 
   '@humanfs/core@0.19.2':
     resolution: {integrity: sha512-UhXNm+CFMWcbChXywFwkmhqjs3PRCmcSa/hfBgLIb7oQ5HNb1wS0icWsGtSAUNgefHeI+eBrA8I1fxmbHsGdvA==}
@@ -3751,6 +3757,8 @@ snapshots:
       ipaddr.js: 2.4.0
 
   '@fontsource-variable/assistant@5.3.0': {}
+
+  '@fontsource-variable/frank-ruhl-libre@5.3.0': {}
 
   '@humanfs/core@0.19.2':
     dependencies:

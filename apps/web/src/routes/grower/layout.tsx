@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { Outlet } from "react-router-dom";
 
+import { PageTransition } from "@/components/shell/page-transition";
 import { RoleShell } from "@/components/shell/role-shell";
 
 const GROWER_NAV = [
@@ -15,7 +16,9 @@ export default function GrowerLayout() {
     <RoleShell navItems={GROWER_NAV} primaryAction={{ href: "/grower/picks", label: "עדכון" }}>
       {/* Inside the shell, so switching screens keeps the sidebar mounted. */}
       <Suspense fallback={null}>
-        <Outlet />
+        <PageTransition>
+          <Outlet />
+        </PageTransition>
       </Suspense>
     </RoleShell>
   );

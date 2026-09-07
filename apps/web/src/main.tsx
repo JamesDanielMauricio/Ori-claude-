@@ -10,6 +10,11 @@ import { Providers } from "./lib/providers";
 // family in --font-sans; this is what actually loads the woff2 files.
 // Imported before globals.css so the @font-face rules are registered first.
 import "@fontsource-variable/assistant";
+// Frank Ruhl Libre — the Hebrew serif used for page titles only
+// (--font-display). Each fontsource package declares its subsets as separate
+// @font-face rules with `unicode-range`, so a Hebrew page downloads only the
+// Hebrew file; importing the package root costs nothing extra at runtime.
+import "@fontsource-variable/frank-ruhl-libre";
 import "./globals.css";
 
 // The browser entry point. Provider order matches what app/layout.tsx had:

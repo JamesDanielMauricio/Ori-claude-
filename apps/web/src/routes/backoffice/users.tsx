@@ -8,10 +8,12 @@ import { ActionBar } from "@/components/reference-data/action-bar";
 import { CheckboxList } from "@/components/reference-data/checkbox-list";
 import { FormField, inputClassName } from "@/components/reference-data/form-field";
 import { ListDetailLayout } from "@/components/reference-data/list-detail-layout";
+import { RecordList } from "@/components/reference-data/record-list";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
+import { FormSection, StatusPill } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
-import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/components/ui/toast";
 import { createClient } from "@/lib/supabase/client";
 import { trpc } from "@/lib/trpc-client";
@@ -23,6 +25,14 @@ interface ProfileRow {
   company_id: string;
   companies: { name: string } | null;
 }
+
+// One place for the role wording, so the list pill and the <select> below
+// can never drift apart.
+const ROLE_LABEL: Record<UserRole, string> = {
+  backoffice: "משרד אחורי",
+  grower: "מגדל",
+  customer: "לקוח",
+};
 
 interface FormState {
   displayName: string;
@@ -114,6 +124,20 @@ export default function UsersPage() {
       setForm(toFormState(selected, blockedQuery.data));
     }
   }, [selected, blockedQuery.data, editing]);
+
+  // Company on its own second line and the role as a trailing pill, rather
+  // than everything concatenated into the primary label — that is what
+  // rendered rows as "Customer 01(Customer 01)".
+  const listItems = useMemo(
+    () =>
+      (usersQuery.data ?? []).map((row) => ({
+        id: row.user_id,
+        label: row.display_name,
+        meta: row.companies?.name ?? null,
+        badge: ROLE_LABEL[row.role],
+      })),
+    [usersQuery.data],
+  );
 
   const catalogOptions = useMemo(
     () =>
@@ -214,102 +238,116 @@ export default function UsersPage() {
                 </Button>
               </Link>
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-surface shadow-card">
-              {usersQuery.isLoading ? (
-                <div className="space-y-2 p-3">
-                  <Skeleton className="h-10 w-full" />
-                  <Skeleton className="h-10 w-full" />
-                  <Skeleton className="h-10 w-full" />
-                </div>
-              ) : (
-                <ul>
-                  {usersQuery.data?.map((row) => (
-                    <li key={row.user_id}>
-                      <button
-                        type="button"
-                        onClick={() => handleSelect(row.user_id)}
-                        className={`block w-full relative border-b border-border px-4 py-2.5 text-start text-sm transition-colors ${
-                          row.user_id === selectedId
-                            ? "bg-accent-soft font-semibold text-accent before:absolute before:inset-y-0 before:start-0 before:w-[3px] before:bg-accent"
-                            : "hover:bg-canvas"
-                        }`}
-                      >
-                        {row.display_name}
-                        {row.companies?.name && (
-                          <span className="ms-2 text-xs text-ink-muted">
-                            ({row.companies.name})
-                          </span>
-                        )}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+            <RecordList
+              icon="user"
+              items={listItems}
+              selectedId={selectedId}
+              onSelect={handleSelect}
+              loading={usersQuery.isLoading}
+              searchPlaceholder="חיפוש משתמש"
+              emptyLabel="אין משתמשים עדיין."
+            />
           </div>
         }
         detail={
           !selectedId || !form ? (
-            <p className="text-sm text-ink-muted">בחר משתמש מהרשימה.</p>
+            <EmptyState
+              icon="user"
+              title="לא נבחר משתמש"
+              hint="בחר חשבון מהרשימה כדי לערוך את שם התצוגה, התפקיד, השיוך לחברה והמוצרים החסומים שלו."
+            />
           ) : (
-            <div className="flex flex-col gap-4">
-              <FormField label="שם תצוגה" htmlFor="user-display-name">
-                <input
-                  id="user-display-name"
-                  required
-                  disabled={!editing}
-                  className={inputClassName}
-                  value={form.displayName}
-                  onChange={(event) =>
-                    setForm((current) => current && { ...current, displayName: event.target.value })
-                  }
-                />
-              </FormField>
-
-              <FormField label="תפקיד" htmlFor="user-role">
-                <select
-                  id="user-role"
-                  disabled={!editing}
-                  className={inputClassName}
-                  value={form.role}
-                  onChange={(event) =>
-                    setForm(
-                      (current) => current && { ...current, role: event.target.value as UserRole },
-                    )
-                  }
+            <div className="flex flex-col gap-6">
+              {/* The record's own identity above the form, so the pane says
+                  whose account is open without the user having to read it
+                  back out of the first input. */}
+              <div className="flex items-center gap-3.5 border-b border-border pb-5">
+                <span
+                  aria-hidden
+                  className="font-display flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-accent-soft text-xl text-accent ring-1 ring-inset ring-accent/25"
                 >
-                  <option value="backoffice">משרד אחורי</option>
-                  <option value="grower">מגדל</option>
-                  <option value="customer">לקוח</option>
-                </select>
-              </FormField>
+                  {form.displayName.trim().charAt(0)}
+                </span>
+                <div className="min-w-0">
+                  <h2 className="font-display truncate text-xl text-ink">
+                    {form.displayName || "—"}
+                  </h2>
+                  <p className="mt-0.5 truncate text-sm text-ink-muted">
+                    {selected?.companies?.name ?? "—"}
+                  </p>
+                </div>
+                <span className="ms-auto shrink-0">
+                  <StatusPill tone="neutral">{ROLE_LABEL[form.role]}</StatusPill>
+                </span>
+              </div>
 
-              <FormField label="חברה" htmlFor="user-company">
-                <select
-                  id="user-company"
-                  disabled={!editing}
-                  className={inputClassName}
-                  value={form.companyId}
-                  onChange={(event) =>
-                    setForm((current) => current && { ...current, companyId: event.target.value })
-                  }
-                >
-                  {companiesQuery.data?.map((company) => (
-                    <option key={company.id} value={company.id}>
-                      {company.name}
-                    </option>
-                  ))}
-                </select>
-              </FormField>
+              <FormSection title="פרטי חשבון" columns={2}>
+                <FormField label="שם תצוגה" htmlFor="user-display-name">
+                  <input
+                    id="user-display-name"
+                    required
+                    disabled={!editing}
+                    className={`${inputClassName} w-full`}
+                    value={form.displayName}
+                    onChange={(event) =>
+                      setForm(
+                        (current) => current && { ...current, displayName: event.target.value },
+                      )
+                    }
+                  />
+                </FormField>
 
-              <FormField label="מוצרים חסומים בתצוגת החנות" htmlFor="user-blocked-products">
+                <FormField label="תפקיד" htmlFor="user-role">
+                  <select
+                    id="user-role"
+                    disabled={!editing}
+                    className={`${inputClassName} w-full`}
+                    value={form.role}
+                    onChange={(event) =>
+                      setForm(
+                        (current) =>
+                          current && { ...current, role: event.target.value as UserRole },
+                      )
+                    }
+                  >
+                    {(Object.keys(ROLE_LABEL) as UserRole[]).map((role) => (
+                      <option key={role} value={role}>
+                        {ROLE_LABEL[role]}
+                      </option>
+                    ))}
+                  </select>
+                </FormField>
+
+                <FormField label="חברה" htmlFor="user-company">
+                  <select
+                    id="user-company"
+                    disabled={!editing}
+                    className={`${inputClassName} w-full`}
+                    value={form.companyId}
+                    onChange={(event) =>
+                      setForm((current) => current && { ...current, companyId: event.target.value })
+                    }
+                  >
+                    {companiesQuery.data?.map((company) => (
+                      <option key={company.id} value={company.id}>
+                        {company.name}
+                      </option>
+                    ))}
+                  </select>
+                </FormField>
+              </FormSection>
+
+              <FormSection
+                title="מוצרים חסומים"
+                hint="מוצרים שסומנו כאן לא יופיעו כלל בחנות של המשתמש הזה."
+              >
                 <CheckboxList
                   options={catalogOptions}
                   selectedIds={form.blockedProductVarietyIds}
                   onToggle={toggleBlocked}
                   disabled={!editing}
                 />
-              </FormField>
+              </FormSection>
 
               <ActionBar
                 editing={editing}

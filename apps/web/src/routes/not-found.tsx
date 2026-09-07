@@ -1,15 +1,37 @@
+import { Link } from "react-router-dom";
+
 // Styled with the app's own tokens rather than the inline `style` block it
 // had before — a 404 is still a screen of this product, and an unstyled one
-// reads as a crash rather than as a wrong address. Content is unchanged:
-// the source's 404 is a single text element with no navigation on it
-// (reference/prd/pages/404.md), so this doesn't add a link it never had.
+// reads as a crash rather than as a wrong address.
+//
+// The source's 404 is a single text element with no navigation on it
+// (reference/prd/pages/404.md). The link back to "/" added here is not a
+// content change of substance: "/" is HomeRedirect, which sends each role to
+// its own landing screen, so this is the same dead end with a way out of it.
+// A 404 with no exit is the one place a user can get genuinely stuck.
 export default function NotFound() {
   return (
-    <div className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-canvas px-4 text-center">
-      <p aria-hidden className="text-6xl font-bold tracking-tight text-accent-soft">
+    <main className="relative flex min-h-dvh flex-col items-center justify-center overflow-hidden bg-canvas px-4 text-center">
+      {/* The numeral is set in the display serif at a size where it reads as
+          a graphic rather than as text, in the faintest ink on the page —
+          present enough to explain what happened, quiet enough that the
+          sentence under it is what you actually read. */}
+      <p
+        aria-hidden
+        className="font-display pointer-events-none select-none text-[9rem] leading-none text-border-strong/70 sm:text-[12rem]"
+      >
         404
       </p>
-      <p className="text-lg font-semibold text-ink">הדף לא נמצא.</p>
-    </div>
+      <h1 className="font-display -mt-4 text-2xl text-ink">הדף לא נמצא.</h1>
+      <p className="mt-2 max-w-xs text-sm leading-relaxed text-ink-muted">
+        ייתכן שהכתובת שגויה, או שהדף הוסר.
+      </p>
+      <Link
+        to="/"
+        className="mt-7 inline-flex h-10 items-center justify-center rounded-md bg-accent px-5 text-sm font-semibold text-accent-ink shadow-accent transition-colors duration-200 hover:bg-accent-hover"
+      >
+        חזרה לדף הבית
+      </Link>
+    </main>
   );
 }

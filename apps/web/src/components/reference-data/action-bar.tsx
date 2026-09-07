@@ -27,10 +27,27 @@ export function ActionBar({
   extra?: ReactNode | undefined;
 }) {
   return (
-    <div className="mt-1 flex flex-wrap items-center gap-2 border-t border-border pt-4">
+    // Keyed on `editing` so React remounts the row when the mode flips, which
+    // is what lets the entrance animation replay. Without the key the two sets
+    // of buttons swap in place with no transition and the mode change is easy
+    // to miss — which matters here, because "am I editing?" is exactly the
+    // question this bar exists to answer.
+    <div
+      key={editing ? "editing" : "idle"}
+      className="animate-rise-in mt-1 flex flex-wrap items-center gap-2 border-t border-border pt-4"
+    >
       {editing ? (
         <>
           <Button type="button" onClick={onSave} disabled={saving}>
+            {/* A spinning ring during the save, not just the word "שומר…".
+                The text alone changes by two characters and is easy to miss;
+                a moving element is unambiguous proof the click registered. */}
+            {saving && (
+              <span
+                aria-hidden
+                className="animate-spin-loop h-3.5 w-3.5 rounded-full border-2 border-current border-t-transparent"
+              />
+            )}
             {saving ? "שומר…" : "שמור"}
           </Button>
           <Button type="button" variant="secondary" onClick={onDiscard} disabled={saving}>

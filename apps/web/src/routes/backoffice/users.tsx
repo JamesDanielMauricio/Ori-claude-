@@ -1,21 +1,21 @@
 import { saveUserInputSchema, toSaveUserRpcArgs } from "@ori/domain/reference-data";
 import type { UserRole } from "@ori/shared/roles";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
-import { ActionBar } from "@/components/reference-data/action-bar";
-import { CheckboxList } from "@/components/reference-data/checkbox-list";
-import { FormField, inputClassName } from "@/components/reference-data/form-field";
-import { ListDetailLayout } from "@/components/reference-data/list-detail-layout";
-import { RecordList } from "@/components/reference-data/record-list";
+import { CellChipList } from "@/components/reference-data/cell-popover";
+import { inputClassName } from "@/components/reference-data/form-field";
+import { ProductMultiSelectCell } from "@/components/reference-data/product-multi-select-cell";
+import { RecordTable, type RecordTableColumn } from "@/components/reference-data/record-table";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
-import { FormSection, StatusPill } from "@/components/ui/card";
+import { StatusPill } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
-import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/components/ui/toast";
+import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { hasChanges } from "@/lib/has-changes";
+import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
 import { trpc } from "@/lib/trpc-client";
 
@@ -24,21 +24,38 @@ interface ProfileRow {
   display_name: string;
   role: UserRole;
   company_id: string;
+  // Optional editable field (reference/prd/edit-profile.md) and the source
+  // of the individual-WhatsApp-dispatch batch when a company has no
+  // whatsapp_group_id set — see profile.ts's schema comment. Not part of
+  // `save_user`'s RPC signature (packages/db/migrations/0007), so saving it
+  // is a plain `.update()` against `profiles` — already permitted by the
+  // "profiles_update_backoffice" RLS policy (packages/db/migrations/0006),
+  // no new function or migration required.
+  phone_number: string | null;
+  // True while the account is still on an admin-issued temporary password
+  // (the PRD's "Temp Pass" state) — cleared by the client the moment the
+  // user sets their own. Read-only here: it's set by the import/reset
+  // flows, not something to toggle by hand.
+  must_change_password: boolean;
+  created_at: string;
   companies: { name: string } | null;
 }
 
-// One place for the role wording, so the list pill and the <select> below
-// can never drift apart.
+// One place for the role wording, so the table's badge and the <select>
+// below can never drift apart.
 const ROLE_LABEL: Record<UserRole, string> = {
   backoffice: "משרד אחורי",
   grower: "מגדל",
   customer: "לקוח",
 };
 
+const CREATED_AT_FORMAT = new Intl.DateTimeFormat("he-IL", { dateStyle: "short" });
+
 interface FormState {
   displayName: string;
   role: UserRole;
   companyId: string;
+  phoneNumber: string;
   blockedProductVarietyIds: Set<string>;
 }
 
@@ -47,6 +64,7 @@ function toFormState(row: ProfileRow, blocked: string[]): FormState {
     displayName: row.display_name,
     role: row.role,
     companyId: row.company_id,
+    phoneNumber: row.phone_number ?? "",
     blockedProductVarietyIds: new Set(blocked),
   };
 }
@@ -63,21 +81,55 @@ export default function UsersPage() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
+  // Which row (by user_id) is being edited inline right now — this screen
+  // has no "new record" draft (see the header comment), so this is always
+  // either an existing user's id or null.
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
   const [saving, setSaving] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+
+  const usersQueryKey = ["reference-data", "users"] as const;
+  const blockedQueryKey = ["reference-data", "blocked-products-all"] as const;
 
   const usersQuery = useQuery({
-    queryKey: ["reference-data", "users"],
+    queryKey: usersQueryKey,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("profiles")
-        .select("user_id, display_name, role, company_id, companies(name)")
+        .select(
+          "user_id, display_name, role, company_id, phone_number, must_change_password, created_at, companies(name)",
+        )
         .order("display_name");
       if (error) throw error;
       return data as unknown as ProfileRow[];
+    },
+  });
+
+  // Login emails live in `auth.users`, which PostgREST doesn't expose — so
+  // they come from the API's service-role endpoint and get joined onto the
+  // profiles rows by id here. See apps/api/src/routers/auth.ts.
+  const emailsQuery = trpc.auth.listUserEmails.useQuery();
+
+  // Every user's blocked-product selection in ONE read, grouped
+  // client-side — same reasoning as growers.tsx's identical bulk read: the
+  // blacklist is a column now, so every visible row needs its own value.
+  const blockedQuery = useQuery({
+    queryKey: blockedQueryKey,
+    queryFn: async () => {
+      const rows = await fetchAllRows<{ user_id: string; product_variety_id: string }>((from, to) =>
+        supabase
+          .from("profile_blocked_products")
+          .select("user_id, product_variety_id")
+          .range(from, to),
+      );
+      const byUser = new Map<string, string[]>();
+      for (const row of rows) {
+        const list = byUser.get(row.user_id);
+        if (list) list.push(row.product_variety_id);
+        else byUser.set(row.user_id, [row.product_variety_id]);
+      }
+      return byUser;
     },
   });
 
@@ -105,41 +157,6 @@ export default function UsersPage() {
     },
   });
 
-  const blockedQuery = useQuery({
-    queryKey: ["reference-data", "blocked-products", selectedId],
-    enabled: !!selectedId,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("profile_blocked_products")
-        .select("product_variety_id")
-        .eq("user_id", selectedId!);
-      if (error) throw error;
-      return data.map((row) => row.product_variety_id);
-    },
-  });
-
-  const selected = usersQuery.data?.find((row) => row.user_id === selectedId) ?? null;
-
-  useEffect(() => {
-    if (!editing && selected && blockedQuery.data) {
-      setForm(toFormState(selected, blockedQuery.data));
-    }
-  }, [selected, blockedQuery.data, editing]);
-
-  // Company on its own second line and the role as a trailing pill, rather
-  // than everything concatenated into the primary label — that is what
-  // rendered rows as "Customer 01(Customer 01)".
-  const listItems = useMemo(
-    () =>
-      (usersQuery.data ?? []).map((row) => ({
-        id: row.user_id,
-        label: row.display_name,
-        meta: row.companies?.name ?? null,
-        badge: ROLE_LABEL[row.role],
-      })),
-    [usersQuery.data],
-  );
-
   const catalogOptions = useMemo(
     () =>
       (catalogQuery.data ?? []).map((product) => ({
@@ -150,12 +167,49 @@ export default function UsersPage() {
       })),
     [catalogQuery.data],
   );
+  const varietyLabelById = useMemo(
+    () => new Map(catalogOptions.map((option) => [option.id, option.label])),
+    [catalogOptions],
+  );
+
+  const selected = usersQuery.data?.find((row) => row.user_id === editingId) ?? null;
+  const deleteTarget = usersQuery.data?.find((row) => row.user_id === deleteTargetId) ?? null;
+
+  const saveOptimistic = optimisticUpdate<ProfileRow[], void>(
+    queryClient,
+    usersQueryKey,
+    (rows) =>
+      rows?.map((row) =>
+        row.user_id === editingId && form
+          ? {
+              ...row,
+              display_name: form.displayName,
+              role: form.role,
+              company_id: form.companyId,
+              phone_number: form.phoneNumber || null,
+            }
+          : row,
+      ),
+  );
+
+  // The blacklist is its own query, so it needs its own optimistic patch —
+  // see growers.tsx's identical pairing.
+  const saveBlockedOptimistic = optimisticUpdate<Map<string, string[]>, void>(
+    queryClient,
+    blockedQueryKey,
+    (byUser) => {
+      if (!byUser || !editingId || !form) return byUser;
+      const next = new Map(byUser);
+      next.set(editingId, [...form.blockedProductVarietyIds]);
+      return next;
+    },
+  );
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      if (!selectedId || !form) throw new Error("No user selected");
+      if (!editingId || !form) throw new Error("No user selected");
       const input = saveUserInputSchema.parse({
-        userId: selectedId,
+        userId: editingId,
         displayName: form.displayName,
         role: form.role,
         companyId: form.companyId,
@@ -163,58 +217,79 @@ export default function UsersPage() {
       });
       const { data, error } = await supabase.rpc("save_user", toSaveUserRpcArgs(input));
       if (error) throw error;
+      // Phone number isn't part of save_user's RPC signature — a plain
+      // update, covered by the same "profiles_update_backoffice" RLS policy
+      // that lets this screen edit another user's role/company at all.
+      const { error: phoneError } = await supabase
+        .from("profiles")
+        .update({ phone_number: form.phoneNumber || null })
+        .eq("user_id", editingId);
+      if (phoneError) throw phoneError;
       return data as { user_id: string };
     },
-    onSuccess: (row) => {
-      showToast("הנתונים נשמרו.", "success");
-      setEditing(false);
-      void queryClient.invalidateQueries({ queryKey: ["reference-data", "users"] });
-      void queryClient.invalidateQueries({
-        queryKey: ["reference-data", "blocked-products", row.user_id],
-      });
+    onMutate: async (variables) => {
+      const rows = await saveOptimistic.onMutate(variables);
+      const blocked = await saveBlockedOptimistic.onMutate(variables);
+      return { rows, blocked };
     },
-    onError: (error: { message?: string }) => {
+    onSuccess: () => {
+      showToast("הנתונים נשמרו.", "success");
+      setEditingId(null);
+      setForm(null);
+      void queryClient.invalidateQueries({ queryKey: usersQueryKey });
+      void queryClient.invalidateQueries({ queryKey: blockedQueryKey });
+    },
+    onError: (
+      error: { message?: string },
+      variables,
+      context:
+        | {
+            rows: { previous: ProfileRow[] | undefined } | undefined;
+            blocked: { previous: Map<string, string[]> | undefined } | undefined;
+          }
+        | undefined,
+    ) => {
+      saveOptimistic.onError(error, variables, context?.rows);
+      saveBlockedOptimistic.onError(error, variables, context?.blocked);
       showToast(`השמירה נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
     },
   });
 
+  const deleteOptimistic = optimisticUpdate<ProfileRow[], { targetUserId: string }>(
+    queryClient,
+    usersQueryKey,
+    (rows, variables) => rows?.filter((row) => row.user_id !== variables.targetUserId),
+  );
+
   const deleteMutation = trpc.auth.deleteUser.useMutation({
+    onMutate: deleteOptimistic.onMutate,
     onSuccess: () => {
       showToast("המשתמש נמחק.", "success");
-      setSelectedId(null);
-      setForm(null);
-      setDeleteOpen(false);
-      void queryClient.invalidateQueries({ queryKey: ["reference-data", "users"] });
+      setDeleteTargetId(null);
+      void queryClient.invalidateQueries({ queryKey: usersQueryKey });
     },
-    onError: (error) => {
+    onError: mergeOnError(deleteOptimistic.onError, (error: { message?: string }) => {
       showToast(`המחיקה נכשלה: ${error.message}`, "error");
-      setDeleteOpen(false);
-    },
+      setDeleteTargetId(null);
+    }),
   });
 
-  function handleSelect(id: string) {
-    setSelectedId(id);
-    setEditing(false);
+  // Seeded synchronously from data the table already has — the blacklist is
+  // loaded up front for its column, not lazily on click.
+  function handleEditRow(row: ProfileRow) {
+    setEditingId(row.user_id);
+    setForm(toFormState(row, blockedQuery.data?.get(row.user_id) ?? []));
   }
 
-  // The values with no unsaved edits — both what "בטל שינויים" restores and
-  // what the live form is compared against. See customers.tsx for why these
-  // are one expression rather than two.
-  //
-  // Null while the user's blacklist is still loading (this screen has no
-  // "new record" mode — accounts are provisioned by the bulk import, see
-  // this file's header — so there is no blank-form case, only a
-  // not-loaded-yet one). With no baseline there is nothing to compare
-  // against and discard would restore nothing, so the form reads as changed
-  // and both buttons stay live: the safe direction (see hasChanges).
-  const baselineForm =
-    selected && blockedQuery.data ? toFormState(selected, blockedQuery.data) : null;
+  function handleCancel() {
+    setEditingId(null);
+    setForm(null);
+  }
+
+  const baselineForm = selected
+    ? toFormState(selected, blockedQuery.data?.get(selected.user_id) ?? [])
+    : null;
   const dirty = baselineForm === null || hasChanges(form, baselineForm);
-
-  function handleDiscard() {
-    if (baselineForm) setForm(baselineForm);
-    setEditing(false);
-  }
 
   function handleSave() {
     setSaving(true);
@@ -231,162 +306,195 @@ export default function UsersPage() {
     });
   }
 
+  const columns: RecordTableColumn<ProfileRow>[] = [
+    {
+      key: "name",
+      label: "שם תצוגה",
+      render: (row) => <span className="font-medium text-ink">{row.display_name}</span>,
+      renderEdit: () => {
+        if (!form) return null;
+        return (
+          <input
+            aria-label="שם תצוגה"
+            autoFocus
+            required
+            className={`${inputClassName} w-full min-w-[9rem]`}
+            value={form.displayName}
+            onChange={(event) =>
+              setForm((current) => current && { ...current, displayName: event.target.value })
+            }
+          />
+        );
+      },
+    },
+    {
+      key: "email",
+      label: "אימייל",
+      // Read-only: the login identity is an Auth record, not a profile
+      // field — changing it is a credential operation, not an edit here.
+      render: (row) => emailsQuery.data?.[row.user_id] ?? "—",
+    },
+    {
+      key: "role",
+      label: "תפקיד",
+      render: (row) => <StatusPill tone="neutral">{ROLE_LABEL[row.role]}</StatusPill>,
+      renderEdit: () => {
+        if (!form) return null;
+        return (
+          <select
+            aria-label="תפקיד"
+            className={`${inputClassName} w-32`}
+            value={form.role}
+            onChange={(event) =>
+              setForm((current) => current && { ...current, role: event.target.value as UserRole })
+            }
+          >
+            {(Object.keys(ROLE_LABEL) as UserRole[]).map((role) => (
+              <option key={role} value={role}>
+                {ROLE_LABEL[role]}
+              </option>
+            ))}
+          </select>
+        );
+      },
+    },
+    {
+      key: "company",
+      label: "חברה",
+      render: (row) => row.companies?.name ?? "—",
+      renderEdit: () => {
+        if (!form) return null;
+        return (
+          <select
+            aria-label="חברה"
+            className={`${inputClassName} w-full min-w-[9rem]`}
+            value={form.companyId}
+            onChange={(event) =>
+              setForm((current) => current && { ...current, companyId: event.target.value })
+            }
+          >
+            {companiesQuery.data?.map((company) => (
+              <option key={company.id} value={company.id}>
+                {company.name}
+              </option>
+            ))}
+          </select>
+        );
+      },
+    },
+    {
+      key: "phone",
+      label: "טלפון",
+      render: (row) => row.phone_number || "—",
+      renderEdit: () => {
+        if (!form) return null;
+        return (
+          <input
+            type="tel"
+            aria-label="טלפון"
+            className={`${inputClassName} w-32`}
+            value={form.phoneNumber}
+            onChange={(event) =>
+              setForm((current) => current && { ...current, phoneNumber: event.target.value })
+            }
+          />
+        );
+      },
+    },
+    {
+      key: "blocked",
+      label: "מוצרים חסומים",
+      render: (row) => (
+        <CellChipList
+          items={(blockedQuery.data?.get(row.user_id) ?? []).map(
+            (id) => varietyLabelById.get(id) ?? id,
+          )}
+          emptyLabel="אין מוצרים חסומים"
+          tone="danger"
+        />
+      ),
+      renderEdit: () => {
+        if (!form) return null;
+        return (
+          <ProductMultiSelectCell
+            label="מוצרים חסומים"
+            options={catalogOptions}
+            selectedIds={form.blockedProductVarietyIds}
+            onToggle={toggleBlocked}
+          />
+        );
+      },
+    },
+    {
+      key: "tempPassword",
+      label: "סיסמה זמנית",
+      // Read-only: set by the import / admin-reset flows, cleared by the
+      // user's own password change.
+      render: (row) =>
+        row.must_change_password ? (
+          <StatusPill tone="warning" dot>
+            ממתין לשינוי
+          </StatusPill>
+        ) : (
+          <span className="text-sm text-ink-subtle">—</span>
+        ),
+    },
+    {
+      key: "created",
+      label: "נוצר",
+      render: (row) =>
+        row.created_at ? CREATED_AT_FORMAT.format(new Date(row.created_at)) : "—",
+    },
+  ];
+
   return (
     <>
-      <ListDetailLayout
-        header={
-          <PageHeader title="משתמשים" subtitle="חשבונות המערכת: עריכת פרופיל, תפקיד ושיוך לחברה." />
+      <PageHeader title="משתמשים" subtitle="חשבונות המערכת: עריכת פרופיל, תפקיד ושיוך לחברה." />
+      <RecordTable
+        columns={columns}
+        rows={usersQuery.data ?? []}
+        getRowId={(row) => row.user_id}
+        searchText={(row) =>
+          `${row.display_name} ${row.companies?.name ?? ""} ${emailsQuery.data?.[row.user_id] ?? ""}`
         }
-        list={
-          <div className="flex h-full min-h-0 flex-col gap-3">
-            <div className="flex gap-2">
-              <Link to="/backoffice/users/import" className="flex-1">
-                <Button type="button" variant="secondary" className="w-full">
-                  ייבוא משתמשים
-                </Button>
-              </Link>
-              <Link to="/backoffice/users/reset" className="flex-1">
-                <Button type="button" variant="secondary" className="w-full">
-                  איפוס סיסמה
-                </Button>
-              </Link>
-            </div>
-            <RecordList
-              icon="user"
-              items={listItems}
-              selectedId={selectedId}
-              onSelect={handleSelect}
-              loading={usersQuery.isLoading}
-              searchPlaceholder="חיפוש משתמש"
-              emptyLabel="אין משתמשים עדיין."
-            />
-          </div>
+        editingId={editingId}
+        savingEdit={saving}
+        dirtyEdit={dirty}
+        onEdit={handleEditRow}
+        onSaveEdit={handleSave}
+        onCancelEdit={handleCancel}
+        onDelete={(row) => setDeleteTargetId(row.user_id)}
+        toolbarExtra={
+          <>
+            <Link to="/backoffice/users/import">
+              <Button type="button" variant="secondary">
+                ייבוא משתמשים
+              </Button>
+            </Link>
+            <Link to="/backoffice/users/reset">
+              <Button type="button" variant="secondary">
+                איפוס סיסמה
+              </Button>
+            </Link>
+          </>
         }
-        detail={
-          !selectedId || !form ? (
-            <EmptyState
-              icon="user"
-              title="לא נבחר משתמש"
-              hint="בחר חשבון מהרשימה כדי לערוך את שם התצוגה, התפקיד, השיוך לחברה והמוצרים החסומים שלו."
-            />
-          ) : (
-            <div className="flex flex-col gap-6">
-              {/* The record's own identity above the form, so the pane says
-                  whose account is open without the user having to read it
-                  back out of the first input. */}
-              <div className="flex items-center gap-3.5 border-b border-border pb-5">
-                <span
-                  aria-hidden
-                  className="font-display flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-accent-soft text-xl text-accent ring-1 ring-inset ring-accent/25"
-                >
-                  {form.displayName.trim().charAt(0)}
-                </span>
-                <div className="min-w-0">
-                  <h2 className="font-display truncate text-xl text-ink">
-                    {form.displayName || "—"}
-                  </h2>
-                  <p className="mt-0.5 truncate text-sm text-ink-muted">
-                    {selected?.companies?.name ?? "—"}
-                  </p>
-                </div>
-                <span className="ms-auto shrink-0">
-                  <StatusPill tone="neutral">{ROLE_LABEL[form.role]}</StatusPill>
-                </span>
-              </div>
-
-              <FormSection title="פרטי חשבון" columns={2}>
-                <FormField label="שם תצוגה" htmlFor="user-display-name">
-                  <input
-                    id="user-display-name"
-                    required
-                    disabled={!editing}
-                    className={`${inputClassName} w-full`}
-                    value={form.displayName}
-                    onChange={(event) =>
-                      setForm(
-                        (current) => current && { ...current, displayName: event.target.value },
-                      )
-                    }
-                  />
-                </FormField>
-
-                <FormField label="תפקיד" htmlFor="user-role">
-                  <select
-                    id="user-role"
-                    disabled={!editing}
-                    className={`${inputClassName} w-full`}
-                    value={form.role}
-                    onChange={(event) =>
-                      setForm(
-                        (current) =>
-                          current && { ...current, role: event.target.value as UserRole },
-                      )
-                    }
-                  >
-                    {(Object.keys(ROLE_LABEL) as UserRole[]).map((role) => (
-                      <option key={role} value={role}>
-                        {ROLE_LABEL[role]}
-                      </option>
-                    ))}
-                  </select>
-                </FormField>
-
-                <FormField label="חברה" htmlFor="user-company">
-                  <select
-                    id="user-company"
-                    disabled={!editing}
-                    className={`${inputClassName} w-full`}
-                    value={form.companyId}
-                    onChange={(event) =>
-                      setForm((current) => current && { ...current, companyId: event.target.value })
-                    }
-                  >
-                    {companiesQuery.data?.map((company) => (
-                      <option key={company.id} value={company.id}>
-                        {company.name}
-                      </option>
-                    ))}
-                  </select>
-                </FormField>
-              </FormSection>
-
-              <FormSection
-                title="מוצרים חסומים"
-                hint="מוצרים שסומנו כאן לא יופיעו כלל בחנות של המשתמש הזה."
-              >
-                <CheckboxList
-                  options={catalogOptions}
-                  selectedIds={form.blockedProductVarietyIds}
-                  onToggle={toggleBlocked}
-                  disabled={!editing}
-                />
-              </FormSection>
-
-              <ActionBar
-                editing={editing}
-                saving={saving}
-                dirty={dirty}
-                onEdit={() => setEditing(true)}
-                onDiscard={handleDiscard}
-                onSave={handleSave}
-                onDelete={() => setDeleteOpen(true)}
-              />
-            </div>
-          )
-        }
+        loading={usersQuery.isLoading || blockedQuery.isLoading}
+        searchPlaceholder="חיפוש משתמש"
+        emptyLabel="אין משתמשים עדיין."
       />
-      <Dialog open={deleteOpen} onClose={() => setDeleteOpen(false)} title="מחיקת משתמש">
+
+      <Dialog open={deleteTargetId !== null} onClose={() => setDeleteTargetId(null)} title="מחיקת משתמש">
         <p className="mb-4 text-sm">
-          האם למחוק את המשתמש &quot;{selected?.display_name}&quot;? פעולה זו אינה הפיכה — חשבון
+          האם למחוק את המשתמש &quot;{deleteTarget?.display_name}&quot;? פעולה זו אינה הפיכה — חשבון
           ההתחברות יימחק לחלוטין.
         </p>
         <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={() => setDeleteOpen(false)}>
+          <Button variant="secondary" onClick={() => setDeleteTargetId(null)}>
             ביטול
           </Button>
           <Button
             variant="danger"
-            onClick={() => selectedId && deleteMutation.mutate({ targetUserId: selectedId })}
+            onClick={() => deleteTargetId && deleteMutation.mutate({ targetUserId: deleteTargetId })}
             disabled={deleteMutation.isPending}
           >
             {deleteMutation.isPending ? "מוחק…" : "מחק"}

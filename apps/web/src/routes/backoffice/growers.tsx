@@ -1,19 +1,19 @@
 import { saveGrowerInputSchema, toSaveGrowerRpcArgs } from "@ori/domain/reference-data";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
-import { ActionBar } from "@/components/reference-data/action-bar";
-import { CheckboxList } from "@/components/reference-data/checkbox-list";
-import { FormField, inputClassName } from "@/components/reference-data/form-field";
-import { ListDetailLayout } from "@/components/reference-data/list-detail-layout";
-import { RecordList } from "@/components/reference-data/record-list";
+import { CellChipList } from "@/components/reference-data/cell-popover";
+import { inputClassName } from "@/components/reference-data/form-field";
+import { ProductMultiSelectCell } from "@/components/reference-data/product-multi-select-cell";
+import { RecordTable, type RecordTableColumn } from "@/components/reference-data/record-table";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { PageHeader } from "@/components/ui/page-header";
-import { FormSection, StatusPill } from "@/components/ui/card";
-import { EmptyState } from "@/components/ui/empty-state";
+import { StatusPill } from "@/components/ui/card";
 import { useToast } from "@/components/ui/toast";
+import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { hasChanges } from "@/lib/has-changes";
+import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
 
 interface GrowerCompany {
@@ -23,6 +23,7 @@ interface GrowerCompany {
   default_pickup_time: string | null;
   whatsapp_group_id: string | null;
   transporter_company_id: string | null;
+  created_at: string;
 }
 
 interface TransporterOption {
@@ -39,6 +40,14 @@ interface FormState {
   transporterCompanyId: string;
 }
 
+// Sentinel row id for a not-yet-created record: the draft row prepended to
+// the table while `onAdd` is active, so RecordTable's "is this row being
+// edited" logic (which compares ids) needs no separate create/update
+// concept of its own.
+const NEW_ROW_ID = "__new__";
+
+const CREATED_AT_FORMAT = new Intl.DateTimeFormat("he-IL", { dateStyle: "short" });
+
 const BLANK_FORM: FormState = {
   name: "",
   status: "active",
@@ -47,6 +56,18 @@ const BLANK_FORM: FormState = {
   productVarietyIds: new Set(),
   transporterCompanyId: "",
 };
+
+function blankRow(): GrowerCompany {
+  return {
+    id: NEW_ROW_ID,
+    name: "",
+    status: "active",
+    default_pickup_time: null,
+    whatsapp_group_id: null,
+    transporter_company_id: null,
+    created_at: "",
+  };
+}
 
 function toFormState(row: GrowerCompany, productVarietyIds: string[]): FormState {
   return {
@@ -70,22 +91,52 @@ export default function GrowersPage() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
+  // Which row (by id) is being edited inline right now — NEW_ROW_ID for a
+  // draft that hasn't been saved yet, an existing row's own id, or null.
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(BLANK_FORM);
   const [saving, setSaving] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
+  // Separate from `editingId` — deleting a row is still a confirm dialog,
+  // not inline, so it needs its own target rather than reusing edit state.
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+
+  const growersQueryKey = ["reference-data", "growers"] as const;
+  const growerProductsQueryKey = ["reference-data", "grower-products-all"] as const;
 
   const growersQuery = useQuery({
-    queryKey: ["reference-data", "growers"],
+    queryKey: growersQueryKey,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("companies")
-        .select("id, name, status, default_pickup_time, whatsapp_group_id, transporter_company_id")
+        .select(
+          "id, name, status, default_pickup_time, whatsapp_group_id, transporter_company_id, created_at",
+        )
         .eq("type", "grower")
         .order("name");
       if (error) throw error;
       return data as GrowerCompany[];
+    },
+  });
+
+  // Every grower's in-season selection in ONE read, grouped client-side —
+  // not a query per row. The in-season list is a column now, so every
+  // visible row needs its own value; per-row queries would mean one request
+  // per grower on first paint. Paged (see fetchAllRows) because this table
+  // is the one that outgrows PostgREST's row cap.
+  const growerProductsQuery = useQuery({
+    queryKey: growerProductsQueryKey,
+    queryFn: async () => {
+      const rows = await fetchAllRows<{ company_id: string; product_variety_id: string }>(
+        (from, to) =>
+          supabase.from("grower_products").select("company_id, product_variety_id").range(from, to),
+      );
+      const byCompany = new Map<string, string[]>();
+      for (const row of rows) {
+        const list = byCompany.get(row.company_id);
+        if (list) list.push(row.product_variety_id);
+        else byCompany.set(row.company_id, [row.product_variety_id]);
+      }
+      return byCompany;
     },
   });
 
@@ -105,6 +156,10 @@ export default function GrowersPage() {
       return data as TransporterOption[];
     },
   });
+  const transporterNameById = useMemo(
+    () => new Map((transportersQuery.data ?? []).map((row) => [row.id, row.name])),
+    [transportersQuery.data],
+  );
 
   const catalogQuery = useQuery({
     queryKey: ["reference-data", "product-catalog"],
@@ -118,40 +173,6 @@ export default function GrowersPage() {
     },
   });
 
-  const selectionQuery = useQuery({
-    queryKey: ["reference-data", "grower-products", selectedId],
-    enabled: !!selectedId,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("grower_products")
-        .select("product_variety_id")
-        .eq("company_id", selectedId!);
-      if (error) throw error;
-      return data.map((row) => row.product_variety_id);
-    },
-  });
-
-  const selected = growersQuery.data?.find((row) => row.id === selectedId) ?? null;
-
-  // "לא פעיל" becomes a trailing pill rather than a parenthetical glued to
-  // the name, so an inactive record is scannable down the column instead of
-  // hiding at the end of a line that may already be truncated.
-  const listItems = useMemo(
-    () =>
-      (growersQuery.data ?? []).map((row) => ({
-        id: row.id,
-        label: row.name,
-        badge: row.status === "inactive" ? "לא פעיל" : null,
-      })),
-    [growersQuery.data],
-  );
-
-  useEffect(() => {
-    if (!editing && selected && selectionQuery.data) {
-      setForm(toFormState(selected, selectionQuery.data));
-    }
-  }, [selected, selectionQuery.data, editing]);
-
   const catalogOptions = useMemo(
     () =>
       (catalogQuery.data ?? []).map((product) => ({
@@ -162,11 +183,55 @@ export default function GrowersPage() {
       })),
     [catalogQuery.data],
   );
+  const varietyLabelById = useMemo(
+    () => new Map(catalogOptions.map((option) => [option.id, option.label])),
+    [catalogOptions],
+  );
+
+  const editingRowId = editingId !== null && editingId !== NEW_ROW_ID ? editingId : null;
+  const selected = growersQuery.data?.find((row) => row.id === editingRowId) ?? null;
+  const deleteTarget = growersQuery.data?.find((row) => row.id === deleteTargetId) ?? null;
+
+  // Only patches an existing row — a brand-new grower (still unsaved,
+  // editingId === NEW_ROW_ID) stays pessimistic: faking a row for an id the
+  // server hasn't issued yet isn't worth the risk for a save that's
+  // infrequent to begin with.
+  const saveOptimistic = optimisticUpdate<GrowerCompany[], void>(
+    queryClient,
+    growersQueryKey,
+    (rows) =>
+      rows?.map((row) =>
+        row.id === editingRowId
+          ? {
+              ...row,
+              name: form.name,
+              status: form.status,
+              default_pickup_time: form.defaultPickupTime || null,
+              whatsapp_group_id: form.whatsappGroupId || null,
+              transporter_company_id: form.transporterCompanyId || null,
+            }
+          : row,
+      ),
+  );
+
+  // The in-season list lives in its own query, so its optimistic patch is
+  // its own too — without it, the row's "מוצרים בעונה" cell would snap back
+  // to the pre-edit chips until the refetch lands.
+  const saveProductsOptimistic = optimisticUpdate<Map<string, string[]>, void>(
+    queryClient,
+    growerProductsQueryKey,
+    (byCompany) => {
+      if (!byCompany || !editingRowId) return byCompany;
+      const next = new Map(byCompany);
+      next.set(editingRowId, [...form.productVarietyIds]);
+      return next;
+    },
+  );
 
   const saveMutation = useMutation({
     mutationFn: async () => {
       const input = saveGrowerInputSchema.parse({
-        id: selectedId,
+        id: editingRowId,
         name: form.name,
         status: form.status,
         defaultPickupTime: form.defaultPickupTime || null,
@@ -178,67 +243,83 @@ export default function GrowersPage() {
       if (error) throw error;
       return data as GrowerCompany;
     },
-    onSuccess: (row) => {
-      showToast("הנתונים נשמרו.", "success");
-      setEditing(false);
-      setSelectedId(row.id);
-      void queryClient.invalidateQueries({ queryKey: ["reference-data", "growers"] });
-      void queryClient.invalidateQueries({
-        queryKey: ["reference-data", "grower-products", row.id],
-      });
+    onMutate: async (variables) => {
+      const rows = await saveOptimistic.onMutate(variables);
+      const products = await saveProductsOptimistic.onMutate(variables);
+      return { rows, products };
     },
-    onError: (error: { message?: string }) => {
+    onSuccess: () => {
+      showToast("הנתונים נשמרו.", "success");
+      setEditingId(null);
+      void queryClient.invalidateQueries({ queryKey: growersQueryKey });
+      void queryClient.invalidateQueries({ queryKey: growerProductsQueryKey });
+    },
+    onError: (
+      error: { message?: string },
+      variables,
+      context:
+        | {
+            rows: { previous: GrowerCompany[] | undefined } | undefined;
+            products: { previous: Map<string, string[]> | undefined } | undefined;
+          }
+        | undefined,
+    ) => {
+      saveOptimistic.onError(error, variables, context?.rows);
+      saveProductsOptimistic.onError(error, variables, context?.products);
       showToast(`השמירה נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
     },
   });
 
+  const deleteOptimistic = optimisticUpdate<GrowerCompany[], void>(
+    queryClient,
+    growersQueryKey,
+    (rows) => rows?.filter((row) => row.id !== deleteTargetId),
+  );
+
   const deleteMutation = useMutation({
     mutationFn: async () => {
-      if (!selectedId) return;
-      const { error } = await supabase.from("companies").delete().eq("id", selectedId);
+      if (!deleteTargetId) return;
+      const { error } = await supabase.from("companies").delete().eq("id", deleteTargetId);
       if (error) throw error;
     },
+    onMutate: deleteOptimistic.onMutate,
     onSuccess: () => {
       showToast("המגדל נמחק.", "success");
-      setSelectedId(null);
-      setDeleteOpen(false);
-      void queryClient.invalidateQueries({ queryKey: ["reference-data", "growers"] });
+      setDeleteTargetId(null);
+      void queryClient.invalidateQueries({ queryKey: growersQueryKey });
     },
-    onError: (error: { message?: string }) => {
+    onError: mergeOnError(deleteOptimistic.onError, (error: { message?: string }) => {
       showToast(`המחיקה נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
-      setDeleteOpen(false);
-    },
+      setDeleteTargetId(null);
+    }),
   });
 
-  function handleSelect(id: string) {
-    setSelectedId(id);
-    setEditing(false);
+  // Seeded synchronously from data the table already has — the in-season
+  // list is loaded up front for the column, not lazily on click, so there's
+  // no window where the form is rendered but not yet filled (which is what
+  // used to let a fast edit get overwritten by a late-arriving seed).
+  function handleEditRow(row: GrowerCompany) {
+    setEditingId(row.id);
+    setForm(toFormState(row, growerProductsQuery.data?.get(row.id) ?? []));
   }
 
   function handleNew() {
-    setSelectedId(null);
+    setEditingId(NEW_ROW_ID);
     setForm(BLANK_FORM);
-    setEditing(true);
   }
 
-  // The values with no unsaved edits — both what "בטל שינויים" restores and
-  // what the live form is compared against. See customers.tsx for why these
-  // are one expression rather than two.
-  //
-  // `selectionQuery.data` is the grower's in-season variety list, fetched
-  // separately from the row itself: until it lands there is no complete
-  // baseline to compare against, and this falls back to blank exactly as
-  // discard does — so the form reads as changed, and both buttons stay live,
-  // for the moment before it arrives. Erring toward "changed" is the safe
-  // direction (see hasChanges).
-  const baselineForm =
-    selected && selectionQuery.data ? toFormState(selected, selectionQuery.data) : BLANK_FORM;
+  function handleCancel() {
+    setEditingId(null);
+  }
+
+  // What the form would hold with no unsaved edits — decides whether the
+  // save button has anything to do. Computed from the live query data on
+  // every render rather than frozen at seed time, so it always reflects the
+  // actual current server state.
+  const baselineForm = selected
+    ? toFormState(selected, growerProductsQuery.data?.get(selected.id) ?? [])
+    : BLANK_FORM;
   const dirty = hasChanges(form, baselineForm);
-
-  function handleDiscard() {
-    setForm(baselineForm);
-    setEditing(false);
-  }
 
   function toggleProduct(id: string) {
     setForm((current) => {
@@ -254,173 +335,163 @@ export default function GrowersPage() {
     saveMutation.mutate(undefined, { onSettled: () => setSaving(false) });
   }
 
+  const columns: RecordTableColumn<GrowerCompany>[] = [
+    {
+      key: "name",
+      label: "שם",
+      render: (row) => <span className="font-medium text-ink">{row.name}</span>,
+      renderEdit: () => (
+        <input
+          aria-label="שם"
+          autoFocus
+          required
+          className={`${inputClassName} w-full min-w-[10rem]`}
+          value={form.name}
+          onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+        />
+      ),
+    },
+    {
+      key: "status",
+      label: "סטטוס",
+      render: (row) => (
+        <StatusPill tone={row.status === "active" ? "accent" : "neutral"} dot>
+          {row.status === "active" ? "פעיל" : "לא פעיל"}
+        </StatusPill>
+      ),
+      renderEdit: () => (
+        <select
+          aria-label="סטטוס"
+          className={`${inputClassName} w-28`}
+          value={form.status}
+          onChange={(event) =>
+            setForm((current) => ({ ...current, status: event.target.value as "active" | "inactive" }))
+          }
+        >
+          <option value="active">פעיל</option>
+          <option value="inactive">לא פעיל</option>
+        </select>
+      ),
+    },
+    {
+      key: "pickup",
+      label: "שעת איסוף",
+      render: (row) => row.default_pickup_time || "—",
+      renderEdit: () => (
+        <input
+          type="time"
+          aria-label="שעת איסוף ברירת מחדל"
+          className={`${inputClassName} w-32`}
+          value={form.defaultPickupTime}
+          onChange={(event) =>
+            setForm((current) => ({ ...current, defaultPickupTime: event.target.value }))
+          }
+        />
+      ),
+    },
+    {
+      key: "transporter",
+      label: "מוביל",
+      render: (row) =>
+        row.transporter_company_id
+          ? (transporterNameById.get(row.transporter_company_id) ?? "—")
+          : "—",
+      renderEdit: () => (
+        <select
+          aria-label="מוביל"
+          className={`${inputClassName} w-full min-w-[9rem]`}
+          value={form.transporterCompanyId}
+          onChange={(event) =>
+            setForm((current) => ({ ...current, transporterCompanyId: event.target.value }))
+          }
+        >
+          <option value="">— ללא —</option>
+          {transportersQuery.data?.map((transporter) => (
+            <option key={transporter.id} value={transporter.id}>
+              {transporter.name}
+            </option>
+          ))}
+        </select>
+      ),
+    },
+    {
+      key: "whatsapp",
+      label: "קבוצת WhatsApp",
+      render: (row) => row.whatsapp_group_id || "—",
+      renderEdit: () => (
+        <input
+          aria-label="קבוצת WhatsApp"
+          className={`${inputClassName} w-full min-w-[10rem]`}
+          value={form.whatsappGroupId}
+          onChange={(event) =>
+            setForm((current) => ({ ...current, whatsappGroupId: event.target.value }))
+          }
+        />
+      ),
+    },
+    {
+      key: "inSeason",
+      label: "מוצרים בעונה",
+      render: (row) => (
+        <CellChipList
+          items={(growerProductsQuery.data?.get(row.id) ?? []).map(
+            (id) => varietyLabelById.get(id) ?? id,
+          )}
+          emptyLabel="אין מוצרים בעונה"
+        />
+      ),
+      renderEdit: () => (
+        <ProductMultiSelectCell
+          label="מוצרים בעונה"
+          options={catalogOptions}
+          selectedIds={form.productVarietyIds}
+          onToggle={toggleProduct}
+        />
+      ),
+    },
+    {
+      key: "created",
+      label: "נוצר",
+      // Server-set, so read-only: no renderEdit.
+      render: (row) =>
+        row.created_at ? CREATED_AT_FORMAT.format(new Date(row.created_at)) : "—",
+    },
+  ];
+
+  const rows =
+    editingId === NEW_ROW_ID ? [blankRow(), ...(growersQuery.data ?? [])] : (growersQuery.data ?? []);
+
   return (
     <>
-      <ListDetailLayout
-        header={<PageHeader title="מגדלים" subtitle="חברות מגדלים והמוצרים שבעונה אצל כל אחת." />}
-        list={
-          <div className="flex h-full min-h-0 flex-col gap-3">
-            <Button type="button" onClick={handleNew}>
-              מגדל חדש
-            </Button>
-            <RecordList
-              icon="sprout"
-              items={listItems}
-              selectedId={selectedId}
-              onSelect={handleSelect}
-              loading={growersQuery.isLoading}
-              searchPlaceholder="חיפוש מגדל"
-              emptyLabel="אין מגדלים עדיין."
-            />
-          </div>
-        }
-        detail={
-          selectedId === null && !editing ? (
-            <EmptyState
-              icon="sprout"
-              title="לא נבחר מגדל"
-              hint="בחר מגדל מהרשימה כדי לערוך את פרטיו, או צור מגדל חדש."
-              action={
-                <Button type="button" onClick={handleNew}>
-                  מגדל חדש
-                </Button>
-              }
-            />
-          ) : (
-            <div className="flex flex-col gap-6">
-              {/* Identity strip, so the pane states which grower is open
-                  rather than making the user read it back out of the first
-                  input. `selectedId` is null while creating a new record, so
-                  the heading falls back to the draft name. */}
-              <div className="flex items-center gap-3.5 border-b border-border pb-5">
-                <span
-                  aria-hidden
-                  className="font-display flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-accent-soft text-xl text-accent ring-1 ring-inset ring-accent/25"
-                >
-                  {form.name.trim().charAt(0) || "+"}
-                </span>
-                <h2 className="font-display min-w-0 flex-1 truncate text-xl text-ink">
-                  {form.name || "מגדל חדש"}
-                </h2>
-                <StatusPill tone={form.status === "active" ? "accent" : "neutral"} dot>
-                  {form.status === "active" ? "פעיל" : "לא פעיל"}
-                </StatusPill>
-              </div>
-
-              <FormSection title="פרטי מגדל" columns={2}>
-                <FormField label="שם" htmlFor="grower-name">
-                  <input
-                    id="grower-name"
-                    required
-                    disabled={!editing}
-                    className={`${inputClassName} w-full`}
-                    value={form.name}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, name: event.target.value }))
-                    }
-                  />
-                </FormField>
-
-                <FormField label="סטטוס" htmlFor="grower-status">
-                  <select
-                    id="grower-status"
-                    disabled={!editing}
-                    className={`${inputClassName} w-full`}
-                    value={form.status}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        status: event.target.value as "active" | "inactive",
-                      }))
-                    }
-                  >
-                    <option value="active">פעיל</option>
-                    <option value="inactive">לא פעיל</option>
-                  </select>
-                </FormField>
-              </FormSection>
-
-              <FormSection title="לוגיסטיקה ותקשורת" columns={2}>
-                <FormField label="שעת איסוף ברירת מחדל" htmlFor="grower-pickup">
-                  <input
-                    id="grower-pickup"
-                    type="time"
-                    disabled={!editing}
-                    className={`${inputClassName} w-full`}
-                    value={form.defaultPickupTime}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, defaultPickupTime: event.target.value }))
-                    }
-                  />
-                </FormField>
-
-                <FormField label="מוביל" htmlFor="grower-transporter">
-                  <select
-                    id="grower-transporter"
-                    disabled={!editing}
-                    className={`${inputClassName} w-full`}
-                    value={form.transporterCompanyId}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        transporterCompanyId: event.target.value,
-                      }))
-                    }
-                  >
-                    <option value="">— ללא —</option>
-                    {transportersQuery.data?.map((transporter) => (
-                      <option key={transporter.id} value={transporter.id}>
-                        {transporter.name}
-                      </option>
-                    ))}
-                  </select>
-                </FormField>
-
-                <FormField label="קבוצת WhatsApp" htmlFor="grower-whatsapp">
-                  <input
-                    id="grower-whatsapp"
-                    disabled={!editing}
-                    className={`${inputClassName} w-full`}
-                    value={form.whatsappGroupId}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, whatsappGroupId: event.target.value }))
-                    }
-                  />
-                </FormField>
-              </FormSection>
-
-              <FormSection
-                title="מוצרים בעונה"
-                hint="הזנים שהמגדל הזה מספק כרגע. רק הם ייכללו ברשימת הליקוט היומית שלו."
-              >
-                <CheckboxList
-                  options={catalogOptions}
-                  selectedIds={form.productVarietyIds}
-                  onToggle={toggleProduct}
-                  disabled={!editing}
-                />
-              </FormSection>
-
-              <ActionBar
-                editing={editing}
-                saving={saving}
-                dirty={dirty}
-                canDelete={!!selectedId}
-                onEdit={() => setEditing(true)}
-                onDiscard={handleDiscard}
-                onSave={handleSave}
-                onDelete={selectedId ? () => setDeleteOpen(true) : undefined}
-              />
-            </div>
-          )
-        }
+      <PageHeader title="מגדלים" subtitle="חברות מגדלים והמוצרים שבעונה אצל כל אחת." />
+      <RecordTable
+        columns={columns}
+        rows={rows}
+        getRowId={(row) => row.id}
+        searchText={(row) => `${row.name} ${row.whatsapp_group_id ?? ""}`}
+        editingId={editingId}
+        savingEdit={saving}
+        dirtyEdit={dirty}
+        onEdit={handleEditRow}
+        onSaveEdit={handleSave}
+        onCancelEdit={handleCancel}
+        onDelete={(row) => setDeleteTargetId(row.id)}
+        onAdd={handleNew}
+        addLabel="מגדל חדש"
+        // Waits for the in-season lists too: they're a column now, and a
+        // table that paints rows before they arrive would show every grower
+        // as having nothing in season for a moment.
+        loading={growersQuery.isLoading || growerProductsQuery.isLoading}
+        searchPlaceholder="חיפוש מגדל"
+        emptyLabel="אין מגדלים עדיין."
       />
-      <Dialog open={deleteOpen} onClose={() => setDeleteOpen(false)} title="מחיקת מגדל">
+
+      <Dialog open={deleteTargetId !== null} onClose={() => setDeleteTargetId(null)} title="מחיקת מגדל">
         <p className="mb-4 text-sm">
-          האם למחוק את המגדל &quot;{selected?.name}&quot;? פעולה זו אינה הפיכה.
+          האם למחוק את המגדל &quot;{deleteTarget?.name}&quot;? פעולה זו אינה הפיכה.
         </p>
         <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={() => setDeleteOpen(false)}>
+          <Button variant="secondary" onClick={() => setDeleteTargetId(null)}>
             ביטול
           </Button>
           <Button

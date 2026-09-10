@@ -27,13 +27,22 @@ import { expect, test, type Page } from "@playwright/test";
 // flaky fixed timeout or silently masking a real (if minor, few-second)
 // UX gap — see docs/ARCHITECTURE.md.
 async function waitForRowWithReload(page: Page, name: string) {
-  const row = page.getByRole("button", { name: new RegExp(name) });
+  const row = page.locator("tr").filter({ hasText: name });
   try {
     await row.waitFor({ timeout: 8000 });
   } catch {
     await page.reload();
     await row.waitFor({ timeout: 15000 });
   }
+}
+
+// The single <tr> currently in inline-edit mode — see the identical helper
+// in reference-data-growers.spec.ts for why field lookups need to be
+// scoped to it: record-table.tsx's column-visibility picker labels a
+// checkbox with each column's own name (e.g. "שם תצוגה"), which collides
+// with that same field's input aria-label at the page level.
+function editingRow(page: Page) {
+  return page.locator("tr").filter({ has: page.getByRole("button", { name: "שמור" }) });
 }
 
 // Drives the Users screen through the browser. Unlike the other four
@@ -78,21 +87,31 @@ test.describe("Backoffice — Users", () => {
 
     await expect(page.getByText("נוצר", { exact: true })).toBeVisible();
 
-    // Edit: back on the main Users screen, change display name + role.
+    // Edit: back on the main Users screen, change display name + role. The
+    // row's own pencil icon turns the row itself into the edit form —
+    // there's no dialog for this any more, no separate "select the row,
+    // then press ערוך" step, and fields are read directly off the page
+    // since only one row can be mid-edit at a time.
     await page.goto("/backoffice/users");
     await waitForRowWithReload(page, newUserDisplayName);
-    await page.getByRole("button", { name: new RegExp(newUserDisplayName) }).click();
-    await page.getByRole("button", { name: "ערוך" }).click();
-    await page.getByLabel("שם תצוגה").fill(`${newUserDisplayName} (edited)`);
-    await page.getByLabel("תפקיד").selectOption("customer");
-    await page.getByRole("button", { name: "שמור" }).click();
+    await page
+      .locator("tr")
+      .filter({ hasText: newUserDisplayName })
+      .getByRole("button", { name: "ערוך" })
+      .click();
+    await editingRow(page).getByLabel("שם תצוגה").fill(`${newUserDisplayName} (edited)`);
+    await editingRow(page).getByLabel("תפקיד").selectOption("customer");
+    await editingRow(page).getByRole("button", { name: "שמור" }).click();
 
-    await expect(page.getByRole("button", { name: new RegExp(`${newUserDisplayName} \\(edited\\)`) })).toBeVisible();
+    const editedRow = page.locator("tr").filter({ hasText: `${newUserDisplayName} (edited)` });
+    await expect(editedRow).toBeVisible();
 
-    // Delete, closing the loop on full CRUD for this screen.
-    await page.getByRole("button", { name: "מחק" }).click();
+    // Delete, closing the loop on full CRUD for this screen — the row's own
+    // trash icon still opens a confirm dialog (unlike editing, a
+    // destructive action keeps the extra "are you sure" step).
+    await editedRow.getByRole("button", { name: "מחק" }).click();
     await page.getByRole("dialog").getByRole("button", { name: "מחק" }).click();
 
-    await expect(page.getByRole("button", { name: new RegExp(newUserDisplayName) })).toHaveCount(0);
+    await expect(page.locator("tr").filter({ hasText: newUserDisplayName })).toHaveCount(0);
   });
 });

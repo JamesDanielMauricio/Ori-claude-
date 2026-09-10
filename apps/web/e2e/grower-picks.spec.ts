@@ -47,7 +47,7 @@ test.describe("Grower — daily picking input", () => {
     return pick.id;
   }
 
-  test("a grower edits a pick line's pallets, pickup time, and comment, and the change persists across a reload", async ({
+  test("a grower edits a pick line's pallets and comment, and the change persists across a reload", async ({
     page,
   }) => {
     const grower = await createTestGrowerWithProduct();
@@ -68,11 +68,9 @@ test.describe("Grower — daily picking input", () => {
     await expect(page.getByRole("button", { name: "ערוך", exact: true })).toHaveCount(0);
 
     const palletsInput = page.locator('input[type="number"]');
-    const pickupInput = page.locator('input[type="time"]');
     const commentInput = page.locator('input[type="text"]');
 
     await palletsInput.fill("12.5");
-    await pickupInput.fill("09:15");
     await commentInput.fill("gate code 4321");
     await page.getByRole("button", { name: "שמור" }).click();
 
@@ -83,7 +81,6 @@ test.describe("Grower — daily picking input", () => {
     // trailing zeros) regardless of the exact string the numeric(10,2)
     // column round-trips as — "12.5" here, not "12.50".
     await expect(palletsInput).toHaveValue("12.5");
-    await expect(pickupInput).toHaveValue("09:15");
     await expect(commentInput).toHaveValue("gate code 4321");
 
     // The pick history list (routes/grower/history.tsx), the grower-module
@@ -100,7 +97,6 @@ test.describe("Grower — daily picking input", () => {
     // different way of finding one.
     await expect(page).toHaveURL(/\/grower\/picks\?pickId=/);
     await expect(palletsInput).toHaveValue("12.5");
-    await expect(pickupInput).toHaveValue("09:15");
     await expect(commentInput).toHaveValue("gate code 4321");
   });
 

@@ -11,7 +11,16 @@ import {
   deleteTestCompany as deleteTestCompanyById,
   findCompanyIdByName,
 } from "@ori/domain/reference-data/testing";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+// The single <tr> currently in inline-edit mode — see the identical helper
+// in reference-data-growers.spec.ts for why field lookups need to be
+// scoped to it: record-table.tsx's column-visibility picker labels a
+// checkbox with each column's own name, which collides with that same
+// field's input aria-label at the page level.
+function editingRow(page: Page) {
+  return page.locator("tr").filter({ has: page.getByRole("button", { name: "שמור" }) });
+}
 
 // Drives the Transporters screen through the browser — a create and an
 // edit through the real form and `save_transporter` RPC.
@@ -37,15 +46,15 @@ test.describe("Backoffice — Transporters", () => {
     await page.goto("/backoffice/transporters");
 
     const transporterName = `E2E Transporter ${randomUUID()}`;
-    // Two buttons carry this name by design: the one above the list, and the
-    // call-to-action inside the empty detail pane ("...או צור מוביל חדש").
-    // Both open the same blank form; `.first()` is the list-pane one, which
-    // is present whether or not anything is selected.
-    await page.getByRole("button", { name: "מוביל חדש" }).first().click();
-    await page.getByLabel("שם").fill(transporterName);
-    await page.getByRole("button", { name: "שמור" }).click();
+    // The table's own toolbar add button (record-table.tsx's `onAdd`)
+    // prepends a draft row, already in inline-edit mode — one button now,
+    // so no `.first()` disambiguation needed.
+    await page.getByRole("button", { name: "מוביל חדש" }).click();
+    await editingRow(page).getByLabel("שם").fill(transporterName);
+    await editingRow(page).getByRole("button", { name: "שמור" }).click();
 
-    await expect(page.getByRole("button", { name: transporterName })).toBeVisible();
+    const transporterRow = page.locator("tr").filter({ hasText: transporterName });
+    await expect(transporterRow).toBeVisible();
     cleanupFns.push(async () => {
       const id = await findCompanyIdByName(transporterName);
       if (id) await deleteTestCompanyById(id);
@@ -55,11 +64,16 @@ test.describe("Backoffice — Transporters", () => {
       if (id) await deleteTestCompanyById(id);
     });
 
-    await page.getByRole("button", { name: "ערוך" }).click();
-    await page.getByLabel("שם").fill(`${transporterName} (edited)`);
-    await page.getByLabel("קבוצת WhatsApp").fill("120363000000000000");
-    await page.getByRole("button", { name: "שמור" }).click();
+    // The row's own pencil icon turns the row itself into the edit form,
+    // so the rest of this step reads fields directly off the page — safe
+    // since only one row can be mid-edit at a time.
+    await transporterRow.getByRole("button", { name: "ערוך" }).click();
+    await editingRow(page).getByLabel("שם").fill(`${transporterName} (edited)`);
+    await editingRow(page).getByLabel("קבוצת WhatsApp").fill("120363000000000000");
+    await editingRow(page).getByRole("button", { name: "שמור" }).click();
 
-    await expect(page.getByRole("button", { name: `${transporterName} (edited)` })).toBeVisible();
+    await expect(
+      page.locator("tr").filter({ hasText: `${transporterName} (edited)` }),
+    ).toBeVisible();
   });
 });

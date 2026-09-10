@@ -8,6 +8,7 @@ import { QueryError } from "@/components/ui/query-error";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
+import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
 
 interface ProfileRow {
@@ -35,8 +36,10 @@ export default function UserProfilePage() {
   const [displayName, setDisplayName] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
 
+  const profileQueryKey = ["profile", "self"] as const;
+
   const profileQuery = useQuery({
-    queryKey: ["profile", "self"],
+    queryKey: profileQueryKey,
     queryFn: async () => {
       const { data: userData, error: userError } = await supabase.auth.getUser();
       if (userError) throw userError;
@@ -59,6 +62,12 @@ export default function UserProfilePage() {
     }
   }, [profileQuery.data]);
 
+  const saveOptimistic = optimisticUpdate<ProfileRow, void>(queryClient, profileQueryKey, (row) =>
+    row
+      ? { displayName: displayName.trim(), phoneNumber: phoneNumber.trim() || null }
+      : row,
+  );
+
   const saveMutation = useMutation({
     mutationFn: async () => {
       const { data: userData, error: userError } = await supabase.auth.getUser();
@@ -74,13 +83,14 @@ export default function UserProfilePage() {
         .eq("user_id", userData.user.id);
       if (error) throw error;
     },
+    onMutate: saveOptimistic.onMutate,
     onSuccess: () => {
       showToast("הפרופיל נשמר.", "success");
-      void queryClient.invalidateQueries({ queryKey: ["profile", "self"] });
+      void queryClient.invalidateQueries({ queryKey: profileQueryKey });
     },
-    onError: (error: { message?: string }) => {
+    onError: mergeOnError(saveOptimistic.onError, (error: { message?: string }) => {
       showToast(`השמירה נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
-    },
+    }),
   });
 
   function handleSubmit(event: FormEvent) {

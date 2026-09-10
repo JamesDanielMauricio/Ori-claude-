@@ -33,7 +33,7 @@ export function CommentPopup({
     <Dialog open={open} onClose={onClose} title="הערה">
       <div className="flex flex-col gap-4">
         <input
-          className={inputClassName}
+          className={`${inputClassName} w-full`}
           value={value}
           onChange={(event) => setValue(event.target.value)}
           placeholder="הוסף הערה…"

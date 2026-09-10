@@ -15,7 +15,21 @@ import {
   deleteTestProductVariety,
   findCompanyIdByName,
 } from "@ori/domain/reference-data/testing";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+// The single <tr> currently in inline-edit mode — identified by carrying
+// the row's own "שמור" button, which only ever exists on one row at a
+// time. Field lookups are scoped to it rather than done at the page level
+// because record-table.tsx's column-visibility picker renders a checkbox
+// per column labelled with that column's own name (e.g. "שם"), which is
+// also literally every field's own aria-label — an unscoped
+// `page.getByLabel("שם")` matches both and Playwright refuses the
+// ambiguity. The in-season checklist below lives in the row's separate
+// expand-panel <tr> (not this one), so it stays looked up at the page
+// level — nothing there collides with a column name.
+function editingRow(page: Page) {
+  return page.locator("tr").filter({ has: page.getByRole("button", { name: "שמור" }) });
+}
 
 // Drives the Growers screen through the browser end to end — a create and
 // an edit, both through the real form and `save_grower` RPC, not a direct
@@ -50,13 +64,16 @@ test.describe("Backoffice — Growers", () => {
     await page.goto("/backoffice/growers");
 
     const growerName = `E2E Grower ${randomUUID()}`;
-    // Two buttons carry this name by design — the one above the list and the
-    // empty detail pane's call-to-action. `.first()` is the list-pane one.
-    await page.getByRole("button", { name: "מגדל חדש" }).first().click();
-    await page.getByLabel("שם").fill(growerName);
-    await page.getByRole("button", { name: "שמור" }).click();
+    // The table's own toolbar add button (record-table.tsx's `onAdd`)
+    // prepends a draft row, already in inline-edit mode — no dialog. Only
+    // one such button now (unlike the old list-plus-empty-pane layout,
+    // which duplicated it), so no `.first()` disambiguation is needed.
+    await page.getByRole("button", { name: "מגדל חדש" }).click();
+    await editingRow(page).getByLabel("שם").fill(growerName);
+    await editingRow(page).getByRole("button", { name: "שמור" }).click();
 
-    await expect(page.getByRole("button", { name: growerName })).toBeVisible();
+    const growerRow = page.locator("tr").filter({ hasText: growerName });
+    await expect(growerRow).toBeVisible();
     cleanupFns.push(async () => {
       const id = await findCompanyIdByName(growerName);
       if (id) await deleteTestCompanyById(id);
@@ -68,17 +85,42 @@ test.describe("Backoffice — Growers", () => {
 
     // Edit: rename, add the fixture product to the in-season selection,
     // and assign the fixture transporter (id 8's cc target on arrangement
-    // finalization — this is the only screen that can set it).
-    await page.getByRole("button", { name: "ערוך" }).click();
-    await page.getByLabel("שם").fill(`${growerName} (edited)`);
-    await page.getByText(`${family.name} — ${product.name}`).click();
-    await page.getByLabel("מוביל").selectOption(transporter.id);
-    await page.getByRole("button", { name: "שמור" }).click();
+    // finalization — this is the only screen that can set it). The row's
+    // own pencil icon turns the row itself into the edit form; once
+    // clicked, `growerRow`'s text no longer contains the (now-input-held)
+    // name, so the rest of this step reads fields directly off the page —
+    // safe since only one row can be mid-edit at a time.
+    await growerRow.getByRole("button", { name: "ערוך" }).click();
+    await editingRow(page).getByLabel("שם").fill(`${growerName} (edited)`);
 
-    await expect(page.getByRole("button", { name: `${growerName} (edited)` })).toBeVisible();
+    // The in-season list is its own column; editing it opens that cell's
+    // popover (portaled out of the table's scroll container), which carries
+    // a filter because the catalog is ~600 varieties deep.
+    await editingRow(page).getByRole("button", { name: "מוצרים בעונה" }).click();
+    const picker = page.getByRole("dialog", { name: "מוצרים בעונה" });
+    await picker.getByLabel("סינון מוצרים בעונה").fill(product.name);
+    await picker.getByText(`${family.name} — ${product.name}`).click();
+    // Escape closes the picker only — the row stays in edit mode with the
+    // rest of its unsaved changes intact (cell-popover.tsx stops the key
+    // from reaching the table's own cancel-the-row handler). If that ever
+    // regressed, the save below would have nothing left to save.
+    await page.keyboard.press("Escape");
+
+    await editingRow(page).getByLabel("מוביל").selectOption(transporter.id);
+    await editingRow(page).getByRole("button", { name: "שמור" }).click();
+
+    const editedRow = page.locator("tr").filter({ hasText: `${growerName} (edited)` });
+    await expect(editedRow).toBeVisible();
+    // The in-season selection is readable straight off the row now, with
+    // nothing expanded — the whole point of the column.
+    await expect(editedRow).toContainText(`${family.name} — ${product.name}`);
 
     await page.reload();
-    await page.getByRole("button", { name: `${growerName} (edited)` }).click();
-    await expect(page.getByLabel("מוביל")).toHaveValue(transporter.id);
+    await page
+      .locator("tr")
+      .filter({ hasText: `${growerName} (edited)` })
+      .getByRole("button", { name: "ערוך" })
+      .click();
+    await expect(editingRow(page).getByLabel("מוביל")).toHaveValue(transporter.id);
   });
 });

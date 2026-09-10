@@ -12,6 +12,7 @@ import {
   ArrangementMatrix,
   type MatrixWrite,
 } from "@/components/arrangement/arrangement-matrix";
+import { ArrangementMatrixMobile } from "@/components/arrangement/arrangement-matrix-mobile";
 import type {
   BoardCompany,
   BoardOrder,
@@ -26,8 +27,10 @@ import { PageHeader } from "@/components/ui/page-header";
 import { QueryError } from "@/components/ui/query-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
+import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
 import { useTradingDayView } from "@/lib/trading-day-view";
+import { useWide } from "@/lib/use-wide";
 
 // The whole screen's data as ONE nested row — same shape as the arrangement
 // board's own query next door, and for the same reasons (see that file).
@@ -80,6 +83,12 @@ export default function NewArrangementPage() {
   // Which multi-grower products are open. Product ids, not row indices, so
   // the set survives a refetch reordering or a search narrowing the list.
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  // Same `lg` threshold the arrangement board and the reference-data
+  // two-column layout already switch on — see lib/use-wide.ts. Below it,
+  // ArrangementMatrixMobile replaces the frozen-pane spreadsheet with a
+  // drill-down card list; the underlying `visible` data (below) is identical
+  // either way.
+  const wide = useWide("(min-width: 1024px)");
 
   // The day this grid shows: the live open day, or whatever the sidebar's
   // picker has pinned. Same resolution every date-aware backoffice screen
@@ -92,8 +101,10 @@ export default function NewArrangementPage() {
   // rather than a chain of dependent ones. `order_submission_logs` is the one
   // thing that tree carries and this one does not: the "changed since their
   // last submission" flag it feeds has nowhere to go in a grid cell.
+  const boardDataQueryKey = ["new-arrangement", "matrix", day?.id ?? null] as const;
+
   const boardDataQuery = useQuery({
-    queryKey: ["new-arrangement", "matrix", day?.id ?? null],
+    queryKey: boardDataQueryKey,
     enabled: !!day?.id,
     queryFn: async () => {
       const { data, error } = await supabase
@@ -101,7 +112,7 @@ export default function NewArrangementPage() {
         .select(
           `id, trade_date, phase,
            daily_arrangements(id, status, arrangement_records(id, daily_pick_product_id, daily_order_product_id, customer_company_id, quantity_pallets, price, price_type)),
-           daily_picks(id, grower_company_id, status, daily_pick_products(id, daily_pick_id, product_variety_id, pallets_picked, pickup_time, comment, product_varieties(id, name, family_id, product_families(name, image_url)))),
+           daily_picks(id, grower_company_id, status, pickup_time, daily_pick_products(id, daily_pick_id, product_variety_id, pallets_picked, comment, product_varieties(id, name, family_id, product_families(name, image_url)))),
            daily_orders(id, customer_company_id, status, daily_order_products(id, daily_order_id, product_variety_id, pallets_ordered, comment, product_varieties(id, name, family_id, product_families(name, image_url))))`,
         )
         .eq("id", day!.id)
@@ -178,6 +189,74 @@ export default function NewArrangementPage() {
     [matrix, search],
   );
 
+  // Same "patch the one cached tree's records array" shape as the
+  // arrangement board next door — buildMatrix's useMemo recomputes every
+  // row/cell total (זמין, סה"כ חולק) from this array, so nothing here needs
+  // to know how to total pallets.
+  function recordsOptimistic<TVariables>(
+    updater: (records: BoardRecord[], variables: TVariables, current: TradingDay) => BoardRecord[],
+  ) {
+    return optimisticUpdate<TradingDay | null, TVariables>(
+      queryClient,
+      boardDataQueryKey,
+      (current, variables) =>
+        current?.daily_arrangements
+          ? {
+              ...current,
+              daily_arrangements: {
+                ...current.daily_arrangements,
+                arrangement_records: updater(
+                  current.daily_arrangements.arrangement_records,
+                  variables,
+                  current,
+                ),
+              },
+            }
+          : current,
+    );
+  }
+
+  const arrangeOptimistic = recordsOptimistic<MatrixWrite>((records, write, current) => {
+    if (write.recordId) {
+      return records.map((record) =>
+        record.id === write.recordId
+          ? {
+              ...record,
+              quantity_pallets: write.quantity,
+              price: write.price,
+              price_type: write.priceType,
+            }
+          : record,
+      );
+    }
+    // A brand-new record. Only constructible when the customer already has
+    // an order line for this cell's variety — arrange_to_customer creates
+    // that line itself otherwise, and its id isn't knowable client-side
+    // before that happens; that case falls back to the existing
+    // invalidate-on-settle refetch instead of being faked here.
+    const varietyId = current.daily_picks
+      .flatMap((pick) => pick.daily_pick_products)
+      .find((line) => line.id === write.pickLineId)?.product_variety_id;
+    const orderLineId = varietyId
+      ? current.daily_orders
+          .find((order) => order.customer_company_id === write.customerId)
+          ?.daily_order_products.find((line) => line.product_variety_id === varietyId)?.id
+      : undefined;
+    if (!orderLineId) return records;
+    return [
+      ...records,
+      {
+        id: `optimistic-${crypto.randomUUID()}`,
+        daily_pick_product_id: write.pickLineId,
+        daily_order_product_id: orderLineId,
+        customer_company_id: write.customerId,
+        quantity_pallets: write.quantity,
+        price: write.price,
+        price_type: write.priceType,
+      },
+    ];
+  });
+
   const arrangeMutation = useMutation({
     mutationFn: async (write: MatrixWrite) => {
       const parsed = arrangeToCustomerInputSchema.parse({
@@ -196,15 +275,20 @@ export default function NewArrangementPage() {
       );
       if (error) throw error;
     },
+    onMutate: arrangeOptimistic.onMutate,
     onSuccess: invalidateBoards,
-    onError: (error: RpcError) => {
+    onError: mergeOnError(arrangeOptimistic.onError, (error: RpcError) => {
       showToast(`שמירת הסידור נכשלה: ${describeRpcError(error)}`, "error");
       // Refetch on failure too: a refusal usually means this screen's copy of
       // the day is behind whatever caused it, so the grid should re-read
       // rather than argue with the server.
       invalidateBoards();
-    },
+    }),
   });
+
+  const deleteOptimistic = recordsOptimistic<string>((records, recordId) =>
+    records.filter((record) => record.id !== recordId),
+  );
 
   const deleteMutation = useMutation({
     mutationFn: async (recordId: string) => {
@@ -214,11 +298,12 @@ export default function NewArrangementPage() {
       );
       if (error) throw error;
     },
+    onMutate: deleteOptimistic.onMutate,
     onSuccess: invalidateBoards,
-    onError: (error: RpcError) => {
+    onError: mergeOnError(deleteOptimistic.onError, (error: RpcError) => {
       showToast(`מחיקת השיוך נכשלה: ${describeRpcError(error)}`, "error");
       invalidateBoards();
-    },
+    }),
   });
 
   function invalidateBoards() {
@@ -362,26 +447,45 @@ export default function NewArrangementPage() {
           תא מסומן = הלקוח הזמין את המוצר
         </p>
 
-        {editable && (
+        {/* The keyboard hint only describes the desktop grid's own arrow-key
+            navigation — meaningless on the mobile card list below, which has
+            no cell-to-cell navigation at all (see arrangement-matrix-mobile.tsx). */}
+        {editable && wide && (
           <p className="text-xs text-ink-subtle">
             הקלד כמות ולחץ Enter או Tab. חיצים לניווט בין תאים.
           </p>
         )}
       </div>
 
-      <ArrangementMatrix
-        matrix={visible}
-        expanded={expanded}
-        onToggle={(varietyId) =>
-          setExpanded((current) => {
-            const next = new Set(current);
-            if (!next.delete(varietyId)) next.add(varietyId);
-            return next;
-          })
-        }
-        editable={editable}
-        onCommit={commitCell}
-      />
+      {wide ? (
+        <ArrangementMatrix
+          matrix={visible}
+          expanded={expanded}
+          onToggle={(varietyId) =>
+            setExpanded((current) => {
+              const next = new Set(current);
+              if (!next.delete(varietyId)) next.add(varietyId);
+              return next;
+            })
+          }
+          editable={editable}
+          onCommit={commitCell}
+        />
+      ) : (
+        <ArrangementMatrixMobile
+          matrix={visible}
+          expanded={expanded}
+          onToggle={(varietyId) =>
+            setExpanded((current) => {
+              const next = new Set(current);
+              if (!next.delete(varietyId)) next.add(varietyId);
+              return next;
+            })
+          }
+          editable={editable}
+          onCommit={commitCell}
+        />
+      )}
     </div>
   );
 }

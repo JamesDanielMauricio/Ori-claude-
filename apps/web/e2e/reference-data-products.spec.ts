@@ -8,12 +8,23 @@ import {
   runCleanup,
 } from "@ori/domain/auth/testing";
 import {
+  createTestCustomerCompany,
   createTestProductFamily,
+  deleteTestCompany as deleteTestCompanyById,
   deleteTestProductFamily,
   deleteTestProductVariety,
   findProductVarietyIdByName,
 } from "@ori/domain/reference-data/testing";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+// The single <tr> currently in inline-edit mode — see the identical helper
+// in reference-data-growers.spec.ts for why field lookups need to be
+// scoped to it: record-table.tsx's column-visibility picker labels a
+// checkbox with each column's own name (e.g. "מחיר"), which collides with
+// that same field's input aria-label at the page level.
+function editingRow(page: Page) {
+  return page.locator("tr").filter({ has: page.getByRole("button", { name: "שמור" }) });
+}
 
 // Drives the Products screen through the browser — a create and an edit
 // through the real form and `save_product` RPC, including the overbooking
@@ -25,9 +36,12 @@ test.describe("Backoffice — Products", () => {
     await runCleanup(cleanupFns);
   });
 
-  test("creates a product, then edits its price, overbooking buffer, and seasonal flag", async ({
+  test("creates a product, then edits its price, overbooking buffer, seasonal flag, and per-customer cap", async ({
     page,
   }) => {
+    const capCustomer = await createTestCustomerCompany(`E2E Cap Customer ${randomUUID()}`);
+    cleanupFns.push(() => deleteTestCompanyById(capCustomer.id));
+
     const family = await createTestProductFamily();
     cleanupFns.push(() => deleteTestProductFamily(family.id));
 
@@ -45,20 +59,18 @@ test.describe("Backoffice — Products", () => {
     await page.goto("/backoffice/products");
 
     const productName = `E2E Variety ${randomUUID()}`;
-    // Two buttons carry this name by design — the one above the list and the
-    // empty detail pane's call-to-action. `.first()` is the list-pane one.
-    await page.getByRole("button", { name: "מוצר חדש" }).first().click();
-    await page.getByLabel("משפחה").selectOption({ label: family.name });
-    await page.getByLabel("זן / שם").fill(productName);
-    await page.getByLabel("מחיר", { exact: true }).fill("12.5");
-    await page.getByRole("button", { name: "שמור" }).click();
+    // The table's own toolbar add button (record-table.tsx's `onAdd`)
+    // prepends a draft row, already in inline-edit mode — one button now,
+    // not the old list-button-plus-empty-pane-button pair, so no
+    // `.first()` disambiguation needed.
+    await page.getByRole("button", { name: "מוצר חדש" }).click();
+    await editingRow(page).getByLabel("משפחה").selectOption({ label: family.name });
+    await editingRow(page).getByLabel("זן / שם").fill(productName);
+    await editingRow(page).getByLabel("מחיר", { exact: true }).fill("12.5");
+    await editingRow(page).getByRole("button", { name: "שמור" }).click();
 
-    // The screen never renders "<family> — <variety>" as one string: the
-    // detail header puts the variety in an <h2> with the family on its own
-    // line beneath, and the list shows them as label and meta. Asserting on
-    // the heading also keeps this independent of where the row lands in a
-    // list that is now hundreds of products long.
-    await expect(page.getByRole("heading", { name: productName })).toBeVisible();
+    const productRow = page.locator("tr").filter({ hasText: productName });
+    await expect(productRow).toBeVisible();
     cleanupFns.push(async () => {
       const id = await findProductVarietyIdByName(productName);
       if (id) await deleteTestProductVariety(id);
@@ -66,18 +78,36 @@ test.describe("Backoffice — Products", () => {
 
     // Edit: bump the overbooking buffer and turn off seasonal availability
     // — both real PRD fields (product-catalog-family-and-variety.md's "No
-    // Overbooking") this screen is the only place that can change.
-    await page.getByRole("button", { name: "ערוך" }).click();
-    await page.getByLabel("חריגת הזמנה מותרת (No Overbooking)").fill("3");
-    await page.getByText("זמין בעונה הנוכחית").click();
-    await page.getByRole("button", { name: "שמור" }).click();
+    // Overbooking") this screen is the only place that can change. The
+    // row's own pencil icon turns the row itself into the edit form, so
+    // the rest of this step reads fields directly off the page — safe
+    // since only one row can be mid-edit at a time.
+    await productRow.getByRole("button", { name: "ערוך" }).click();
+    await editingRow(page).getByLabel("חריגת הזמנה מותרת (No Overbooking)").fill("3");
+    await editingRow(page).getByLabel("זמין בעונה הנוכחית").click();
 
-    // The badge is rendered bare, without the parentheses this used to look
-    // for — and it now appears on every out-of-season product in a seeded
-    // catalog, so it has to be read off THIS product's own row.
-    await expect(page.getByRole("button", { name: new RegExp(productName) })).toContainText(
-      "לא בעונה",
-      { timeout: 15000 },
-    );
+    // The per-customer pallet caps are their own column, edited through
+    // that cell's popover (portaled out of the table's scroll container).
+    // This is the only screen that writes product_customer_caps, and this
+    // is the only test that covers that half of `save_product`.
+    await editingRow(page).getByRole("button", { name: "תקרות משטחים ללקוח" }).click();
+    const capsPanel = page.getByRole("dialog", { name: "תקרות משטחים ללקוח" });
+    await capsPanel.getByRole("button", { name: "הוסף תקרה" }).click();
+    await capsPanel.getByLabel("לקוח").selectOption({ label: capCustomer.name });
+    await capsPanel.getByLabel("תקרת משטחים").fill("4");
+    // Closes the popover only — the row keeps its other unsaved edits (see
+    // the same step in reference-data-growers.spec.ts).
+    await page.keyboard.press("Escape");
+
+    await editingRow(page).getByRole("button", { name: "שמור" }).click();
+
+    // The "בעונה"/"לא בעונה" column is its own cell now, not a badge glued
+    // to the row's clickable name — and it appears on every out-of-season
+    // product in a seeded catalog, so it has to be read off THIS product's
+    // own row.
+    await expect(productRow).toContainText("לא בעונה", { timeout: 15000 });
+    // …and the cap is readable straight off the row too, with nothing
+    // expanded or opened.
+    await expect(productRow).toContainText(`${capCustomer.name}: 4`);
   });
 });

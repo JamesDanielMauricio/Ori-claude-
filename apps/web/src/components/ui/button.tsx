@@ -32,7 +32,11 @@ const VARIANT_CLASSES: Record<ButtonVariant, string> = {
 // the most reliable tells of a template, and these sit in a layout that now
 // has the room.
 const SIZE_CLASSES: Record<ButtonSize, string> = {
-  sm: "h-8 gap-1.5 px-3.5 text-xs",
+  // 36px, not 32px: below the ~40px touch-target guideline on its own, but
+  // `sm` is reserved for secondary/inline actions rather than a screen's
+  // primary CTA, and pushing it all the way to 40px started crowding the
+  // button rows that use two or three of these side by side.
+  sm: "h-9 gap-1.5 px-3.5 text-xs",
   md: "h-10 gap-2 px-5 text-sm",
 };
 

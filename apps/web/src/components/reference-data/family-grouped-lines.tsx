@@ -21,8 +21,6 @@ export interface FamilyGroupedLine {
   /** Already formatted (formatPallets), so this component stays unit-agnostic. */
   quantityLabel: string;
   hasQuantity: boolean;
-  /** Pickup time on a pick line; omitted on an order line. */
-  secondary?: string | null;
   comment?: string | null;
 }
 
@@ -74,11 +72,6 @@ function FamilyBlock({ family }: { family: FamilyGroupedRow }) {
                 {line.varietyName}
               </span>
               <span className="flex shrink-0 items-baseline gap-2">
-                {line.secondary && (
-                  <span className="text-[11px] tabular-nums text-ink-subtle" dir="ltr">
-                    {line.secondary}
-                  </span>
-                )}
                 <span
                   className={`text-[11px] font-semibold tabular-nums ${
                     line.hasQuantity ? "text-accent" : "text-ink-subtle"

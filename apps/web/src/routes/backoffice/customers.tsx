@@ -1,18 +1,16 @@
 import { saveCustomerInputSchema, toSaveCustomerRpcArgs } from "@ori/domain/reference-data";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 
-import { ActionBar } from "@/components/reference-data/action-bar";
-import { FormField, inputClassName } from "@/components/reference-data/form-field";
-import { ListDetailLayout } from "@/components/reference-data/list-detail-layout";
-import { RecordList } from "@/components/reference-data/record-list";
+import { checkboxClassName, inputClassName } from "@/components/reference-data/form-field";
+import { RecordTable, type RecordTableColumn } from "@/components/reference-data/record-table";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
-import { FormSection, StatusPill } from "@/components/ui/card";
-import { EmptyState } from "@/components/ui/empty-state";
+import { StatusPill } from "@/components/ui/card";
 import { useToast } from "@/components/ui/toast";
 import { hasChanges } from "@/lib/has-changes";
+import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
 
 interface CustomerCompany {
@@ -21,6 +19,7 @@ interface CustomerCompany {
   status: "active" | "inactive";
   can_see_product_prices: boolean | null;
   whatsapp_group_id: string | null;
+  created_at: string;
 }
 
 interface FormState {
@@ -30,12 +29,34 @@ interface FormState {
   whatsappGroupId: string;
 }
 
+// Sentinel row id for a not-yet-created record: the draft row prepended to
+// the table while `onAdd` is active, so RecordTable's "is this row being
+// edited" logic (which compares ids) needs no separate create/update
+// concept of its own.
+const NEW_ROW_ID = "__new__";
+
+const CREATED_AT_FORMAT = new Intl.DateTimeFormat("he-IL", { dateStyle: "short" });
+
 const BLANK_FORM: FormState = {
   name: "",
   status: "active",
   canSeeProductPrices: false,
   whatsappGroupId: "",
 };
+
+// Field values here are never actually read — every column has a
+// `renderEdit` for the draft row, so nothing falls back to `render(row)`.
+// Only `id` matters (for keying and for RecordTable's search-bypass).
+function blankRow(): CustomerCompany {
+  return {
+    id: NEW_ROW_ID,
+    name: "",
+    status: "active",
+    can_see_product_prices: false,
+    whatsapp_group_id: null,
+    created_at: "",
+  };
+}
 
 function toFormState(row: CustomerCompany): FormState {
   return {
@@ -56,18 +77,23 @@ export default function CustomersPage() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
+  // Which row (by id) is being edited inline right now — NEW_ROW_ID for a
+  // draft that hasn't been saved yet, an existing row's own id, or null.
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(BLANK_FORM);
   const [saving, setSaving] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
+  // Separate from `editingId` — deleting a row is still a confirm dialog,
+  // not inline, so it needs its own target rather than reusing edit state.
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+
+  const customersQueryKey = ["reference-data", "customers"] as const;
 
   const customersQuery = useQuery({
-    queryKey: ["reference-data", "customers"],
+    queryKey: customersQueryKey,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("companies")
-        .select("id, name, status, can_see_product_prices, whatsapp_group_id")
+        .select("id, name, status, can_see_product_prices, whatsapp_group_id, created_at")
         .eq("type", "customer")
         .order("name");
       if (error) throw error;
@@ -75,31 +101,31 @@ export default function CustomersPage() {
     },
   });
 
-  const selected = customersQuery.data?.find((row) => row.id === selectedId) ?? null;
+  const editingRowId = editingId === NEW_ROW_ID ? null : editingId;
+  const selected = customersQuery.data?.find((row) => row.id === editingRowId) ?? null;
+  const deleteTarget = customersQuery.data?.find((row) => row.id === deleteTargetId) ?? null;
 
-  // "לא פעיל" as a trailing pill rather than a parenthetical glued to the
-  // name — scannable down the column instead of hiding at the end of a line
-  // that may already be truncated.
-  const listItems = useMemo(
-    () =>
-      (customersQuery.data ?? []).map((row) => ({
-        id: row.id,
-        label: row.name,
-        badge: row.status === "inactive" ? "לא פעיל" : null,
-      })),
-    [customersQuery.data],
+  const saveOptimistic = optimisticUpdate<CustomerCompany[], void>(
+    queryClient,
+    customersQueryKey,
+    (rows) =>
+      rows?.map((row) =>
+        row.id === editingRowId
+          ? {
+              ...row,
+              name: form.name,
+              status: form.status,
+              can_see_product_prices: form.canSeeProductPrices,
+              whatsapp_group_id: form.whatsappGroupId || null,
+            }
+          : row,
+      ),
   );
-
-  useEffect(() => {
-    if (!editing && selected) {
-      setForm(toFormState(selected));
-    }
-  }, [selected, editing]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
       const input = saveCustomerInputSchema.parse({
-        id: selectedId,
+        id: editingRowId,
         name: form.name,
         status: form.status,
         canSeeProductPrices: form.canSeeProductPrices,
@@ -109,210 +135,182 @@ export default function CustomersPage() {
       if (error) throw error;
       return data as CustomerCompany;
     },
-    onSuccess: (row) => {
+    onMutate: saveOptimistic.onMutate,
+    onSuccess: () => {
       showToast("הנתונים נשמרו.", "success");
-      setEditing(false);
-      setSelectedId(row.id);
-      void queryClient.invalidateQueries({ queryKey: ["reference-data", "customers"] });
+      setEditingId(null);
+      void queryClient.invalidateQueries({ queryKey: customersQueryKey });
     },
-    onError: (error: { message?: string }) => {
+    onError: mergeOnError(saveOptimistic.onError, (error: { message?: string }) => {
       showToast(`השמירה נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
-    },
+    }),
   });
+
+  const deleteOptimistic = optimisticUpdate<CustomerCompany[], void>(
+    queryClient,
+    customersQueryKey,
+    (rows) => rows?.filter((row) => row.id !== deleteTargetId),
+  );
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
-      if (!selectedId) return;
-      const { error } = await supabase.from("companies").delete().eq("id", selectedId);
+      if (!deleteTargetId) return;
+      const { error } = await supabase.from("companies").delete().eq("id", deleteTargetId);
       if (error) throw error;
     },
+    onMutate: deleteOptimistic.onMutate,
     onSuccess: () => {
       showToast("הלקוח נמחק.", "success");
-      setSelectedId(null);
-      setDeleteOpen(false);
-      void queryClient.invalidateQueries({ queryKey: ["reference-data", "customers"] });
+      setDeleteTargetId(null);
+      void queryClient.invalidateQueries({ queryKey: customersQueryKey });
     },
-    onError: (error: { message?: string }) => {
+    onError: mergeOnError(deleteOptimistic.onError, (error: { message?: string }) => {
       showToast(`המחיקה נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
-      setDeleteOpen(false);
-    },
+      setDeleteTargetId(null);
+    }),
   });
 
-  function handleSelect(id: string) {
-    setSelectedId(id);
-    setEditing(false);
+  // No second, lazily-fetched query behind this form (unlike growers/products/
+  // users), so — unlike those three — the row already fetched is the whole
+  // baseline: seeding can happen synchronously in the click handler instead
+  // of needing an effect to wait for anything.
+  function handleEditRow(row: CustomerCompany) {
+    setEditingId(row.id);
+    setForm(toFormState(row));
   }
 
   function handleNew() {
-    setSelectedId(null);
+    setEditingId(NEW_ROW_ID);
     setForm(BLANK_FORM);
-    setEditing(true);
+  }
+
+  function handleCancel() {
+    setEditingId(null);
   }
 
   // What the form would hold with no unsaved edits: this record as the
-  // server has it, or a blank one while creating. Defined once and used for
-  // both jobs it has — the values "בטל שינויים" restores, and the values the
-  // current form is compared against to decide whether either button has
-  // anything to do. Deriving them from one expression is what stops the
-  // button from claiming "no changes" while discard would in fact change
-  // something.
+  // server has it. Used both for "בטל שינויים" and for deciding whether
+  // either button has anything to do.
   const baselineForm = selected ? toFormState(selected) : BLANK_FORM;
   const dirty = hasChanges(form, baselineForm);
-
-  function handleDiscard() {
-    setForm(baselineForm);
-    setEditing(false);
-  }
 
   function handleSave() {
     setSaving(true);
     saveMutation.mutate(undefined, { onSettled: () => setSaving(false) });
   }
 
+  const columns: RecordTableColumn<CustomerCompany>[] = [
+    {
+      key: "name",
+      label: "שם",
+      render: (row) => <span className="font-medium text-ink">{row.name}</span>,
+      renderEdit: () => (
+        <input
+          aria-label="שם"
+          autoFocus
+          required
+          className={`${inputClassName} w-full min-w-[10rem]`}
+          value={form.name}
+          onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+        />
+      ),
+    },
+    {
+      key: "status",
+      label: "סטטוס",
+      render: (row) => (
+        <StatusPill tone={row.status === "active" ? "accent" : "neutral"} dot>
+          {row.status === "active" ? "פעיל" : "לא פעיל"}
+        </StatusPill>
+      ),
+      renderEdit: () => (
+        <select
+          aria-label="סטטוס"
+          className={`${inputClassName} w-28`}
+          value={form.status}
+          onChange={(event) =>
+            setForm((current) => ({ ...current, status: event.target.value as "active" | "inactive" }))
+          }
+        >
+          <option value="active">פעיל</option>
+          <option value="inactive">לא פעיל</option>
+        </select>
+      ),
+    },
+    {
+      key: "prices",
+      label: "מציג מחירים בהתראות",
+      render: (row) => (row.can_see_product_prices ? "כן" : "לא"),
+      renderEdit: () => (
+        <label className="flex cursor-pointer items-center gap-2 text-sm text-ink">
+          <input
+            type="checkbox"
+            className={checkboxClassName}
+            aria-label="מציג מחירים בהתראות"
+            checked={form.canSeeProductPrices}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, canSeeProductPrices: event.target.checked }))
+            }
+          />
+          {form.canSeeProductPrices ? "כן" : "לא"}
+        </label>
+      ),
+    },
+    {
+      key: "whatsapp",
+      label: "קבוצת WhatsApp",
+      render: (row) => row.whatsapp_group_id || "—",
+      renderEdit: () => (
+        <input
+          aria-label="קבוצת WhatsApp"
+          className={`${inputClassName} w-full min-w-[10rem]`}
+          value={form.whatsappGroupId}
+          onChange={(event) =>
+            setForm((current) => ({ ...current, whatsappGroupId: event.target.value }))
+          }
+        />
+      ),
+    },
+    {
+      key: "created",
+      label: "נוצר",
+      // Server-set, so read-only: no renderEdit.
+      render: (row) =>
+        row.created_at ? CREATED_AT_FORMAT.format(new Date(row.created_at)) : "—",
+    },
+  ];
+
+  const rows =
+    editingId === NEW_ROW_ID ? [blankRow(), ...(customersQuery.data ?? [])] : (customersQuery.data ?? []);
+
   return (
     <>
-      <ListDetailLayout
-        header={<PageHeader title="לקוחות" subtitle="חברות לקוחות והגדרת הצגת מחירים לכל אחת." />}
-        list={
-          <div className="flex h-full min-h-0 flex-col gap-3">
-            <Button type="button" onClick={handleNew}>
-              לקוח חדש
-            </Button>
-            <RecordList
-              icon="briefcase"
-              items={listItems}
-              selectedId={selectedId}
-              onSelect={handleSelect}
-              loading={customersQuery.isLoading}
-              searchPlaceholder="חיפוש לקוח"
-              emptyLabel="אין לקוחות עדיין."
-            />
-          </div>
-        }
-        detail={
-          selectedId === null && !editing ? (
-            <EmptyState
-              icon="briefcase"
-              title="לא נבחר לקוח"
-              hint="בחר לקוח מהרשימה כדי לערוך את פרטיו, או צור לקוח חדש."
-              action={
-                <Button type="button" onClick={handleNew}>
-                  לקוח חדש
-                </Button>
-              }
-            />
-          ) : (
-            <div className="flex flex-col gap-6">
-              <div className="flex items-center gap-3.5 border-b border-border pb-5">
-                <span
-                  aria-hidden
-                  className="font-display flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-accent-soft text-xl text-accent ring-1 ring-inset ring-accent/25"
-                >
-                  {form.name.trim().charAt(0) || "+"}
-                </span>
-                <h2 className="font-display min-w-0 flex-1 truncate text-xl text-ink">
-                  {form.name || "לקוח חדש"}
-                </h2>
-                <StatusPill tone={form.status === "active" ? "accent" : "neutral"} dot>
-                  {form.status === "active" ? "פעיל" : "לא פעיל"}
-                </StatusPill>
-              </div>
-
-              <FormSection title="פרטי לקוח" columns={2}>
-                <FormField label="שם" htmlFor="customer-name">
-                  <input
-                    id="customer-name"
-                    required
-                    disabled={!editing}
-                    className={`${inputClassName} w-full`}
-                    value={form.name}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, name: event.target.value }))
-                    }
-                  />
-                </FormField>
-
-                <FormField label="סטטוס" htmlFor="customer-status">
-                  <select
-                    id="customer-status"
-                    disabled={!editing}
-                    className={`${inputClassName} w-full`}
-                    value={form.status}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        status: event.target.value as "active" | "inactive",
-                      }))
-                    }
-                  >
-                    <option value="active">פעיל</option>
-                    <option value="inactive">לא פעיל</option>
-                  </select>
-                </FormField>
-              </FormSection>
-
-              <FormSection title="התראות WhatsApp">
-                <FormField label="קבוצת WhatsApp" htmlFor="customer-whatsapp">
-                  <input
-                    id="customer-whatsapp"
-                    disabled={!editing}
-                    className={`${inputClassName} w-full`}
-                    value={form.whatsappGroupId}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, whatsappGroupId: event.target.value }))
-                    }
-                  />
-                </FormField>
-
-                {/* The bare checkbox floating between two labelled fields
-                    read as an orphan. Boxed and given the same weight as a
-                    field label, it becomes a setting rather than a stray. */}
-                <label
-                  className={`flex items-start gap-2.5 rounded-lg bg-surface-muted/60 px-3.5 py-3 text-sm ring-1 ring-inset ring-border ${
-                    editing ? "cursor-pointer" : "cursor-default"
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    className="mt-0.5"
-                    disabled={!editing}
-                    checked={form.canSeeProductPrices}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        canSeeProductPrices: event.target.checked,
-                      }))
-                    }
-                  />
-                  <span>
-                    <span className="block font-medium text-ink">מציג מחירים בהתראות</span>
-                    <span className="mt-0.5 block text-xs text-ink-muted">
-                      כשמכובה, הודעות ה-WhatsApp ללקוח זה יישלחו ללא מחירים.
-                    </span>
-                  </span>
-                </label>
-              </FormSection>
-
-              <ActionBar
-                editing={editing}
-                saving={saving}
-                dirty={dirty}
-                canDelete={!!selectedId}
-                onEdit={() => setEditing(true)}
-                onDiscard={handleDiscard}
-                onSave={handleSave}
-                onDelete={selectedId ? () => setDeleteOpen(true) : undefined}
-              />
-            </div>
-          )
-        }
+      <PageHeader title="לקוחות" subtitle="חברות לקוחות והגדרת הצגת מחירים לכל אחת." />
+      <RecordTable
+        columns={columns}
+        rows={rows}
+        getRowId={(row) => row.id}
+        searchText={(row) => `${row.name} ${row.whatsapp_group_id ?? ""}`}
+        editingId={editingId}
+        savingEdit={saving}
+        dirtyEdit={dirty}
+        onEdit={handleEditRow}
+        onSaveEdit={handleSave}
+        onCancelEdit={handleCancel}
+        onDelete={(row) => setDeleteTargetId(row.id)}
+        onAdd={handleNew}
+        addLabel="לקוח חדש"
+        loading={customersQuery.isLoading}
+        searchPlaceholder="חיפוש לקוח"
+        emptyLabel="אין לקוחות עדיין."
       />
-      <Dialog open={deleteOpen} onClose={() => setDeleteOpen(false)} title="מחיקת לקוח">
+
+      <Dialog open={deleteTargetId !== null} onClose={() => setDeleteTargetId(null)} title="מחיקת לקוח">
         <p className="mb-4 text-sm">
-          האם למחוק את הלקוח &quot;{selected?.name}&quot;? פעולה זו אינה הפיכה.
+          האם למחוק את הלקוח &quot;{deleteTarget?.name}&quot;? פעולה זו אינה הפיכה.
         </p>
         <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={() => setDeleteOpen(false)}>
+          <Button variant="secondary" onClick={() => setDeleteTargetId(null)}>
             ביטול
           </Button>
           <Button

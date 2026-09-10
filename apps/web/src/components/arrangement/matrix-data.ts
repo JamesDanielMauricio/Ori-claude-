@@ -399,6 +399,25 @@ export interface CellTarget {
 }
 
 /**
+ * Parses a cell's typed value into the quantity a write would carry, or
+ * `null` when the text isn't a valid one to commit — shared by both grid
+ * presentations (the desktop spreadsheet and the mobile card list) so a
+ * quantity is accepted or rejected by the same rule wherever it's typed.
+ *
+ * A decimal comma is what a Hebrew keyboard produces on the numpad, and
+ * half-pallets (5.5) are routine — so both separators are accepted. An empty
+ * box means "nothing is arranged here", which is a deletion (quantity 0),
+ * not a no-op or an invalid entry.
+ */
+export function parseMatrixQuantity(raw: string): number | null {
+  const trimmed = raw.trim().replace(",", ".");
+  if (trimmed === "") return 0;
+  const value = Number(trimmed);
+  if (!Number.isFinite(value) || value < 0) return null;
+  return value;
+}
+
+/**
  * Resolves "row × column" to the pick line a write lands on.
  *
  * Returns null for a multi-grower product row — the read-only sum. The whole

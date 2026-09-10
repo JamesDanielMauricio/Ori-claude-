@@ -26,6 +26,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { QueryError } from "@/components/ui/query-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
+import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
 import { useTradingDayView } from "@/lib/trading-day-view";
 
@@ -41,7 +42,6 @@ interface GrowerCompany {
 interface PickLineRow {
   id: string;
   pallets_picked: string;
-  pickup_time: string | null;
   comment: string | null;
   product_varieties: {
     id: string;
@@ -56,6 +56,7 @@ interface DailyPickForDay {
   grower_company_id: string;
   status: "draft" | "submitted" | "closed";
   submitted_at: string | null;
+  pickup_time: string | null;
   reminder_sent_at: string | null;
   daily_pick_products: PickLineRow[];
 }
@@ -87,7 +88,6 @@ function groupPickLines(lines: PickLineRow[]): FamilyGroupedRow[] {
       varietyName: variety.name,
       quantityLabel: formatPallets(pallets),
       hasQuantity: pallets > 0,
-      secondary: formatPickupTime(line.pickup_time),
       comment: line.comment,
     });
   }
@@ -156,15 +156,17 @@ export default function DistributorAsGrowerPage() {
   // Picks AND their lines in one request — embedding daily_pick_products
   // rather than a second query per expanded row, so opening a tenth grower's
   // chevron costs nothing this screen hasn't already paid for the first.
+  const picksForDayQueryKey = ["grower-oversight", "picks-for-day", dayId] as const;
+
   const picksForDayQuery = useQuery({
-    queryKey: ["grower-oversight", "picks-for-day", dayId],
+    queryKey: picksForDayQueryKey,
     enabled: !!dayId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("daily_picks")
         .select(
-          `id, grower_company_id, status, submitted_at, reminder_sent_at,
-           daily_pick_products(id, pallets_picked, pickup_time, comment, product_varieties(id, name, family_id, product_families(id, name, image_url)))`,
+          `id, grower_company_id, status, submitted_at, pickup_time, reminder_sent_at,
+           daily_pick_products(id, pallets_picked, comment, product_varieties(id, name, family_id, product_families(id, name, image_url)))`,
         )
         .eq("trading_day_id", dayId!);
       if (error) throw error;
@@ -312,21 +314,32 @@ export default function DistributorAsGrowerPage() {
   // bell can fire independently. `variables` (react-query's own record of
   // what a pending call was invoked with) is what lets each row know
   // whether it, specifically, is the one currently sending.
+  // `reminder_sent_at` is real, persisted state (not a fire-and-forget with
+  // nothing to show for it) — patch it optimistically like any other field,
+  // so the bell shows "sent" before the round trip rather than after it.
+  const reminderOptimistic = optimisticUpdate<DailyPickForDay[], string>(
+    queryClient,
+    picksForDayQueryKey,
+    (picks, dailyPickId) =>
+      picks?.map((pick) =>
+        pick.id === dailyPickId ? { ...pick, reminder_sent_at: new Date().toISOString() } : pick,
+      ),
+  );
+
   const reminderMutation = useMutation({
     mutationFn: async (dailyPickId: string) => {
       const input = sendPickReminderInputSchema.parse({ dailyPickId });
       const { error } = await supabase.rpc("send_pick_reminder", toSendPickReminderRpcArgs(input));
       if (error) throw error;
     },
+    onMutate: reminderOptimistic.onMutate,
     onSuccess: () => {
       showToast("התזכורת נשלחה.", "success");
-      void queryClient.invalidateQueries({
-        queryKey: ["grower-oversight", "picks-for-day", dayId],
-      });
+      void queryClient.invalidateQueries({ queryKey: picksForDayQueryKey });
     },
-    onError: (error: { message?: string }) => {
+    onError: mergeOnError(reminderOptimistic.onError, (error: { message?: string }) => {
       showToast(`שליחת התזכורת נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
-    },
+    }),
   });
 
   function toggleExpanded(growerId: string) {
@@ -356,12 +369,17 @@ export default function DistributorAsGrowerPage() {
   const rows = sortedGrowers.map((grower) => {
     const pick = pickByGrowerId.get(grower.id) ?? null;
     const tone = !pick ? "warning" : pick.status === "draft" ? "neutral" : "accent";
-    const caption =
+    const statusCaption =
       pick?.status === "submitted" && pick.submitted_at
         ? `נשלח ב-${new Date(pick.submitted_at).toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" })}`
         : pick?.status === "closed"
           ? "סגור"
           : null;
+    // Pickup time is per-grower, not per-product: the pick's own snapshot
+    // once it has one (taken at submit/close, so it survives a later edit
+    // to the company's default), otherwise the company's live default.
+    const pickupTime = formatPickupTime(pick?.pickup_time ?? grower.default_pickup_time);
+    const caption = [pickupTime && `איסוף ${pickupTime}`, statusCaption].filter(Boolean).join(" · ") || null;
     const families = pick ? groupPickLines(pick.daily_pick_products) : [];
     const reminding = reminderMutation.isPending && reminderMutation.variables === pick?.id;
 
@@ -392,6 +410,7 @@ export default function DistributorAsGrowerPage() {
           !dayView.isLive || !pick || pick.status === "closed" || reminderMutation.isPending
         }
         reminding={reminding}
+        reminded={!!pick?.reminder_sent_at}
       >
         <FamilyGroupedLines families={families} emptyLabel="אין מוצרים בעונה עבור מגדל זה." />
       </ExpandableEntityRow>

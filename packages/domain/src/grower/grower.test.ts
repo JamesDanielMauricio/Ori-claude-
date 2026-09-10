@@ -318,7 +318,7 @@ describe("grower picking module", () => {
     expect(afterClose).toMatchObject({ leftoverPallets: "8.00" });
   }, 30000);
 
-  it("update_pick_product_details lets the owning grower (or backoffice) set pickup_time/comment, rejects other growers, and rejects edits once the pick is closed", async () => {
+  it("update_pick_product_details lets the owning grower (or backoffice) set the comment, rejects other growers, and rejects edits once the pick is closed", async () => {
     const { client: backoffice, userId: adminId } = await signedInBackoffice();
     const grower = await createTestGrowerWithProduct();
     cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
@@ -337,26 +337,25 @@ describe("grower picking module", () => {
       "update_pick_product_details",
       toUpdatePickProductDetailsRpcArgs({
         dailyPickProductId: line!.id,
-        pickupTime: "14:30",
         comment: "gate code 1234",
       }),
     );
     expect(edit.error).toBeNull();
-    expect(edit.data).toMatchObject({ pickup_time: "14:30:00", comment: "gate code 1234" });
+    expect(edit.data).toMatchObject({ comment: "gate code 1234" });
 
     const backofficeEdit = await backoffice.rpc(
       "update_pick_product_details",
-      toUpdatePickProductDetailsRpcArgs({ dailyPickProductId: line!.id, pickupTime: null, comment: "cleared" }),
+      toUpdatePickProductDetailsRpcArgs({ dailyPickProductId: line!.id, comment: "cleared" }),
     );
     expect(backofficeEdit.error).toBeNull();
-    expect(backofficeEdit.data).toMatchObject({ pickup_time: null, comment: "cleared" });
+    expect(backofficeEdit.data).toMatchObject({ comment: "cleared" });
 
     const otherGrower = await createTestGrowerWithProduct();
     cleanupFns.push(() => deleteTestGrowerWithProduct(otherGrower));
     const otherGrowerClient = await signedInGrowerFor(otherGrower.companyId);
     const forbidden = await otherGrowerClient.rpc(
       "update_pick_product_details",
-      toUpdatePickProductDetailsRpcArgs({ dailyPickProductId: line!.id, pickupTime: "09:00", comment: "nope" }),
+      toUpdatePickProductDetailsRpcArgs({ dailyPickProductId: line!.id, comment: "nope" }),
     );
     expect(forbidden.error).not.toBeNull();
     expect(forbidden.error?.code).toBe(GROWER_ERROR_CODES.FORBIDDEN);
@@ -364,7 +363,7 @@ describe("grower picking module", () => {
     await backoffice.from("daily_picks").update({ status: "closed" }).eq("id", pickId);
     const afterClose = await growerClient.rpc(
       "update_pick_product_details",
-      toUpdatePickProductDetailsRpcArgs({ dailyPickProductId: line!.id, pickupTime: "10:00", comment: "too late" }),
+      toUpdatePickProductDetailsRpcArgs({ dailyPickProductId: line!.id, comment: "too late" }),
     );
     expect(afterClose.error).not.toBeNull();
     expect(afterClose.error?.code).toBe(GROWER_ERROR_CODES.INVALID_STATE);
@@ -453,8 +452,8 @@ describe("grower picking module", () => {
       toSavePickLinesRpcArgs({
         dailyPickId: pickId,
         lines: [
-          { dailyPickProductId: lineA!.id, palletsPicked: 10, pickupTime: null, comment: null },
-          { dailyPickProductId: lineB!.id, palletsPicked: 10, pickupTime: null, comment: null },
+          { dailyPickProductId: lineA!.id, palletsPicked: 10, comment: null },
+          { dailyPickProductId: lineB!.id, palletsPicked: 10, comment: null },
         ],
       }),
     );
@@ -476,8 +475,8 @@ describe("grower picking module", () => {
       toSavePickLinesRpcArgs({
         dailyPickId: pickId,
         lines: [
-          { dailyPickProductId: lineA!.id, palletsPicked: 99, pickupTime: "05:30", comment: "changed" },
-          { dailyPickProductId: lineB!.id, palletsPicked: 1, pickupTime: null, comment: null },
+          { dailyPickProductId: lineA!.id, palletsPicked: 99, comment: "changed" },
+          { dailyPickProductId: lineB!.id, palletsPicked: 1, comment: null },
         ],
       }),
     );
@@ -486,7 +485,7 @@ describe("grower picking module", () => {
 
     // The assertion that matters: line A must be untouched, not 99.
     const afterA = await getPickProductLine(pickId, grower.varietyId);
-    expect(afterA).toMatchObject({ palletsPicked: "10.00", pickupTime: null, comment: null });
+    expect(afterA).toMatchObject({ palletsPicked: "10.00", comment: null });
     const afterB = await getPickProductLine(pickId, secondProduct.varietyId);
     expect(afterB).toMatchObject({ palletsPicked: "10.00" });
 
@@ -496,8 +495,8 @@ describe("grower picking module", () => {
       toSavePickLinesRpcArgs({
         dailyPickId: pickId,
         lines: [
-          { dailyPickProductId: lineA!.id, palletsPicked: 99, pickupTime: "05:30", comment: "changed" },
-          { dailyPickProductId: lineB!.id, palletsPicked: 7, pickupTime: null, comment: null },
+          { dailyPickProductId: lineA!.id, palletsPicked: 99, comment: "changed" },
+          { dailyPickProductId: lineB!.id, palletsPicked: 7, comment: null },
         ],
       }),
     );
@@ -541,8 +540,8 @@ describe("grower picking module", () => {
         // Grower one's own pick — authorized — but carrying grower two's line.
         dailyPickId: pickOne.data!.id,
         lines: [
-          { dailyPickProductId: lineOne!.id, palletsPicked: 5, pickupTime: null, comment: null },
-          { dailyPickProductId: lineTwo!.id, palletsPicked: 5, pickupTime: null, comment: null },
+          { dailyPickProductId: lineOne!.id, palletsPicked: 5, comment: null },
+          { dailyPickProductId: lineTwo!.id, palletsPicked: 5, comment: null },
         ],
       }),
     );

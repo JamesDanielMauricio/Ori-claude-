@@ -439,6 +439,7 @@ export type Database = {
           grower_company_id: string;
           status: Database["public"]["Enums"]["daily_pick_status"];
           submitted_at: string | null;
+          pickup_time: string | null;
           reminder_sent_at: string | null;
           created_at: string;
           updated_at: string;
@@ -449,6 +450,7 @@ export type Database = {
           grower_company_id: string;
           status?: Database["public"]["Enums"]["daily_pick_status"];
           submitted_at?: string | null;
+          pickup_time?: string | null;
           reminder_sent_at?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -459,6 +461,7 @@ export type Database = {
           grower_company_id?: string;
           status?: Database["public"]["Enums"]["daily_pick_status"];
           submitted_at?: string | null;
+          pickup_time?: string | null;
           reminder_sent_at?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -486,7 +489,6 @@ export type Database = {
           daily_pick_id: string;
           product_variety_id: string;
           pallets_picked: string;
-          pickup_time: string | null;
           comment: string | null;
           leftover_pallets: string | null;
           created_at: string;
@@ -497,7 +499,6 @@ export type Database = {
           daily_pick_id: string;
           product_variety_id: string;
           pallets_picked?: string;
-          pickup_time?: string | null;
           comment?: string | null;
           leftover_pallets?: string | null;
           created_at?: string;
@@ -508,7 +509,6 @@ export type Database = {
           daily_pick_id?: string;
           product_variety_id?: string;
           pallets_picked?: string;
-          pickup_time?: string | null;
           comment?: string | null;
           leftover_pallets?: string | null;
           created_at?: string;
@@ -1081,6 +1081,14 @@ export type Database = {
         };
         Returns: Database["public"]["Tables"]["daily_picks"]["Row"];
       };
+      // Hand-added ahead of migration 0044 actually running — see the
+      // note on update_growers_data above for why.
+      revert_pick_to_draft: {
+        Args: {
+          p_daily_pick_id: string;
+        };
+        Returns: Database["public"]["Tables"]["daily_picks"]["Row"];
+      };
       update_pick_product_pallets: {
         Args: {
           p_daily_pick_product_id: string;
@@ -1104,7 +1112,6 @@ export type Database = {
       update_pick_product_details: {
         Args: {
           p_daily_pick_product_id: string;
-          p_pickup_time: string | null;
           p_comment: string | null;
         };
         Returns: Database["public"]["Tables"]["daily_pick_products"]["Row"];

@@ -13,6 +13,7 @@ import { QueryError } from "@/components/ui/query-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { hasChanges } from "@/lib/has-changes";
+import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
 
 import { CommentPopup } from "./comment-popup";
@@ -256,6 +257,23 @@ export function OrderLinesEditor({
     return groupCatalogByFamily(nonzeroRows);
   }, [catalogQuery.data, draft]);
 
+  // As with PickLinesEditor: the visible quantities are already the draft,
+  // live as the customer types, so submitting doesn't change what's on
+  // screen. What it does change is `dirty` (below) — derived from comparing
+  // the draft against `catalogQuery.data` — which otherwise stays "unsaved"
+  // until the round trip lands and this cache refetches. Patching the cache
+  // here resolves that the instant "שמור" is pressed; a rejection rolls it
+  // back, restoring `dirty` and the ActionBar along with it.
+  const submitOptimistic = optimisticUpdate<CatalogRow[], void>(queryClient, queryKey, (rows) => {
+    if (!rows) return rows;
+    return rows.map((row) => {
+      const line = draft[row.variety_id];
+      return line
+        ? { ...row, pallets_ordered: Number(line.pallets || 0), comment: line.comment || null }
+        : row;
+    });
+  });
+
   const submitMutation = useMutation({
     mutationFn: async () => {
       const lines = toSubmittedLines(catalogQuery.data ?? [], draft);
@@ -264,6 +282,7 @@ export function OrderLinesEditor({
       if (error) throw error;
       return data;
     },
+    onMutate: submitOptimistic.onMutate,
     onSuccess: () => {
       showToast("ההזמנה נשלחה.", "success");
       setConfirmOpen(false);
@@ -274,9 +293,9 @@ export function OrderLinesEditor({
       void queryClient.invalidateQueries({ queryKey });
       onSubmitted?.();
     },
-    onError: (error: { message?: string }) => {
+    onError: mergeOnError(submitOptimistic.onError, (error: { message?: string }) => {
       showToast(`השליחה נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
-    },
+    }),
   });
 
   function updateLine(varietyId: string, patch: Partial<DraftLine>) {

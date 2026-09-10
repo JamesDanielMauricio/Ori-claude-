@@ -45,7 +45,6 @@ function pickLine(id: string, pickId: string, variety: typeof lemon, pallets: st
     daily_pick_id: pickId,
     product_variety_id: variety.id,
     pallets_picked: pallets,
-    pickup_time: null,
     comment: null,
     product_varieties: variety,
   };
@@ -67,6 +66,7 @@ const picks: BoardPick[] = [
     id: "pick-a",
     grower_company_id: GROWER_A,
     status: "submitted",
+    pickup_time: null,
     daily_pick_products: [
       pickLine("line-a-lemon", "pick-a", lemon, "5"),
       pickLine("line-a-lychee", "pick-a", lychee, "7"),
@@ -76,6 +76,7 @@ const picks: BoardPick[] = [
     id: "pick-b",
     grower_company_id: GROWER_B,
     status: "submitted",
+    pickup_time: null,
     daily_pick_products: [pickLine("line-b-lemon", "pick-b", lemon, "10")],
   },
 ];

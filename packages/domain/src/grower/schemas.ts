@@ -28,17 +28,11 @@ export function toCloseOutPickLeftoversRpcArgs(input: CloseOutPickLeftoversInput
   return { p_trading_day_id: input.tradingDayId };
 }
 
-// `HH:MM` or `HH:MM:SS` — what an <input type="time"> gives the client and
-// what Postgres's `time` type round-trips as text. Null clears the
-// per-line override back to "use the grower's default pickup time".
-const timeOfDay = z
-  .string()
-  .regex(/^\d{2}:\d{2}(:\d{2})?$/, "expected HH:MM or HH:MM:SS")
-  .nullable();
-
+// Pickup time is a per-grower (company) setting, not a per-product one —
+// see companies.default_pickup_time / daily_picks.pickup_time — so this
+// function edits only the comment.
 export const updatePickProductDetailsInputSchema = z.object({
   dailyPickProductId: z.string().uuid(),
-  pickupTime: timeOfDay,
   comment: z.string().nullable(),
 });
 export type UpdatePickProductDetailsInput = z.infer<typeof updatePickProductDetailsInputSchema>;
@@ -46,7 +40,6 @@ export type UpdatePickProductDetailsInput = z.infer<typeof updatePickProductDeta
 export function toUpdatePickProductDetailsRpcArgs(input: UpdatePickProductDetailsInput) {
   return {
     p_daily_pick_product_id: input.dailyPickProductId,
-    p_pickup_time: input.pickupTime,
     p_comment: input.comment,
   };
 }
@@ -59,7 +52,6 @@ export function toUpdatePickProductDetailsRpcArgs(input: UpdatePickProductDetail
 export const pickLineInputSchema = z.object({
   dailyPickProductId: z.string().uuid(),
   palletsPicked: z.number().nonnegative(),
-  pickupTime: timeOfDay,
   comment: z.string().nullable(),
 });
 export type PickLineInput = z.infer<typeof pickLineInputSchema>;
@@ -80,7 +72,6 @@ export function toSavePickLinesRpcArgs(input: SavePickLinesInput) {
     p_lines: input.lines.map((line) => ({
       dailyPickProductId: line.dailyPickProductId,
       palletsPicked: line.palletsPicked,
-      pickupTime: line.pickupTime,
       comment: line.comment,
     })),
   };

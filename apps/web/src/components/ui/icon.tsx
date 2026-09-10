@@ -97,6 +97,27 @@ const PATHS: Record<string, ReactNode> = {
   ),
   menu: <path d="M4 7h16M4 12h16M4 17h16" />,
   close: <path d="m6.8 6.8 10.4 10.4M17.2 6.8 6.8 17.2" />,
+  // A lid, a can, and the ribs inside it — the record-table's delete
+  // button, the first place this app has needed a delete GLYPH rather than
+  // a text "מחק" button.
+  trash: (
+    <>
+      <path d="M4.5 7.5h15" />
+      <path d="M9.5 7.5V5.8a1.5 1.5 0 0 1 1.5-1.5h2a1.5 1.5 0 0 1 1.5 1.5V7.5" />
+      <path d="M6.5 7.5 7.3 19a1.8 1.8 0 0 0 1.8 1.7h5.8a1.8 1.8 0 0 0 1.8-1.7l.8-11.5" />
+      <path d="M10.3 11v6M13.7 11v6" />
+    </>
+  ),
+  // Three sliders at different heights — the record-table's
+  // column-visibility toggle.
+  columns: (
+    <>
+      <path d="M5 4.5v15M12 4.5v15M19 4.5v15" />
+      <circle cx="5" cy="9" r="1.7" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="15" r="1.7" fill="currentColor" stroke="none" />
+      <circle cx="19" cy="7" r="1.7" fill="currentColor" stroke="none" />
+    </>
+  ),
   // Points toward the inline start of an RTL page, i.e. visually right —
   // the "back" direction in Hebrew.
   chevronStart: <path d="m9.5 5 7 7-7 7" />,

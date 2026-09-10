@@ -35,15 +35,15 @@ export function SubmissionConfirmationDialog({
                   {family.varieties.map((variety) => (
                     <li
                       key={variety.variety_id}
-                      className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-sm"
+                      className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-md border border-border px-3 py-2 text-sm"
                     >
-                      <span>
+                      <span className="min-w-0 flex-1 truncate">
                         {variety.variety_name}
                         {!variety.is_orderable && (
                           <span className="ms-2 text-xs text-danger">(אזל מהמלאי)</span>
                         )}
                       </span>
-                      <span className="flex items-center gap-3 text-ink-muted">
+                      <span className="flex shrink-0 items-center gap-3 text-ink-muted">
                         {formatPrice(variety) && <span>{formatPrice(variety)}</span>}
                         <span>{variety.pallets_ordered} פלטות</span>
                       </span>

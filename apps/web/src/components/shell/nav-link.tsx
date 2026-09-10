@@ -67,7 +67,7 @@ export function NavLink({
       // `translate-x`-free hover on purpose: nudging a nav row sideways on
       // hover makes an eleven-item rail feel unstable when the pointer
       // crosses it on the way somewhere else. The tint alone is the signal.
-      className={`group relative flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-[background-color,color,box-shadow] duration-200 ease-[cubic-bezier(0.22,0.61,0.36,1)] before:absolute before:inset-y-1.5 before:start-0 before:w-[3px] before:scale-y-0 before:rounded-full before:bg-accent before:opacity-0 before:transition-[transform,opacity] before:duration-200 before:content-[''] ${stateClasses} ${className}`}
+      className={`group relative flex items-center gap-2.5 rounded-md px-3 py-2.5 text-sm transition-[background-color,color,box-shadow] duration-200 ease-[cubic-bezier(0.22,0.61,0.36,1)] before:absolute before:inset-y-1.5 before:start-0 before:w-[3px] before:scale-y-0 before:rounded-full before:bg-accent before:opacity-0 before:transition-[transform,opacity] before:duration-200 before:content-[''] ${stateClasses} ${className}`}
     >
       {children}
     </Link>

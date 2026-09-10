@@ -288,7 +288,7 @@ function CustomerCard({
             onClick={() => onPromote(customer.customerId)}
             aria-label={`הצע את המוצר הנבחר ל${customer.customerName}`}
             title="הוסף את המוצר הנבחר ללקוח זה"
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-accent-soft text-accent ring-1 ring-inset ring-accent/25 transition-colors duration-200 hover:bg-accent hover:text-accent-ink"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-accent-soft text-accent ring-1 ring-inset ring-accent/25 transition-colors duration-200 hover:bg-accent hover:text-accent-ink"
           >
             <Icon name="plusCircle" className="h-4 w-4" />
           </button>
@@ -304,7 +304,7 @@ function CustomerCard({
           onClick={() => onEditOrders(customer.customerId)}
           aria-label={`ערוך את הזמנת ${customer.customerName}`}
           title="ערוך הזמנת לקוח"
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-colors duration-200 hover:bg-accent-soft hover:text-accent"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-colors duration-200 hover:bg-accent-soft hover:text-accent"
         >
           <Icon name="pencil" className="h-3.5 w-3.5" />
         </button>
@@ -379,14 +379,14 @@ function OrderLineRow({
             : ""
       }`}
     >
-      <div className="flex items-center gap-2 px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2 px-3 py-2">
         {expandable ? (
           <button
             type="button"
             onClick={onToggle}
             aria-expanded={open}
             aria-label={`הצג שיוכים עבור ${line.varietyName}`}
-            className="group shrink-0"
+            className="group flex h-8 w-8 shrink-0 items-center justify-center"
           >
             <Icon
               name="chevronDown"
@@ -558,7 +558,7 @@ function ArrangementCell({
         disabled={!editing || saving}
         aria-label={`כמות לסידור עבור ${customerName}`}
         aria-invalid={invalidDraft}
-        className={`${inputClassName} h-7 w-16 px-2 text-xs ${
+        className={`${inputClassName} h-9 w-20 px-2 text-xs ${
           invalidDraft ? "ring-danger focus:ring-danger" : ""
         }`}
         value={draft}
@@ -588,7 +588,7 @@ function ArrangementCell({
           // was already the way out (see onKeyDown); it just never said so
           // while ✓ was always available.
           title={valid && !dirty ? "אין שינוי לשמירה — Esc לסגירה" : "שמור סידור (Enter)"}
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-accent text-accent-ink shadow-card transition-colors duration-200 hover:bg-accent-hover disabled:bg-surface-muted disabled:text-ink-subtle disabled:shadow-none"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-accent text-accent-ink shadow-card transition-colors duration-200 hover:bg-accent-hover disabled:bg-surface-muted disabled:text-ink-subtle disabled:shadow-none"
         >
           <Icon name="checkCircle" className="h-4 w-4" />
         </button>
@@ -598,7 +598,7 @@ function ArrangementCell({
           onClick={() => setEditing(true)}
           aria-label={`ערוך סידור עבור ${customerName}`}
           title="ערוך סידור"
-          className="animate-pop-in flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-accent ring-1 ring-inset ring-accent/35 transition-colors duration-200 hover:bg-accent-soft"
+          className="animate-pop-in flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-accent ring-1 ring-inset ring-accent/35 transition-colors duration-200 hover:bg-accent-soft"
         >
           <Icon name="pencil" className="h-3.5 w-3.5" />
         </button>
@@ -669,7 +669,7 @@ function AllocationRow({
             min={0}
             aria-label={`כמות משטחים מ${allocation.growerName}`}
             aria-invalid={!valid}
-            className={`${inputClassName} h-7 w-20 px-2 text-xs ${
+            className={`${inputClassName} h-9 w-24 px-2 text-xs ${
               !valid ? "ring-danger focus:ring-danger" : ""
             }`}
             value={draft}
@@ -697,7 +697,7 @@ function AllocationRow({
               onClick={() => void commit()}
               aria-label="שמור כמות"
               title="שמור (Enter)"
-              className="animate-pop-in flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-accent text-accent-ink shadow-card transition-colors duration-200 hover:bg-accent-hover disabled:bg-surface-muted disabled:text-ink-subtle disabled:shadow-none"
+              className="animate-pop-in flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-accent text-accent-ink shadow-card transition-colors duration-200 hover:bg-accent-hover disabled:bg-surface-muted disabled:text-ink-subtle disabled:shadow-none"
             >
               <Icon name="checkCircle" className="h-4 w-4" />
             </button>
@@ -709,7 +709,7 @@ function AllocationRow({
             onClick={() => onDelete(allocation.recordId)}
             aria-label={`מחק שיוך מ${allocation.growerName}`}
             title="מחק שיוך"
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-colors duration-200 hover:bg-danger-soft hover:text-danger disabled:cursor-not-allowed disabled:text-border-strong"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-colors duration-200 hover:bg-danger-soft hover:text-danger disabled:cursor-not-allowed disabled:text-border-strong"
           >
             <Icon name="close" className="h-3.5 w-3.5" />
           </button>

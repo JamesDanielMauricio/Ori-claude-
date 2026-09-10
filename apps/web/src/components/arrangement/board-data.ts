@@ -24,7 +24,6 @@ export interface BoardPickLine {
   daily_pick_id: string;
   product_variety_id: string;
   pallets_picked: string;
-  pickup_time: string | null;
   comment: string | null;
   product_varieties: BoardVarietyRow | null;
 }
@@ -33,6 +32,14 @@ export interface BoardPick {
   id: string;
   grower_company_id: string;
   status: string;
+  /**
+   * The grower's collection time for the day, snapshotted onto the pick
+   * itself (by submit_pick, or close_arrangement for a no-show) rather than
+   * a per-product field — pickup time is a per-grower setting. Null while
+   * the pick is still in draft; buildBoard falls back to the company's live
+   * default in that case.
+   */
+  pickup_time: string | null;
   daily_pick_products: BoardPickLine[];
 }
 
@@ -112,7 +119,6 @@ export interface GrowerPickLine {
   allocated: number;
   /** What this grower still has free on this line. */
   remaining: number;
-  pickupTime: string | null;
   comment: string | null;
 }
 
@@ -134,9 +140,10 @@ export interface GrowerSupply {
   pickId: string;
   status: string;
   /**
-   * The grower's collection time for the day: the earliest per-line override
-   * if any line sets one, else the company default. Null when neither
-   * exists, in which case the row shows no time rather than inventing one.
+   * The grower's collection time for the day: the pick's own snapshot
+   * (`daily_picks.pickup_time`) once one exists, else the company's live
+   * default while the pick is still in draft. Null when neither exists, in
+   * which case the row shows no time rather than inventing one.
    */
   pickupTime: string | null;
   picked: number;
@@ -353,7 +360,6 @@ export function buildBoard({
       const families = new Map<string, GrowerFamilyGroup>();
       let picked = 0;
       let allocated = 0;
-      const pickupTimes: string[] = [];
 
       for (const line of pick.daily_pick_products) {
         const variety = line.product_varieties;
@@ -362,7 +368,6 @@ export function buildBoard({
         const lineAllocated = allocatedByPickLine.get(line.id) ?? 0;
         picked += linePicked;
         allocated += lineAllocated;
-        if (line.pickup_time) pickupTimes.push(line.pickup_time);
 
         let group = families.get(variety.family_id);
         if (!group) {
@@ -381,7 +386,6 @@ export function buildBoard({
           picked: linePicked,
           allocated: lineAllocated,
           remaining: linePicked - lineAllocated,
-          pickupTime: line.pickup_time,
           comment: line.comment,
         });
       }
@@ -390,21 +394,13 @@ export function buildBoard({
         group.lines.sort((a, b) => a.varietyName.localeCompare(b.varietyName, "he"));
       }
 
-      // `time` values are zero-padded "HH:MM:SS", so a plain string compare
-      // is a correct chronological one — no Date parsing needed to find the
-      // earliest of them.
-      const earliest = pickupTimes.reduce<string | null>(
-        (min, time) => (min === null || time < min ? time : min),
-        null,
-      );
-
       return {
         growerId: pick.grower_company_id,
         growerName: nameOf(pick.grower_company_id),
         pickId: pick.id,
         status: pick.status,
         pickupTime:
-          earliest ?? companyById.get(pick.grower_company_id)?.default_pickup_time ?? null,
+          pick.pickup_time ?? companyById.get(pick.grower_company_id)?.default_pickup_time ?? null,
         picked,
         allocated,
         families: [...families.values()].sort((a, b) =>

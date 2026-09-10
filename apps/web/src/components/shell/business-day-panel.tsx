@@ -8,16 +8,19 @@ import { todayIsoDate } from "@ori/shared/dates";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { checkboxClassName } from "@/components/reference-data/form-field";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Icon } from "@/components/ui/icon";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
+import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
 import {
   OPEN_TRADING_DAY_QUERY_KEY,
   useOpenTradingDay,
   useSelectedTradingDay,
+  type TradingDayView,
 } from "@/lib/trading-day-view";
 
 import { TradingDayCalendarPicker } from "./trading-day-calendar-picker";
@@ -72,11 +75,13 @@ export function BusinessDayPanel() {
   const { selectedDate, setSelectedDate } = useSelectedTradingDay();
   const isViewingPinnedDate = selectedDate !== null;
 
+  const shopQueryKey = ["business-day-panel", "shop", day?.id] as const;
+
   // Read-only display of the flag once the shop is already open — this
   // panel doesn't add a way to change it after the fact; canSeePrices is
   // still only ever set at open_shop time (the checkbox below it).
   const shopQuery = useQuery({
-    queryKey: ["business-day-panel", "shop", day?.id],
+    queryKey: shopQueryKey,
     enabled: phase === "shop_open",
     queryFn: async () => {
       const { data, error } = await supabase
@@ -100,6 +105,41 @@ export function BusinessDayPanel() {
     void queryClient.invalidateQueries({ queryKey: ["shop-panel"] });
   }
 
+  // Shared shape for the three transitions on an ALREADY-existing day
+  // (open shop / close shop / close day): patch its `phase` in place, roll
+  // back to whatever it was if the server refuses. `initiateMutation` below
+  // is the one transition with no existing row to patch, so it builds its
+  // own updater instead of using this.
+  function dayPhaseOptimistic(nextPhase: TradingDayView["phase"]) {
+    return optimisticUpdate<TradingDayView | null, void>(
+      queryClient,
+      OPEN_TRADING_DAY_QUERY_KEY,
+      (current) => (current ? { ...current, phase: nextPhase } : current),
+    );
+  }
+
+  const initiateOptimistic = optimisticUpdate<TradingDayView | null, void>(
+    queryClient,
+    OPEN_TRADING_DAY_QUERY_KEY,
+    (current) =>
+      current ?? {
+        // No real id yet — initiate_business_day creates the row
+        // server-side. A placeholder is safe here ONLY because `busy`
+        // (below) disables every lifecycle button, this one included,
+        // while this mutation is pending, so nothing in this panel can act
+        // on the fake id before invalidate() replaces it with the real row.
+        // Any other mounted screen keyed off a real day id doesn't read
+        // this particular cache entry today (grep OPEN_TRADING_DAY_QUERY_KEY
+        // before changing that); if one ever does, the existing realtime
+        // subscription on trading_days (lib/trading-day-view.tsx) and this
+        // mutation's own onSettled-style invalidate both correct it the
+        // moment the real row lands, success or failure.
+        id: `optimistic-${crypto.randomUUID()}`,
+        trade_date: todayIsoDate(),
+        phase: "initiated",
+      },
+  );
+
   const initiateMutation = useMutation({
     mutationFn: async () => {
       // The local calendar date, never a UTC-derived one. `toISOString()
@@ -117,16 +157,19 @@ export function BusinessDayPanel() {
       );
       if (error) throw error;
     },
+    onMutate: initiateOptimistic.onMutate,
     onSuccess: () => {
       showToast("יום העסקים נפתח.", "success");
       setConfirmAction(null);
       invalidate();
     },
-    onError: (error: { message?: string }) => {
+    onError: mergeOnError(initiateOptimistic.onError, (error: { message?: string }) => {
       showToast(`פתיחת היום נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
       setConfirmAction(null);
-    },
+    }),
   });
+
+  const openShopPhaseOptimistic = dayPhaseOptimistic("shop_open");
 
   const openShopMutation = useMutation({
     mutationFn: async () => {
@@ -134,47 +177,64 @@ export function BusinessDayPanel() {
       const { error } = await supabase.rpc("open_shop", toOpenShopRpcArgs(input));
       if (error) throw error;
     },
+    onMutate: async () => {
+      const context = await openShopPhaseOptimistic.onMutate(undefined);
+      // Seeds the read-only "לקוחות מורשים רואים מחירים" checkbox with the
+      // value this same click is choosing, so it doesn't sit blank/default
+      // for the round trip — the real row lands moments later (invalidate()
+      // below) and simply confirms it. No rollback needed: on failure the
+      // phase patch above reverts, `shopQuery` goes back to disabled
+      // (`enabled: phase === "shop_open"`), and this seed just sits unused.
+      queryClient.setQueryData(shopQueryKey, { can_see_prices: canSeePrices });
+      return context;
+    },
     onSuccess: () => {
       showToast("החנות נפתחה.", "success");
       setConfirmAction(null);
       invalidate();
     },
-    onError: (error: { message?: string }) => {
+    onError: mergeOnError(openShopPhaseOptimistic.onError, (error: { message?: string }) => {
       showToast(`פתיחת החנות נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
       setConfirmAction(null);
-    },
+    }),
   });
+
+  const closeShopPhaseOptimistic = dayPhaseOptimistic("shop_closed");
 
   const closeShopMutation = useMutation({
     mutationFn: async () => {
       const { error } = await supabase.rpc("close_shop");
       if (error) throw error;
     },
+    onMutate: closeShopPhaseOptimistic.onMutate,
     onSuccess: () => {
       showToast("החנות נסגרה.", "success");
       setConfirmAction(null);
       invalidate();
     },
-    onError: (error: { message?: string }) => {
+    onError: mergeOnError(closeShopPhaseOptimistic.onError, (error: { message?: string }) => {
       showToast(`סגירת החנות נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
       setConfirmAction(null);
-    },
+    }),
   });
+
+  const closeDayPhaseOptimistic = dayPhaseOptimistic("closed");
 
   const closeDayMutation = useMutation({
     mutationFn: async () => {
       const { error } = await supabase.rpc("close_arrangement");
       if (error) throw error;
     },
+    onMutate: closeDayPhaseOptimistic.onMutate,
     onSuccess: () => {
       showToast("יום העסקים נסגר.", "success");
       setConfirmAction(null);
       invalidate();
     },
-    onError: (error: { message?: string }) => {
+    onError: mergeOnError(closeDayPhaseOptimistic.onError, (error: { message?: string }) => {
       showToast(`סגירת יום העסקים נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
       setConfirmAction(null);
-    },
+    }),
   });
 
   const busy =
@@ -263,6 +323,7 @@ export function BusinessDayPanel() {
         <label className="flex items-center gap-2 px-1 text-xs text-ink-muted">
           <input
             type="checkbox"
+            className={checkboxClassName}
             checked={canSeePrices}
             onChange={(event) => setCanSeePrices(event.target.checked)}
           />
@@ -273,6 +334,7 @@ export function BusinessDayPanel() {
         <label className="flex items-center gap-2 px-1 text-xs text-ink-muted">
           <input
             type="checkbox"
+            className={checkboxClassName}
             checked={shopQuery.data?.can_see_prices ?? true}
             disabled
             readOnly

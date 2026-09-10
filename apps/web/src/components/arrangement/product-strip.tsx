@@ -106,7 +106,7 @@ export function ProductStrip({
             <button
               type="button"
               onClick={() => onEditPrice(product.varietyId)}
-              className="mt-4 shrink-0 rounded-md px-3 py-1.5 text-xs font-semibold text-ink-muted ring-1 ring-inset ring-border-strong transition-colors duration-200 hover:bg-accent-soft/70 hover:text-accent"
+              className="mt-4 flex h-9 shrink-0 items-center rounded-md px-3 text-xs font-semibold text-ink-muted ring-1 ring-inset ring-border-strong transition-colors duration-200 hover:bg-accent-soft/70 hover:text-accent"
             >
               ערוך מחיר
             </button>

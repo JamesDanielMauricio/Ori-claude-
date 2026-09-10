@@ -33,6 +33,24 @@ export function toSubmitPickRpcArgs(input: SubmitPickInput) {
   return { p_daily_pick_id: input.dailyPickId };
 }
 
+// Backoffice-only reverse of submit_pick, from the arrangement board's
+// truck icon (migration 0044) — Submitted -> Draft, while the trading day
+// is still open. Unlike every other status transition in this module, this
+// one is NOT forward-only: it's a deliberate, later product decision that a
+// distributor can un-submit a grower whose pick isn't actually ready to be
+// arranged against yet. Once the trading day closes, every pick is 'closed'
+// (close_arrangement, 0043/0044), so there is no submitted pick left to
+// revert — the function's own status check enforces that without needing a
+// separate day-phase check.
+export const revertPickToDraftInputSchema = z.object({
+  dailyPickId: z.string().uuid(),
+});
+export type RevertPickToDraftInput = z.infer<typeof revertPickToDraftInputSchema>;
+
+export function toRevertPickToDraftRpcArgs(input: RevertPickToDraftInput) {
+  return { p_daily_pick_id: input.dailyPickId };
+}
+
 export const updatePickProductPalletsInputSchema = z.object({
   dailyPickProductId: z.string().uuid(),
   palletsPicked: z.number().nonnegative(),

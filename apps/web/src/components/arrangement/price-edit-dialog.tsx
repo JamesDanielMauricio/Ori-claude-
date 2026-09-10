@@ -6,6 +6,7 @@ import { FormField, inputClassName } from "@/components/reference-data/form-fiel
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
+import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
 
 interface ProductVarietyRow {
@@ -47,8 +48,10 @@ export function PriceEditDialog({
   const [priceRangeTo, setPriceRangeTo] = useState("");
   const [priceType, setPriceType] = useState("");
 
+  const varietyQueryKey = ["arrangement", "product-variety", varietyId] as const;
+
   const varietyQuery = useQuery({
-    queryKey: ["arrangement", "product-variety", varietyId],
+    queryKey: varietyQueryKey,
     enabled: !!varietyId,
     queryFn: async () => {
       const { data, error } = await supabase
@@ -105,6 +108,23 @@ export function PriceEditDialog({
     setPriceType(varietyQuery.data.price_type ?? "");
   }, [varietyQuery.data, varietyId, seededVarietyId]);
 
+  type VarietyRow = ProductVarietyRow & { product_families: { name: string } | null };
+
+  const saveOptimistic = optimisticUpdate<VarietyRow, void>(
+    queryClient,
+    varietyQueryKey,
+    (row) =>
+      row
+        ? {
+            ...row,
+            price: price === "" ? null : price,
+            price_range_from: priceRangeFrom === "" ? null : priceRangeFrom,
+            price_range_to: priceRangeTo === "" ? null : priceRangeTo,
+            price_type: priceType || null,
+          }
+        : row,
+  );
+
   const saveMutation = useMutation({
     mutationFn: async () => {
       const row = varietyQuery.data!;
@@ -130,14 +150,15 @@ export function PriceEditDialog({
       const { error } = await supabase.rpc("save_product", toSaveProductRpcArgs(input));
       if (error) throw error;
     },
+    onMutate: saveOptimistic.onMutate,
     onSuccess: () => {
       showToast("המחיר עודכן.", "success");
       void queryClient.invalidateQueries({ queryKey: ["arrangement"] });
       onClose();
     },
-    onError: (error: { message?: string }) => {
+    onError: mergeOnError(saveOptimistic.onError, (error: { message?: string }) => {
       showToast(`עדכון המחיר נכשל: ${error.message ?? "שגיאה לא ידועה"}`, "error");
-    },
+    }),
   });
 
   const title = varietyQuery.data
@@ -152,7 +173,7 @@ export function PriceEditDialog({
         <p className="text-sm text-ink-muted">טוען…</p>
       ) : (
         <div className="flex flex-col gap-4">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <FormField label="מחיר" htmlFor="arr-price">
               <input
                 id="arr-price"

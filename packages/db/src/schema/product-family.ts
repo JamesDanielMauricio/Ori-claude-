@@ -9,6 +9,11 @@ export const productFamilies = pgTable("product_families", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   category: text("category"),
+  // The family's catalog photo, shown on the customer order screen and the
+  // backoffice Products table. Added by migration 0036 and live in the
+  // database since; this declaration was simply never brought across, so
+  // Drizzle's view of the table drifted from the real one.
+  imageUrl: text("image_url"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

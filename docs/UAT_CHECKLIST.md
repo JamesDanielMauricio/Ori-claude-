@@ -58,13 +58,25 @@ here.
 
 - [ ] A grower with in-season products, on a day the distributor has initiated, sees today's pick
       line(s) pre-populated (not blank) — the bootstrap ran.
-- [ ] Editing pallet count, pickup time, and comment on a line and pressing Save persists — reload
+- [ ] Editing pallet count and comment on a line and pressing Save persists — reload
       the page and confirm the values are still there (not just held in local state).
 - [ ] Pressing Cancel after typing into a field discards the edit — reload confirms the *original*
       value survived, not the typed-but-uncancelled one.
 - [ ] Submitting a pick moves its visible status forward (Draft → Submitted); the grower can still
       edit line items afterward (per the PRD, editing after submit is allowed and doesn't reverse
       status).
+- [ ] Pickup time is a per-grower setting, not per-product: set a grower's default pickup time in
+      `/backoffice/growers`, submit their pick for the day, then change the grower's default again —
+      the already-submitted pick's collection time (shown on the arrangement board and on
+      `/backoffice/distributor-grower`) stays at the value it had when submitted, not the new default.
+- [ ] On `/backoffice/arrangement`, the truck icon beside a grower's pencil submits a Draft pick
+      (status badge/label moves to Submitted); clicking it again while the trading day is still open
+      reverts it back to Draft. The icon disappears once the pick is Closed, and the whole toggle is
+      disabled once the arrangement itself is closed or a past day is pinned.
+- [ ] Closing the trading day's arrangement (sidebar's "סגירת יום עסקים") force-finalizes any pick
+      still in Draft (a no-show, or one reverted with the truck icon and never re-submitted) straight
+      to Closed — it should not get stuck, and its pickup time still reflects the grower's default at
+      that moment.
 - [ ] A grower with **no** Daily Pick for today (distributor hasn't initiated a day yet) sees a
       sensible empty state, not an error or a blank screen.
 - [ ] **Backoffice-as-grower** (`/backoffice/distributor-grower`): a backoffice user can open any

@@ -51,9 +51,15 @@ export function TableBody({ children }: { children: ReactNode }) {
 // The inline-start marker bar is drawn with a `box-shadow` inset rather than
 // a border, so it appears on hover without the 3px width shifting every cell
 // in the row sideways — the eye reads the row as highlighted, not as moved.
+// `group/row` (a NAMED group, not a bare `group`) so a cell can react to
+// its own row being hovered — the record table's pinned actions column
+// needs it, since an opaque frozen cell can't show the row tint painted
+// underneath it. Named deliberately: a bare `group` here would also fire
+// every unnamed `group-hover:` inside any row in the app, e.g. the
+// arrangement records table's chevron, which means to follow its own button.
 export function TableRow({ children }: { children: ReactNode }) {
   return (
-    <tr className="transition-[background-color,box-shadow] duration-150 hover:bg-accent-soft/55 hover:shadow-[inset_3px_0_0_var(--color-accent)]">
+    <tr className="group/row transition-[background-color,box-shadow] duration-150 hover:bg-accent-soft/55 hover:shadow-[inset_3px_0_0_var(--color-accent)]">
       {children}
     </tr>
   );

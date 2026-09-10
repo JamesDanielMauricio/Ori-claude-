@@ -12,3 +12,4 @@ export {
   type DeliverRecoveryLink,
 } from "./admin-reset-password";
 export { deleteUser, type DeleteUserInput } from "./delete-user";
+export { listUserEmails } from "./list-user-emails";

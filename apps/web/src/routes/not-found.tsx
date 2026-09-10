@@ -18,7 +18,7 @@ export default function NotFound() {
           sentence under it is what you actually read. */}
       <p
         aria-hidden
-        className="font-display pointer-events-none select-none text-[9rem] leading-none text-border-strong/70 sm:text-[12rem]"
+        className="font-display pointer-events-none select-none text-[5.5rem] leading-none text-border-strong/70 sm:text-[9rem] md:text-[12rem]"
       >
         404
       </p>

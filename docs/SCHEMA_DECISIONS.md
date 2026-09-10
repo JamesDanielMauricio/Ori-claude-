@@ -5,7 +5,89 @@ A running log of non-obvious decisions made about `packages/db`'s schema — the
 
 ---
 
-## 2026-07-12 (latest) — The remaining six mainalert triggers: one backoffice-addressing pattern,
+## 2026-09-10 (latest) — Pick status gains a deliberate backward transition: Submitted → Draft,
+## backoffice-only, from the arrangement board
+
+**Context.** `reference/prd/state-machines/pick-status-state-machine.md` documents the Daily Pick
+state machine as strictly forward-only (Draft → Submitted → Closed), "no backward transitions
+exist in any UI" — accurate for the source app, and for this rebuild up to this point
+(`packages/domain/src/lifecycle-engine/lifecycle.test.ts` has a test literally titled "submit_pick
+is forward-only and grower-scoped"). Stakeholder direction now adds one, deliberately: a truck icon
+beside the pencil in `GrowerSupplyColumn` (the arrangement board's grower list) lets the
+distributor revert a grower's Submitted pick back to Draft while the trading day is still open —
+e.g. the grower submitted prematurely, or the distributor wants to keep editing before treating the
+lot as final. This does not change the *reference* doc (that still describes the source app's own
+behavior, synced from the external PRD tool); it's recorded here as a deliberate, later divergence
+in this rebuild's own implementation.
+
+**What changed (`packages/db/migrations/0044_revert-pick-to-draft.sql`).**
+
+- **`revert_pick_to_draft(p_daily_pick_id)`, new, backoffice-only** (not "the owning grower, or
+  backoffice" like every other function in this module — this is a distributor-side arrangement-
+  board control, not something exposed on the grower's own picking screen). Only accepts a pick
+  currently `'submitted'` (raises `INVALID_STATE`/P0007 otherwise) — since `close_arrangement`
+  mass-closes every pick to `'closed'` when the day ends, a pick can only ever be `'submitted'`
+  while its trading day is still open, so this one check is equivalent to "day still open" without
+  a separate phase lookup.
+- **Clears what `submit_pick` set**: `status` back to `'draft'`, `submitted_at` back to `null`, and
+  — because of the pickup-time snapshot from the entry below — `pickup_time` back to `null` too. A
+  later re-submission re-snapshots whatever the grower company's default is AT THAT POINT, which is
+  the whole reason 0043 made it a snapshot instead of a live join in the first place.
+- **`close_arrangement`, extended again**: the mass pick-close now also backfills `submitted_at`
+  (`coalesce(dp.submitted_at, now())`) alongside the existing `pickup_time` backfill, for any pick
+  that reaches Closed without ever going through `submit_pick` — a genuine no-show, or one the
+  distributor reverted with the truck icon and never got re-submitted. Every closed pick now carries
+  a real submission timestamp, not a null one for the picks that arrived here sideways.
+
+The arrangement-board UI (`GrowerSupplyColumn`) hides the toggle entirely once a pick is `'closed'`
+— there's nothing left to flip — and disables it whenever the screen's own `editable` flag
+(trading day live + arrangement still open) is false, the same gate every other write control on
+that screen already uses.
+
+---
+
+## 2026-09-10 — Pickup time moved from per-product to per-grower, with a
+## submission-time snapshot for historical accuracy
+
+**Context.** `daily_pick_products.pickup_time` (0014) modeled pickup time as an optional
+per-line override of `companies.default_pickup_time` — stakeholder feedback confirmed this was
+simply wrong: a grower has one collection time for the whole day, not one per variety on their
+pick. The per-line override and its editing surface (a `type="time"` input per row in
+`PickLinesEditor`) are removed entirely.
+
+**What changed (`packages/db/migrations/0043_grower-pickup-time.sql`).**
+
+- **`daily_pick_products.pickup_time`, dropped.** `update_pick_product_details` now edits only
+  `comment` (its 3-arg signature is replaced with a 2-arg one via an explicit `drop function` —
+  see the "real, silent bug" entry below for why that step can't be skipped). `save_pick_lines`
+  (0039)'s per-line JSONB shape drops `pickupTime` the same way.
+- **`daily_picks.pickup_time`, added** — not a live join to `companies.default_pickup_time`, but
+  a snapshot of it, so a later edit to the company's default cannot rewrite a past day's record.
+  This is the direct answer to "we should be able to see the pickup time of past records."
+  Written at exactly the two moments a pick can leave Draft:
+  1. **`submit_pick`** — the grower's own Draft → Submitted action copies the company's current
+     `default_pickup_time` in at that moment.
+  2. **`close_arrangement`**'s mass pick-close — a pick that never gets submitted (a no-show
+     grower, force-closed at Phase 4 per Invariant 4) never runs `submit_pick`, so the same
+     backfill happens there instead, guarded with `coalesce(dp.pickup_time, c.default_pickup_time)`
+     so an already-submitted pick's own snapshot is never overwritten.
+- While still in Draft, `daily_picks.pickup_time` is null and every read path (the arrangement
+  board's `buildBoard`, the Grower Inventory Status oversight screen) falls back to the live
+  `companies.default_pickup_time` — there is nothing to snapshot yet, so showing the live value
+  is correct, not a bug.
+- `FamilyGroupedLines`' `secondary` field (the per-line pickup-time label on the oversight
+  screen's read view) is removed outright rather than left unset: it was already unset for order
+  lines, and removing the grower side left nothing that ever populated it. The oversight screen
+  (`distributor-grower.tsx`) now shows the grower's collection time once, in the row's caption,
+  next to (not instead of) the submission-time/closed status text it already showed.
+
+See `packages/domain/src/lifecycle-engine/lifecycle.test.ts`'s four-phase walkthrough for the
+snapshot behavior proven end to end: a submitting grower's pick keeps the company default it had
+at submission time, and a no-show's pick picks up the same backfill through `close_arrangement`.
+
+---
+
+## 2026-07-12 — The remaining six mainalert triggers: one backoffice-addressing pattern,
 ## live-computed stock alerts, and a transporter cc — no new dispatch mechanism
 
 **What changed.** Every `mainalert` id `docs/DATA_MIGRATION_PLAN.md` still listed as unbuilt (ids 3,

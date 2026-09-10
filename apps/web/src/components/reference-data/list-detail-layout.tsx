@@ -28,7 +28,18 @@ export function ListDetailLayout({
     <div className="flex h-full min-h-0 flex-col md:h-[calc(100dvh-4rem)] lg:h-[calc(100dvh-5rem)]">
       {header && <div className="shrink-0">{header}</div>}
       <div className="flex min-h-0 flex-1 flex-col gap-4 md:flex-row">
-        <div className="flex min-h-0 w-full flex-col md:w-80 md:shrink-0">{list}</div>
+        {/* Below `md` the outer column above has no fixed height (`h-full`
+            resolves against an auto-height ancestor on a stacked mobile
+            page), so this pane's own `flex-1` had nothing to size against —
+            RecordList's internal `overflow-y-auto` never actually clipped,
+            and a several-hundred-row catalog rendered every row inline on
+            the page before the detail form ever came into view. `h-[65dvh]`
+            gives it a real height to scroll within on mobile; `md:h-auto`
+            hands sizing back to the flex/`flex-1` chain the desktop layout
+            already relies on. */}
+        <div className="flex h-[65dvh] min-h-0 w-full flex-col md:h-auto md:w-80 md:shrink-0">
+          {list}
+        </div>
         {/* The detail pane is the screen's focus — it's where every edit
             happens — so it carries the heavier of the two elevations. The
             list beside it keeps whatever its own screen gives it, and the

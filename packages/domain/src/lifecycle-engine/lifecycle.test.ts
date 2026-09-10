@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { db } from "@ori/db";
-import { notificationOutbox } from "@ori/db/schema";
+import { companies, notificationOutbox } from "@ori/db/schema";
 import {
   createTestBackofficeAdmin,
   createTestCompany,
@@ -19,6 +19,7 @@ import {
   LIFECYCLE_ERROR_CODES,
   toInitiateBusinessDayRpcArgs,
   toOpenShopRpcArgs,
+  toRevertPickToDraftRpcArgs,
   toSubmitPickRpcArgs,
   toUpdatePickProductPalletsRpcArgs,
 } from "./schemas";
@@ -73,9 +74,9 @@ describe("lifecycle engine", () => {
     // against a half-populated `cleanupFns` array while the abandoned
     // chain is still creating rows — exactly the kind of FK-violation
     // flake a short timeout would otherwise cause here.
-    const submittingGrower = await createTestGrowerWithProduct();
+    const submittingGrower = await createTestGrowerWithProduct({ defaultPickupTime: "06:30" });
     cleanupFns.push(() => deleteTestGrowerWithProduct(submittingGrower));
-    const noShowGrower = await createTestGrowerWithProduct();
+    const noShowGrower = await createTestGrowerWithProduct({ defaultPickupTime: "09:45" });
     cleanupFns.push(() => deleteTestGrowerWithProduct(noShowGrower));
     const customer = await createTestCompany(`Test Customer ${randomUUID()}`, "customer");
     cleanupFns.push(() => deleteTestCompany(customer.id));
@@ -127,7 +128,11 @@ describe("lifecycle engine", () => {
       toSubmitPickRpcArgs({ dailyPickId: submittingPick!.id }),
     );
     expect(submit.error).toBeNull();
-    expect(submit.data).toMatchObject({ status: "submitted" });
+    // submit_pick snapshots the grower's CURRENT company default onto the
+    // pick's own pickup_time (0043) — pickup time is a per-grower setting,
+    // not a per-product one, and this snapshot is what keeps this record's
+    // collection time stable even if the company default is edited later.
+    expect(submit.data).toMatchObject({ status: "submitted", pickup_time: "06:30:00" });
 
     // --- Phase 2: Open Shop ---
     const openShop = await backoffice.rpc("open_shop", toOpenShopRpcArgs({ canSeePrices: true }));
@@ -212,6 +217,28 @@ describe("lifecycle engine", () => {
     const noShowPickAfterClose = await getDailyPickForGrower(day.id, noShowGrower.companyId);
     expect(submittingPickAfterClose).toMatchObject({ status: "closed" });
     expect(noShowPickAfterClose).toMatchObject({ status: "closed" });
+
+    // close_arrangement's mass pick-close backfills pickup_time (from the
+    // grower's current company default) AND submitted_at (0043/0044) for a
+    // pick that never went through submit_pick — the no-show — while
+    // leaving a pick that already captured its own values at submission
+    // untouched.
+    const { data: picksAfterClose } = await backoffice
+      .from("daily_picks")
+      .select("grower_company_id, pickup_time, submitted_at")
+      .in("id", [submittingPick!.id, noShowPick!.id]);
+    expect(picksAfterClose).toContainEqual(
+      expect.objectContaining({
+        grower_company_id: submittingGrower.companyId,
+        pickup_time: "06:30:00",
+        submitted_at: submit.data!.submitted_at,
+      }),
+    );
+    const noShowAfterClose = picksAfterClose!.find(
+      (row) => row.grower_company_id === noShowGrower.companyId,
+    );
+    expect(noShowAfterClose).toMatchObject({ pickup_time: "09:45:00" });
+    expect(noShowAfterClose!.submitted_at).not.toBeNull();
 
     const metadata = closeArrangement.data!.metadata as {
       draftPicksForceClosed: Array<{ dailyPickId: string; growerCompanyId: string }>;
@@ -591,6 +618,79 @@ describe("lifecycle engine", () => {
     const forbiddenSubmit = await otherGrowerClient.rpc("submit_pick", toSubmitPickRpcArgs({ dailyPickId }));
     expect(forbiddenSubmit.error).not.toBeNull();
     expect(forbiddenSubmit.error?.code).toBe(LIFECYCLE_ERROR_CODES.FORBIDDEN);
+  }, 30000);
+
+  // revert_pick_to_draft (0044) is the one deliberate exception to this
+  // module's otherwise forward-only rule — the arrangement board's truck
+  // icon. Proves: backoffice-only, only accepts a submitted pick, clears
+  // submitted_at AND the pickup_time snapshot (0043) so a later
+  // re-submission captures the company's default fresh rather than the
+  // stale one from before the revert, and a closed pick can never be
+  // reverted.
+  it("revert_pick_to_draft is backoffice-only, only reverts a submitted pick, and clears its pickup_time snapshot for a fresh re-submission", async () => {
+    const backoffice = await signedInBackoffice();
+    const admin = await createTestBackofficeAdmin();
+    cleanupFns.push(() => deleteTestBackofficeAdmin(admin));
+
+    const grower = await createTestGrowerWithProduct({ defaultPickupTime: "07:00" });
+    cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
+
+    const day = await createTestTradingDay({ initiatedByUserId: admin.userId, phase: "initiated" });
+    cleanupFns.push(() => deleteTestTradingDay(day.id));
+
+    const growerClient = await signedInGrowerFor(grower.companyId);
+
+    const directPick = await backoffice
+      .from("daily_picks")
+      .insert({ trading_day_id: day.id, grower_company_id: grower.companyId, status: "draft" })
+      .select()
+      .single();
+    const dailyPickId = directPick.data!.id;
+
+    // Still draft: nothing to revert.
+    const revertWhileDraft = await backoffice.rpc(
+      "revert_pick_to_draft",
+      toRevertPickToDraftRpcArgs({ dailyPickId }),
+    );
+    expect(revertWhileDraft.error).not.toBeNull();
+    expect(revertWhileDraft.error?.code).toBe(LIFECYCLE_ERROR_CODES.INVALID_STATE);
+
+    const submit = await growerClient.rpc("submit_pick", toSubmitPickRpcArgs({ dailyPickId }));
+    expect(submit.error).toBeNull();
+    expect(submit.data).toMatchObject({ status: "submitted", pickup_time: "07:00:00" });
+
+    // The grower can't revert their own submission — this is a
+    // distributor-side control, unlike submit_pick's "owning grower, or
+    // backoffice".
+    const forbidden = await growerClient.rpc(
+      "revert_pick_to_draft",
+      toRevertPickToDraftRpcArgs({ dailyPickId }),
+    );
+    expect(forbidden.error).not.toBeNull();
+    expect(forbidden.error?.code).toBe(LIFECYCLE_ERROR_CODES.FORBIDDEN);
+
+    const revert = await backoffice.rpc("revert_pick_to_draft", toRevertPickToDraftRpcArgs({ dailyPickId }));
+    expect(revert.error).toBeNull();
+    expect(revert.data).toMatchObject({ status: "draft", submitted_at: null, pickup_time: null });
+
+    // The distributor changes the grower's default before it's submitted
+    // again — proves the clear-on-revert is what lets the next submission
+    // pick up the NEW value rather than replaying the stale one.
+    await db.update(companies).set({ defaultPickupTime: "11:15" }).where(eq(companies.id, grower.companyId));
+
+    const resubmit = await growerClient.rpc("submit_pick", toSubmitPickRpcArgs({ dailyPickId }));
+    expect(resubmit.error).toBeNull();
+    expect(resubmit.data).toMatchObject({ status: "submitted", pickup_time: "11:15:00" });
+
+    // Force the pick closed (standing in for close_arrangement's mass
+    // close) — a closed pick can never be reverted either.
+    await backoffice.from("daily_picks").update({ status: "closed" }).eq("id", dailyPickId);
+    const revertWhileClosed = await backoffice.rpc(
+      "revert_pick_to_draft",
+      toRevertPickToDraftRpcArgs({ dailyPickId }),
+    );
+    expect(revertWhileClosed.error).not.toBeNull();
+    expect(revertWhileClosed.error?.code).toBe(LIFECYCLE_ERROR_CODES.INVALID_STATE);
   }, 30000);
 
   it("open_shop enqueues one shop_open notification per active customer, none for an inactive one — id 4", async () => {

@@ -274,8 +274,8 @@ concurrency guards — deliberately one file, since "at most one open day" is a 
 none of this project's other tests have had to share across test cases before).
 
 The **grower picking module** is implemented: grower-facing daily picking input
-(estimates/actual quantity as one `pallets_picked` field, an optional per-line pickup-time
-override, and a comment) and the distributor's Grower Inventory Status oversight screen
+(estimates/actual quantity as one `pallets_picked` field per line, plus a comment) and the
+distributor's Grower Inventory Status oversight screen
 (every active grower's pick status, editing a submission on their behalf, adding in-season
 products mid-day, sending a reminder). Two replacements were the explicit point of this
 module:
@@ -313,7 +313,7 @@ test, which drives exactly this scenario (an untouched line, a picked-but-unarra
 arranged line, all removed from season in the same re-run) and asserts each is handled correctly.
 
 The Cancel button on both screens is fixed by construction, not as a special case: pick-line
-edits (`pallets_picked`, `pickup_time`, `comment`) live in local component draft state
+edits (`pallets_picked`, `comment`) live in local component draft state
 (`PickLinesEditor`, shared by both screens — the same `update_pick_product_pallets`/
 `update_pick_product_details` functions already accept "the owning grower, or backoffice," so
 the distributor editing on a grower's behalf is not a special case either) until Save is

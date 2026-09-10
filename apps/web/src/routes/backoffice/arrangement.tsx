@@ -6,6 +6,13 @@ import {
   toUpdateArrangementRecordRpcArgs,
   updateArrangementRecordInputSchema,
 } from "@ori/domain/arrangement";
+import {
+  LIFECYCLE_ERROR_CODES,
+  revertPickToDraftInputSchema,
+  submitPickInputSchema,
+  toRevertPickToDraftRpcArgs,
+  toSubmitPickRpcArgs,
+} from "@ori/domain/lifecycle-engine";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
@@ -38,6 +45,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { QueryError } from "@/components/ui/query-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
+import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
 import { useTradingDayView } from "@/lib/trading-day-view";
 
@@ -165,8 +173,10 @@ export default function ArrangementPage() {
   // `companies` stays separate below: it's whole-table reference data with
   // no dependency on the day, so it starts immediately and resolves in
   // parallel rather than adding a hop.
+  const boardDataQueryKey = ["arrangement", "board-data", day?.id ?? null] as const;
+
   const boardDataQuery = useQuery({
-    queryKey: ["arrangement", "board-data", day?.id ?? null],
+    queryKey: boardDataQueryKey,
     enabled: !!day?.id,
     queryFn: async () => {
       const { data, error } = await supabase
@@ -174,7 +184,7 @@ export default function ArrangementPage() {
         .select(
           `id, trade_date, phase,
            daily_arrangements(id, status, arrangement_records(id, daily_pick_product_id, daily_order_product_id, customer_company_id, quantity_pallets, price, price_type)),
-           daily_picks(id, grower_company_id, status, daily_pick_products(id, daily_pick_id, product_variety_id, pallets_picked, pickup_time, comment, product_varieties(id, name, family_id, product_families(name, image_url)))),
+           daily_picks(id, grower_company_id, status, pickup_time, daily_pick_products(id, daily_pick_id, product_variety_id, pallets_picked, comment, product_varieties(id, name, family_id, product_families(name, image_url)))),
            daily_orders(id, customer_company_id, status, daily_order_products(id, daily_order_id, product_variety_id, pallets_ordered, comment, product_varieties(id, name, family_id, product_families(name, image_url))), order_submission_logs(id, snapshot, created_at))`,
         )
         .eq("id", day!.id)
@@ -273,6 +283,39 @@ export default function ArrangementPage() {
   const ordersCustomerName =
     view.customers.find((customer) => customer.customerId === ordersCustomerId)?.customerName ?? "";
 
+  // The whole board is one cached object (boardDataQuery above); every
+  // mutation below that touches an arrangement record reaches into the same
+  // `daily_arrangements.arrangement_records` array and replaces it, rather
+  // than hand-patching the derived totals — `buildBoard`'s useMemo recomputes
+  // every total (חולק/נותר/OOS, per-grower and per-customer sums) from this
+  // array automatically, so nothing here needs to know how to total pallets.
+  function recordsOptimistic<TVariables>(
+    updater: (records: BoardRecord[], variables: TVariables, current: TradingDay) => BoardRecord[],
+  ) {
+    return optimisticUpdate<TradingDay | null, TVariables>(
+      queryClient,
+      boardDataQueryKey,
+      (current, variables) =>
+        current?.daily_arrangements
+          ? {
+              ...current,
+              daily_arrangements: {
+                ...current.daily_arrangements,
+                arrangement_records: updater(
+                  current.daily_arrangements.arrangement_records,
+                  variables,
+                  current,
+                ),
+              },
+            }
+          : current,
+    );
+  }
+
+  const deleteOptimistic = recordsOptimistic<string>((records, recordId) =>
+    records.filter((record) => record.id !== recordId),
+  );
+
   const deleteMutation = useMutation({
     mutationFn: async (recordId: string) => {
       const { error } = await supabase.rpc(
@@ -281,16 +324,30 @@ export default function ArrangementPage() {
       );
       if (error) throw error;
     },
+    onMutate: deleteOptimistic.onMutate,
     onSuccess: () => {
       showToast("השיוך נמחק.", "success");
       // Records are nested inside the board query's single response now,
       // so refetching the board is what picks up the change.
-      void queryClient.invalidateQueries({ queryKey: ["arrangement", "board-data"] });
+      void queryClient.invalidateQueries({ queryKey: boardDataQueryKey });
     },
-    onError: (error: RpcError) => {
+    onError: mergeOnError(deleteOptimistic.onError, (error: RpcError) => {
       showToast(`המחיקה נכשלה: ${describeRpcError(error)}`, "error");
-    },
+    }),
   });
+
+  const updateOptimistic = recordsOptimistic<AllocationPatch>((records, patch) =>
+    records.map((record) =>
+      record.id === patch.id
+        ? {
+            ...record,
+            quantity_pallets: patch.quantityPallets,
+            price: patch.price,
+            price_type: patch.priceType,
+          }
+        : record,
+    ),
+  );
 
   const updateMutation = useMutation({
     mutationFn: async (input: AllocationPatch) => {
@@ -301,17 +358,18 @@ export default function ArrangementPage() {
       );
       if (error) throw error;
     },
+    onMutate: updateOptimistic.onMutate,
     onSuccess: () => {
       showToast("השיוך עודכן.", "success");
-      void queryClient.invalidateQueries({ queryKey: ["arrangement", "board-data"] });
+      void queryClient.invalidateQueries({ queryKey: boardDataQueryKey });
     },
-    onError: (error: RpcError) => {
+    onError: mergeOnError(updateOptimistic.onError, (error: RpcError) => {
       showToast(`העדכון נכשל: ${describeRpcError(error)}`, "error");
       // Refetch on failure too: an INVALID_STATE or OVER_ALLOCATION rejection
       // usually means this screen's copy of the day is behind whatever caused
       // it, so the board should re-read rather than argue with the server.
-      void queryClient.invalidateQueries({ queryKey: ["arrangement", "board-data"] });
-    },
+      void queryClient.invalidateQueries({ queryKey: boardDataQueryKey });
+    }),
   });
 
   // Resolves to whether the write actually landed, and never rejects — the
@@ -329,6 +387,47 @@ export default function ArrangementPage() {
       return false;
     }
   };
+
+  const arrangeOptimistic = recordsOptimistic<ArrangeRequest>((records, request, current) => {
+    if (!effectiveSelection) return records;
+    const pickLineId = effectiveSelection.pickLineId;
+    if (request.existing) {
+      // Already has a record off THIS pick line — the ✓ is editing its
+      // quantity, same shape as updateMutation above.
+      const existingRecordId = request.existing.recordId;
+      return records.map((record) =>
+        record.id === existingRecordId
+          ? { ...record, quantity_pallets: request.quantityPallets }
+          : record,
+      );
+    }
+    // A brand-new record off this pick line. Only constructible when the
+    // customer already has an order line for the selected variety, because
+    // a record needs a real `daily_order_product_id` to be valid — for a
+    // "promoted" customer with no order line yet, arrange_to_customer
+    // creates that line itself (see this mutation's own header comment
+    // below), and its id isn't knowable client-side before that happens.
+    // That one case falls back to the existing invalidate-on-settle
+    // refetch instead of being faked here.
+    const orderLineId = current.daily_orders
+      .find((order) => order.customer_company_id === request.customerId)
+      ?.daily_order_products.find(
+        (line) => line.product_variety_id === effectiveSelection.varietyId,
+      )?.id;
+    if (!orderLineId) return records;
+    return [
+      ...records,
+      {
+        id: `optimistic-${crypto.randomUUID()}`,
+        daily_pick_product_id: pickLineId,
+        daily_order_product_id: orderLineId,
+        customer_company_id: request.customerId,
+        quantity_pallets: request.quantityPallets,
+        price: null,
+        price_type: null,
+      },
+    ];
+  });
 
   // The ✓ button on a customer row. One RPC whether or not anything exists
   // yet: arrange_to_customer upserts the arrangement record and, for a
@@ -355,14 +454,15 @@ export default function ArrangementPage() {
       );
       if (error) throw error;
     },
+    onMutate: arrangeOptimistic.onMutate,
     onSuccess: () => {
       showToast("הסידור נשמר.", "success");
-      void queryClient.invalidateQueries({ queryKey: ["arrangement", "board-data"] });
+      void queryClient.invalidateQueries({ queryKey: boardDataQueryKey });
     },
-    onError: (error: RpcError) => {
+    onError: mergeOnError(arrangeOptimistic.onError, (error: RpcError) => {
       showToast(`שמירת הסידור נכשלה: ${describeRpcError(error)}`, "error");
-      void queryClient.invalidateQueries({ queryKey: ["arrangement", "board-data"] });
-    },
+      void queryClient.invalidateQueries({ queryKey: boardDataQueryKey });
+    }),
   });
 
   const arrange = async (request: ArrangeRequest): Promise<boolean> => {
@@ -382,6 +482,64 @@ export default function ArrangementPage() {
       return false;
     }
   };
+
+  // The truck icon: submit_pick for a draft pick, revert_pick_to_draft for
+  // a submitted one — the grower row's own current status decides which
+  // RPC this call is, so the column never has to know about either
+  // function by name. FORBIDDEN/INVALID_STATE get their own messages here
+  // rather than reusing describeRpcError above: that one's copy ("הסידור
+  // כבר סגור") is written for the arrangement-record functions and would
+  // mislead for this pick-status action.
+  const toggleSubmitOptimistic = optimisticUpdate<TradingDay | null, GrowerSupply>(
+    queryClient,
+    boardDataQueryKey,
+    (current, grower) =>
+      current
+        ? {
+            ...current,
+            daily_picks: current.daily_picks.map((pick) =>
+              pick.id === grower.pickId
+                ? { ...pick, status: grower.status === "submitted" ? "draft" : "submitted" }
+                : pick,
+            ),
+          }
+        : current,
+  );
+
+  const toggleSubmitMutation = useMutation({
+    mutationFn: async (grower: GrowerSupply) => {
+      if (grower.status === "submitted") {
+        const input = revertPickToDraftInputSchema.parse({ dailyPickId: grower.pickId });
+        const { error } = await supabase.rpc(
+          "revert_pick_to_draft",
+          toRevertPickToDraftRpcArgs(input),
+        );
+        if (error) throw error;
+      } else {
+        const input = submitPickInputSchema.parse({ dailyPickId: grower.pickId });
+        const { error } = await supabase.rpc("submit_pick", toSubmitPickRpcArgs(input));
+        if (error) throw error;
+      }
+    },
+    onMutate: toggleSubmitOptimistic.onMutate,
+    onSuccess: (_data, grower) => {
+      showToast(
+        grower.status === "submitted" ? "הליקוט הוחזר לטיוטה." : "הליקוט נשלח.",
+        "success",
+      );
+      void queryClient.invalidateQueries({ queryKey: boardDataQueryKey });
+    },
+    onError: mergeOnError(toggleSubmitOptimistic.onError, (error: RpcError) => {
+      const message =
+        error.code === LIFECYCLE_ERROR_CODES.INVALID_STATE
+          ? "סטטוס הליקוט כבר השתנה בינתיים. רענן את הדף."
+          : error.code === LIFECYCLE_ERROR_CODES.FORBIDDEN
+            ? "אין הרשאה לבצע פעולה זו."
+            : (error.message ?? "שגיאה לא ידועה");
+      showToast(`העדכון נכשל: ${message}`, "error");
+      void queryClient.invalidateQueries({ queryKey: boardDataQueryKey });
+    }),
+  });
 
   // Loading has two stages now: which day (dayView), then that day's board
   // (boardDataQuery, which only starts once a day id is known — see its
@@ -510,6 +668,8 @@ export default function ArrangementPage() {
             setExpandedGrowerId((current) => (current === growerId ? null : growerId))
           }
           onEditPick={setPickDialogGrower}
+          onToggleSubmit={(grower) => toggleSubmitMutation.mutate(grower)}
+          toggleSubmitDisabled={!editable || toggleSubmitMutation.isPending}
           onSelect={(next) => {
             setSelection(next);
             // The staging list is per-product: customers offered last

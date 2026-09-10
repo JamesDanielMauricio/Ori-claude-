@@ -11,7 +11,16 @@ import {
   deleteTestCompany as deleteTestCompanyById,
   findCompanyIdByName,
 } from "@ori/domain/reference-data/testing";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+// The single <tr> currently in inline-edit mode — see the identical helper
+// in reference-data-growers.spec.ts for why field lookups need to be
+// scoped to it: record-table.tsx's column-visibility picker labels a
+// checkbox with each column's own name, which collides with that same
+// field's input aria-label at the page level.
+function editingRow(page: Page) {
+  return page.locator("tr").filter({ has: page.getByRole("button", { name: "שמור" }) });
+}
 
 // Drives the Customers screen through the browser — a create and an edit
 // through the real form and `save_customer` RPC.
@@ -37,13 +46,15 @@ test.describe("Backoffice — Customers", () => {
     await page.goto("/backoffice/customers");
 
     const customerName = `E2E Customer ${randomUUID()}`;
-    // Two buttons carry this name by design — the one above the list and the
-    // empty detail pane's call-to-action. `.first()` is the list-pane one.
-    await page.getByRole("button", { name: "לקוח חדש" }).first().click();
-    await page.getByLabel("שם").fill(customerName);
-    await page.getByRole("button", { name: "שמור" }).click();
+    // The table's own toolbar add button (record-table.tsx's `onAdd`)
+    // prepends a draft row, already in inline-edit mode — one button now,
+    // so no `.first()` disambiguation needed.
+    await page.getByRole("button", { name: "לקוח חדש" }).click();
+    await editingRow(page).getByLabel("שם").fill(customerName);
+    await editingRow(page).getByRole("button", { name: "שמור" }).click();
 
-    await expect(page.getByRole("button", { name: customerName })).toBeVisible();
+    const customerRow = page.locator("tr").filter({ hasText: customerName });
+    await expect(customerRow).toBeVisible();
     cleanupFns.push(async () => {
       const id = await findCompanyIdByName(customerName);
       if (id) await deleteTestCompanyById(id);
@@ -53,15 +64,17 @@ test.describe("Backoffice — Customers", () => {
       if (id) await deleteTestCompanyById(id);
     });
 
-    await page.getByRole("button", { name: "ערוך" }).click();
-    await page.getByLabel("שם").fill(`${customerName} (edited)`);
-    // The label reads "מציג מחירים בהתראות" on its own line now, with
-    // WhatsApp named only in the hint underneath it ("...הודעות ה-WhatsApp
-    // ללקוח זה..."), so the old single-line string matches no node at all.
-    // The <label> wraps the checkbox, so clicking its text still toggles it.
-    await page.getByText("מציג מחירים בהתראות").click();
-    await page.getByRole("button", { name: "שמור" }).click();
+    // The row's own pencil icon turns the row itself into the edit form,
+    // so the rest of this step reads fields directly off the page — safe
+    // since only one row can be mid-edit at a time.
+    await customerRow.getByRole("button", { name: "ערוך" }).click();
+    await editingRow(page).getByLabel("שם").fill(`${customerName} (edited)`);
+    // The checkbox itself carries this as its aria-label now (not a
+    // wrapping <label> with static instructional text), so getByLabel
+    // finds and toggles it directly.
+    await editingRow(page).getByLabel("מציג מחירים בהתראות").click();
+    await editingRow(page).getByRole("button", { name: "שמור" }).click();
 
-    await expect(page.getByRole("button", { name: `${customerName} (edited)` })).toBeVisible();
+    await expect(page.locator("tr").filter({ hasText: `${customerName} (edited)` })).toBeVisible();
   });
 });

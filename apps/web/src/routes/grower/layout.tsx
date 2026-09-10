@@ -7,7 +7,6 @@ import { RoleShell } from "@/components/shell/role-shell";
 const GROWER_NAV = [
   { href: "/grower/picks", label: "עדכון יומי" },
   { href: "/grower/history", label: "היסטוריית ליקוט" },
-  { href: "/grower/legacy", label: "מצב מוצרים (ישן)" },
 ];
 
 // `await requireRole("grower")` moved to the parent route in

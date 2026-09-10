@@ -4,19 +4,19 @@ import {
   toSaveProductRpcArgs,
 } from "@ori/domain/reference-data";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
-import { ActionBar } from "@/components/reference-data/action-bar";
-import { FormField, inputClassName } from "@/components/reference-data/form-field";
-import { ListDetailLayout } from "@/components/reference-data/list-detail-layout";
-import { RecordList } from "@/components/reference-data/record-list";
+import { CellChipList, CellPopover } from "@/components/reference-data/cell-popover";
+import { checkboxClassName, inputClassName } from "@/components/reference-data/form-field";
+import { RecordTable, type RecordTableColumn } from "@/components/reference-data/record-table";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
-import { FormSection, StatusPill } from "@/components/ui/card";
-import { EmptyState } from "@/components/ui/empty-state";
+import { StatusPill } from "@/components/ui/card";
 import { useToast } from "@/components/ui/toast";
+import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { hasChanges } from "@/lib/has-changes";
+import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
 
 type PackType = "pallets" | "crates";
@@ -36,7 +36,12 @@ interface ProductVariety {
   is_seasonal_available: boolean;
   number_of_orders_per_customer: number | null;
   version: number;
+  created_at: string;
 }
+
+type ProductRow = ProductVariety & {
+  product_families: { name: string; category: string | null; image_url: string | null } | null;
+};
 
 interface PalletCap {
   customerCompanyId: string;
@@ -63,6 +68,16 @@ interface FormState {
   customerPalletCaps: PalletCap[];
 }
 
+// Sentinel row id for a not-yet-created record: the draft row prepended to
+// the table while `onAdd` is active, so RecordTable's "is this row being
+// edited" logic (which compares ids) needs no separate create/update
+// concept of its own.
+const NEW_ROW_ID = "__new__";
+
+const CREATED_AT_FORMAT = new Intl.DateTimeFormat("he-IL", { dateStyle: "short" });
+
+const PACK_TYPE_LABEL: Record<PackType, string> = { pallets: "משטחים", crates: "ארגזים" };
+
 function blankForm(defaultFamilyId: string): FormState {
   return {
     familyId: defaultFamilyId,
@@ -79,6 +94,27 @@ function blankForm(defaultFamilyId: string): FormState {
     numberOfOrdersPerCustomer: "",
     version: null,
     customerPalletCaps: [],
+  };
+}
+
+function blankRow(): ProductRow {
+  return {
+    id: NEW_ROW_ID,
+    family_id: "",
+    name: "",
+    sizes: null,
+    pack_type: null,
+    price: null,
+    price_range_from: null,
+    price_range_to: null,
+    price_type: null,
+    no_overbooking: "0",
+    highlight_price_fluctuations: false,
+    is_seasonal_available: true,
+    number_of_orders_per_customer: null,
+    version: 0,
+    created_at: "",
+    product_families: null,
   };
 }
 
@@ -103,8 +139,8 @@ function toFormState(row: ProductVariety, caps: PalletCap[]): FormState {
 }
 
 // The Products management screen — catalog (family + variety), pricing,
-// overbooking, and the new per-customer pallet cap control. `save_product`
-// is where the conflict-prevention rule actually lives (R7): every save
+// overbooking, and the per-customer pallet cap control. `save_product` is
+// where the conflict-prevention rule actually lives (R7): every save
 // carries the version this form last loaded, and a rejection means someone
 // else saved first — surfaced here as a clear message and a forced reload,
 // never a silent overwrite and never a UI "someone's editing this" lock.
@@ -113,11 +149,15 @@ export default function ProductsPage() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
+  // Which row (by id) is being edited inline right now — NEW_ROW_ID for a
+  // draft that hasn't been saved yet, an existing row's own id, or null.
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(blankForm(""));
   const [saving, setSaving] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+
+  const productsQueryKey = ["reference-data", "products"] as const;
+  const capsQueryKey = ["reference-data", "product-customer-caps-all"] as const;
 
   const familiesQuery = useQuery({
     queryKey: ["reference-data", "product-families"],
@@ -132,16 +172,16 @@ export default function ProductsPage() {
   });
 
   const productsQuery = useQuery({
-    queryKey: ["reference-data", "products"],
+    queryKey: productsQueryKey,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("product_varieties")
         .select(
-          "id, family_id, name, sizes, pack_type, price, price_range_from, price_range_to, price_type, no_overbooking, highlight_price_fluctuations, is_seasonal_available, number_of_orders_per_customer, version, product_families(name)",
+          "id, family_id, name, sizes, pack_type, price, price_range_from, price_range_to, price_type, no_overbooking, highlight_price_fluctuations, is_seasonal_available, number_of_orders_per_customer, version, created_at, product_families(name, category, image_url)",
         )
         .order("name");
       if (error) throw error;
-      return data as Array<ProductVariety & { product_families: { name: string } | null }>;
+      return data as ProductRow[];
     },
   });
 
@@ -157,50 +197,90 @@ export default function ProductsPage() {
       return data as Array<{ id: string; name: string }>;
     },
   });
+  const customerNameById = useMemo(
+    () => new Map((customersQuery.data ?? []).map((row) => [row.id, row.name])),
+    [customersQuery.data],
+  );
 
+  // Every variety's per-customer caps in ONE read, grouped client-side —
+  // same reasoning as growers.tsx's identical bulk read: the caps are a
+  // column now, so every visible row needs its own value.
   const capsQuery = useQuery({
-    queryKey: ["reference-data", "product-customer-caps", selectedId],
-    enabled: !!selectedId,
+    queryKey: capsQueryKey,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("product_customer_caps")
-        .select("customer_company_id, pallet_cap")
-        .eq("product_variety_id", selectedId!);
-      if (error) throw error;
-      return data.map((row) => ({
-        customerCompanyId: row.customer_company_id,
-        palletCap: row.pallet_cap,
-      }));
+      const rows = await fetchAllRows<{
+        product_variety_id: string;
+        customer_company_id: string;
+        pallet_cap: number;
+      }>((from, to) =>
+        supabase
+          .from("product_customer_caps")
+          .select("product_variety_id, customer_company_id, pallet_cap")
+          .range(from, to),
+      );
+      const byVariety = new Map<string, PalletCap[]>();
+      for (const row of rows) {
+        const cap = { customerCompanyId: row.customer_company_id, palletCap: row.pallet_cap };
+        const list = byVariety.get(row.product_variety_id);
+        if (list) list.push(cap);
+        else byVariety.set(row.product_variety_id, [cap]);
+      }
+      return byVariety;
     },
   });
 
-  const selected = productsQuery.data?.find((row) => row.id === selectedId) ?? null;
+  const editingRowId = editingId !== null && editingId !== NEW_ROW_ID ? editingId : null;
+  const selected = productsQuery.data?.find((row) => row.id === editingRowId) ?? null;
+  const deleteTarget = productsQuery.data?.find((row) => row.id === deleteTargetId) ?? null;
 
-  // The variety is the row's identity; its family is context, so it goes on
-  // the second line instead of being joined to the front with an em dash.
-  // That also means the family name no longer eats the width every row needs
-  // for the variety itself.
-  const listItems = useMemo(
-    () =>
-      (productsQuery.data ?? []).map((row) => ({
-        id: row.id,
-        label: row.name,
-        meta: row.product_families?.name ?? null,
-        badge: row.is_seasonal_available ? null : "לא בעונה",
-      })),
-    [productsQuery.data],
+  // Patches every field the form edits except `version` — that's a real
+  // optimistic-concurrency column, bumped by the server only. Leaving it
+  // alone here means a stale version still gets caught by the real
+  // PRODUCT_VERSION_CONFLICT_ERROR_CODE check below; faking a bump here
+  // would just teach the UI to trust a number the server hasn't agreed to.
+  const saveOptimistic = optimisticUpdate<ProductRow[], void>(
+    queryClient,
+    productsQueryKey,
+    (rows) =>
+      rows?.map((row) =>
+        row.id === editingRowId
+          ? {
+              ...row,
+              family_id: form.familyId,
+              name: form.name,
+              sizes: form.sizes || null,
+              pack_type: form.packType || null,
+              price: form.price === "" ? null : form.price,
+              price_range_from: form.priceRangeFrom === "" ? null : form.priceRangeFrom,
+              price_range_to: form.priceRangeTo === "" ? null : form.priceRangeTo,
+              price_type: form.priceType || null,
+              no_overbooking: form.noOverbooking || "0",
+              highlight_price_fluctuations: form.highlightPriceFluctuations,
+              is_seasonal_available: form.isSeasonalAvailable,
+              number_of_orders_per_customer:
+                form.numberOfOrdersPerCustomer === ""
+                  ? null
+                  : Number(form.numberOfOrdersPerCustomer),
+            }
+          : row,
+      ),
   );
 
-  useEffect(() => {
-    if (!editing && selected && capsQuery.data) {
-      setForm(toFormState(selected, capsQuery.data));
-    }
-  }, [selected, capsQuery.data, editing]);
+  const saveCapsOptimistic = optimisticUpdate<Map<string, PalletCap[]>, void>(
+    queryClient,
+    capsQueryKey,
+    (byVariety) => {
+      if (!byVariety || !editingRowId) return byVariety;
+      const next = new Map(byVariety);
+      next.set(editingRowId, form.customerPalletCaps);
+      return next;
+    },
+  );
 
   const saveMutation = useMutation({
     mutationFn: async () => {
       const input = saveProductInputSchema.parse({
-        id: selectedId,
+        id: editingRowId,
         familyId: form.familyId,
         name: form.name,
         sizes: form.sizes || null,
@@ -221,80 +301,109 @@ export default function ProductsPage() {
       if (error) throw error;
       return data as ProductVariety;
     },
-    onSuccess: (row) => {
-      showToast("הנתונים נשמרו.", "success");
-      setEditing(false);
-      setSelectedId(row.id);
-      void queryClient.invalidateQueries({ queryKey: ["reference-data", "products"] });
-      void queryClient.invalidateQueries({
-        queryKey: ["reference-data", "product-customer-caps", row.id],
-      });
+    onMutate: async (variables) => {
+      const rows = await saveOptimistic.onMutate(variables);
+      const caps = await saveCapsOptimistic.onMutate(variables);
+      return { rows, caps };
     },
-    onError: (error: { message?: string; code?: string }) => {
-      if (error.code === PRODUCT_VERSION_CONFLICT_ERROR_CODE) {
-        showToast(
-          "המוצר עודכן על ידי משתמש אחר בינתיים. הנתונים רועננו — בדוק ושמור שוב.",
-          "error",
-        );
-        void queryClient.invalidateQueries({ queryKey: ["reference-data", "products"] });
-        void queryClient.invalidateQueries({
-          queryKey: ["reference-data", "product-customer-caps", selectedId],
-        });
-        setEditing(false);
-      } else {
+    onSuccess: () => {
+      showToast("הנתונים נשמרו.", "success");
+      setEditingId(null);
+      void queryClient.invalidateQueries({ queryKey: productsQueryKey });
+      void queryClient.invalidateQueries({ queryKey: capsQueryKey });
+    },
+    onError: async (
+      error: { message?: string; code?: string },
+      variables,
+      context:
+        | {
+            rows: { previous: ProductRow[] | undefined } | undefined;
+            caps: { previous: Map<string, PalletCap[]> | undefined } | undefined;
+          }
+        | undefined,
+    ) => {
+      saveOptimistic.onError(error, variables, context?.rows);
+      saveCapsOptimistic.onError(error, variables, context?.caps);
+
+      if (error.code !== PRODUCT_VERSION_CONFLICT_ERROR_CODE) {
         showToast(`השמירה נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
+        return;
       }
+
+      // Someone else saved this product first (R7). Refetch and re-seed the
+      // row that's still open for editing from the values that actually
+      // won, so the next save carries THEIR version rather than retrying
+      // against a version the server has already moved past.
+      showToast("המוצר עודכן על ידי משתמש אחר בינתיים. הנתונים רועננו — בדוק ושמור שוב.", "error");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: productsQueryKey }),
+        queryClient.invalidateQueries({ queryKey: capsQueryKey }),
+      ]);
+      if (!editingRowId) return;
+      const fresh = queryClient
+        .getQueryData<ProductRow[]>(productsQueryKey)
+        ?.find((row) => row.id === editingRowId);
+      if (!fresh) {
+        setEditingId(null);
+        return;
+      }
+      const caps = queryClient.getQueryData<Map<string, PalletCap[]>>(capsQueryKey)?.get(fresh.id);
+      setForm(toFormState(fresh, caps ?? []));
     },
   });
+
+  const deleteOptimistic = optimisticUpdate<ProductRow[], void>(
+    queryClient,
+    productsQueryKey,
+    (rows) => rows?.filter((row) => row.id !== deleteTargetId),
+  );
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
-      if (!selectedId) return;
-      const { error } = await supabase.from("product_varieties").delete().eq("id", selectedId);
+      if (!deleteTargetId) return;
+      const { error } = await supabase.from("product_varieties").delete().eq("id", deleteTargetId);
       if (error) throw error;
     },
+    onMutate: deleteOptimistic.onMutate,
     onSuccess: () => {
       showToast("המוצר נמחק.", "success");
-      setSelectedId(null);
-      setDeleteOpen(false);
-      void queryClient.invalidateQueries({ queryKey: ["reference-data", "products"] });
+      setDeleteTargetId(null);
+      void queryClient.invalidateQueries({ queryKey: productsQueryKey });
     },
-    onError: (error: { message?: string }) => {
+    onError: mergeOnError(deleteOptimistic.onError, (error: { message?: string }) => {
       showToast(`המחיקה נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
-      setDeleteOpen(false);
-    },
+      setDeleteTargetId(null);
+    }),
   });
 
-  function handleSelect(id: string) {
-    setSelectedId(id);
-    setEditing(false);
+  // Seeded synchronously from data the table already has — the caps are
+  // loaded up front for their column, not lazily on click.
+  function handleEditRow(row: ProductRow) {
+    setEditingId(row.id);
+    setForm(toFormState(row, capsQuery.data?.get(row.id) ?? []));
   }
 
   function handleNew() {
-    setSelectedId(null);
+    setEditingId(NEW_ROW_ID);
     setForm(blankForm(familiesQuery.data?.[0]?.id ?? ""));
-    setEditing(true);
   }
 
-  // The values with no unsaved edits — both what "בטל שינויים" restores and
-  // what the live form is compared against. See customers.tsx for why these
-  // are one expression rather than two.
+  function handleCancel() {
+    setEditingId(null);
+  }
+
+  // What the form would hold with no unsaved edits — decides whether the
+  // save button has anything to do.
   //
   // `version` rides along inside FormState but can never differ between the
   // two sides: nothing in this form edits it, and a save that bumps it also
   // re-seeds the form from the returned row. It is the optimistic-locking
   // token (R7), not a field, so it neither can nor should make the form read
   // as changed.
-  const baselineForm =
-    selected && capsQuery.data
-      ? toFormState(selected, capsQuery.data)
-      : blankForm(familiesQuery.data?.[0]?.id ?? "");
+  const baselineForm = selected
+    ? toFormState(selected, capsQuery.data?.get(selected.id) ?? [])
+    : blankForm(familiesQuery.data?.[0]?.id ?? "");
   const dirty = hasChanges(form, baselineForm);
-
-  function handleDiscard() {
-    setForm(baselineForm);
-    setEditing(false);
-  }
 
   function handleSave() {
     setSaving(true);
@@ -329,344 +438,353 @@ export default function ProductsPage() {
     }));
   }
 
+  const columns: RecordTableColumn<ProductRow>[] = [
+    {
+      key: "image",
+      label: "תמונה",
+      // The photo belongs to the family, not the variety — this screen
+      // edits varieties, so it's shown, not edited.
+      render: (row) =>
+        row.product_families?.image_url ? (
+          <img
+            src={row.product_families.image_url}
+            alt=""
+            className="h-9 w-9 rounded-md object-cover ring-1 ring-inset ring-border"
+          />
+        ) : (
+          <span className="flex h-9 w-9 items-center justify-center rounded-md bg-surface-muted text-ink-subtle ring-1 ring-inset ring-border">
+            —
+          </span>
+        ),
+    },
+    {
+      key: "name",
+      label: "זן",
+      render: (row) => <span className="font-medium text-ink">{row.name}</span>,
+      renderEdit: () => (
+        <input
+          aria-label="זן / שם"
+          autoFocus
+          required
+          className={`${inputClassName} w-full min-w-[9rem]`}
+          value={form.name}
+          onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+        />
+      ),
+    },
+    {
+      key: "family",
+      label: "משפחה",
+      render: (row) => row.product_families?.name ?? "—",
+      renderEdit: () => (
+        <select
+          aria-label="משפחה"
+          className={`${inputClassName} w-full min-w-[8rem]`}
+          value={form.familyId}
+          onChange={(event) => setForm((current) => ({ ...current, familyId: event.target.value }))}
+        >
+          {familiesQuery.data?.map((family) => (
+            <option key={family.id} value={family.id}>
+              {family.name}
+            </option>
+          ))}
+        </select>
+      ),
+    },
+    {
+      key: "category",
+      label: "קטגוריה",
+      // A family-level field (PRD: Product Family's Category). Shown per
+      // variety because it's part of what identifies the row, read-only
+      // because editing it here would silently retag every other variety in
+      // the same family.
+      render: (row) => row.product_families?.category || "—",
+    },
+    {
+      key: "sizes",
+      label: "גודל",
+      render: (row) => row.sizes || "—",
+      renderEdit: () => (
+        <input
+          aria-label="גדלים"
+          className={`${inputClassName} w-28`}
+          value={form.sizes}
+          onChange={(event) => setForm((current) => ({ ...current, sizes: event.target.value }))}
+        />
+      ),
+    },
+    {
+      key: "packType",
+      label: "סוג אריזה",
+      render: (row) => (row.pack_type ? PACK_TYPE_LABEL[row.pack_type] : "—"),
+      renderEdit: () => (
+        <select
+          aria-label="סוג אריזה"
+          className={`${inputClassName} w-28`}
+          value={form.packType}
+          onChange={(event) =>
+            setForm((current) => ({ ...current, packType: event.target.value as PackType | "" }))
+          }
+        >
+          <option value="">—</option>
+          <option value="pallets">משטחים</option>
+          <option value="crates">ארגזים</option>
+        </select>
+      ),
+    },
+    {
+      key: "price",
+      label: "מחיר",
+      render: (row) => row.price || "—",
+      renderEdit: () => (
+        <input
+          type="number"
+          step="0.01"
+          aria-label="מחיר"
+          className={`${inputClassName} w-24`}
+          value={form.price}
+          onChange={(event) => setForm((current) => ({ ...current, price: event.target.value }))}
+        />
+      ),
+    },
+    {
+      key: "priceFrom",
+      label: "טווח מ-",
+      render: (row) => row.price_range_from || "—",
+      renderEdit: () => (
+        <input
+          type="number"
+          step="0.01"
+          aria-label="טווח מ-"
+          className={`${inputClassName} w-24`}
+          value={form.priceRangeFrom}
+          onChange={(event) =>
+            setForm((current) => ({ ...current, priceRangeFrom: event.target.value }))
+          }
+        />
+      ),
+    },
+    {
+      key: "priceTo",
+      label: "טווח עד",
+      render: (row) => row.price_range_to || "—",
+      renderEdit: () => (
+        <input
+          type="number"
+          step="0.01"
+          aria-label="טווח עד"
+          className={`${inputClassName} w-24`}
+          value={form.priceRangeTo}
+          onChange={(event) =>
+            setForm((current) => ({ ...current, priceRangeTo: event.target.value }))
+          }
+        />
+      ),
+    },
+    {
+      key: "priceType",
+      label: "סוג מחיר",
+      render: (row) => row.price_type || "—",
+      renderEdit: () => (
+        <input
+          aria-label="סוג תמחור"
+          className={`${inputClassName} w-28`}
+          value={form.priceType}
+          onChange={(event) => setForm((current) => ({ ...current, priceType: event.target.value }))}
+        />
+      ),
+    },
+    {
+      key: "overbooking",
+      label: "הזמנת יתר",
+      render: (row) => row.no_overbooking,
+      renderEdit: () => (
+        <input
+          type="number"
+          step="1"
+          min={0}
+          aria-label="חריגת הזמנה מותרת (No Overbooking)"
+          className={`${inputClassName} w-24`}
+          value={form.noOverbooking}
+          onChange={(event) =>
+            setForm((current) => ({ ...current, noOverbooking: event.target.value }))
+          }
+        />
+      ),
+    },
+    {
+      key: "orderCap",
+      label: "מקס' הזמנות ללקוח",
+      // The customer order screen's dropdown (order-product-list.tsx) reads
+      // this as its own ceiling — never applied to a backoffice
+      // on-behalf-of edit, where staff may deliberately exceed it. Empty
+      // means uncapped. See product-variety.ts's schema comment for how it
+      // differs from the per-customer caps column (one default for every
+      // customer vs. an override for one).
+      render: (row) => row.number_of_orders_per_customer ?? "—",
+      renderEdit: () => (
+        <input
+          type="number"
+          step="1"
+          min={0}
+          placeholder="ללא הגבלה"
+          aria-label="כמות מקסימלית להזמנה ללקוח (Number of Orders per Customer)"
+          className={`${inputClassName} w-28`}
+          value={form.numberOfOrdersPerCustomer}
+          onChange={(event) =>
+            setForm((current) => ({ ...current, numberOfOrdersPerCustomer: event.target.value }))
+          }
+        />
+      ),
+    },
+    {
+      key: "caps",
+      label: "תקרות ללקוח",
+      render: (row) => (
+        <CellChipList
+          items={(capsQuery.data?.get(row.id) ?? []).map(
+            (cap) =>
+              `${customerNameById.get(cap.customerCompanyId) ?? cap.customerCompanyId}: ${cap.palletCap}`,
+          )}
+          emptyLabel="אין תקרות"
+        />
+      ),
+      renderEdit: () => (
+        <CellPopover
+          label="תקרות משטחים ללקוח"
+          summary={`${form.customerPalletCaps.length} תקרות`}
+          panelClassName="w-[26rem]"
+        >
+          <div className="flex flex-col gap-2">
+            {form.customerPalletCaps.map((cap, index) => (
+              <div key={index} className="flex flex-wrap items-center gap-2">
+                <select
+                  aria-label="לקוח"
+                  className={`${inputClassName} min-w-0 flex-1`}
+                  value={cap.customerCompanyId}
+                  onChange={(event) => updateCap(index, { customerCompanyId: event.target.value })}
+                >
+                  {customersQuery.data?.map((customer) => (
+                    <option key={customer.id} value={customer.id}>
+                      {customer.name}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="number"
+                  min={0}
+                  aria-label="תקרת משטחים"
+                  className={`${inputClassName} w-20`}
+                  value={cap.palletCap}
+                  onChange={(event) => updateCap(index, { palletCap: Number(event.target.value) })}
+                />
+                <Button type="button" variant="ghost" size="sm" onClick={() => removeCap(index)}>
+                  הסר
+                </Button>
+              </div>
+            ))}
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={addCap}
+              disabled={!customersQuery.data?.length}
+            >
+              הוסף תקרה
+            </Button>
+          </div>
+        </CellPopover>
+      ),
+    },
+    {
+      key: "seasonal",
+      label: "בעונה",
+      render: (row) => (
+        <StatusPill tone={row.is_seasonal_available ? "accent" : "neutral"} dot>
+          {row.is_seasonal_available ? "בעונה" : "לא בעונה"}
+        </StatusPill>
+      ),
+      renderEdit: () => (
+        <label className="flex cursor-pointer items-center gap-2 text-sm text-ink">
+          <input
+            type="checkbox"
+            className={checkboxClassName}
+            aria-label="זמין בעונה הנוכחית"
+            checked={form.isSeasonalAvailable}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, isSeasonalAvailable: event.target.checked }))
+            }
+          />
+          {form.isSeasonalAvailable ? "בעונה" : "לא בעונה"}
+        </label>
+      ),
+    },
+    {
+      key: "highlight",
+      label: "הבלטת תנודות מחיר",
+      render: (row) => (row.highlight_price_fluctuations ? "כן" : "לא"),
+      renderEdit: () => (
+        <label className="flex cursor-pointer items-center gap-2 text-sm text-ink">
+          <input
+            type="checkbox"
+            className={checkboxClassName}
+            aria-label="הדגש תנודות מחיר"
+            checked={form.highlightPriceFluctuations}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                highlightPriceFluctuations: event.target.checked,
+              }))
+            }
+          />
+          {form.highlightPriceFluctuations ? "כן" : "לא"}
+        </label>
+      ),
+    },
+    {
+      key: "created",
+      label: "נוצר",
+      render: (row) =>
+        row.created_at ? CREATED_AT_FORMAT.format(new Date(row.created_at)) : "—",
+    },
+  ];
+
+  const rows =
+    editingId === NEW_ROW_ID
+      ? [blankRow(), ...(productsQuery.data ?? [])]
+      : (productsQuery.data ?? []);
+
   return (
     <>
-      <ListDetailLayout
-        header={
-          <PageHeader
-            title="מוצרים"
-            subtitle="קטלוג הזנים: מחירים, אוברבוקינג, עונתיות ומגבלות ללקוח."
-          />
-        }
-        list={
-          <div className="flex h-full min-h-0 flex-col gap-3">
-            <Button type="button" onClick={handleNew} disabled={!familiesQuery.data?.length}>
-              מוצר חדש
-            </Button>
-            <RecordList
-              icon="package"
-              items={listItems}
-              selectedId={selectedId}
-              onSelect={handleSelect}
-              loading={productsQuery.isLoading}
-              searchPlaceholder="חיפוש מוצר או זן"
-              emptyLabel="אין מוצרים עדיין."
-            />
-          </div>
-        }
-        detail={
-          selectedId === null && !editing ? (
-            <EmptyState
-              icon="package"
-              title="לא נבחר מוצר"
-              hint="בחר זן מהרשימה כדי לערוך מחירים, אוברבוקינג ועונתיות, או צור מוצר חדש."
-              action={
-                <Button type="button" onClick={handleNew} disabled={!familiesQuery.data?.length}>
-                  מוצר חדש
-                </Button>
-              }
-            />
-          ) : (
-            <div className="flex flex-col gap-6">
-              <div className="flex items-center gap-3.5 border-b border-border pb-5">
-                <span
-                  aria-hidden
-                  className="font-display flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-accent-soft text-xl text-accent ring-1 ring-inset ring-accent/25"
-                >
-                  {form.name.trim().charAt(0) || "+"}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <h2 className="font-display truncate text-xl text-ink">
-                    {form.name || "מוצר חדש"}
-                  </h2>
-                  <p className="mt-0.5 truncate text-sm text-ink-muted">
-                    {familiesQuery.data?.find((family) => family.id === form.familyId)?.name ?? "—"}
-                  </p>
-                </div>
-                <StatusPill tone={form.isSeasonalAvailable ? "accent" : "neutral"} dot>
-                  {form.isSeasonalAvailable ? "בעונה" : "לא בעונה"}
-                </StatusPill>
-              </div>
-
-              <FormSection title="זיהוי" columns={2}>
-                <FormField label="משפחה" htmlFor="product-family">
-                  <select
-                    id="product-family"
-                    disabled={!editing}
-                    className={`${inputClassName} w-full`}
-                    value={form.familyId}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, familyId: event.target.value }))
-                    }
-                  >
-                    {familiesQuery.data?.map((family) => (
-                      <option key={family.id} value={family.id}>
-                        {family.name}
-                      </option>
-                    ))}
-                  </select>
-                </FormField>
-
-                <FormField label="זן / שם" htmlFor="product-name">
-                  <input
-                    id="product-name"
-                    required
-                    disabled={!editing}
-                    className={`${inputClassName} w-full`}
-                    value={form.name}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, name: event.target.value }))
-                    }
-                  />
-                </FormField>
-
-                <FormField label="גדלים" htmlFor="product-sizes">
-                  <input
-                    id="product-sizes"
-                    disabled={!editing}
-                    className={`${inputClassName} w-full`}
-                    value={form.sizes}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, sizes: event.target.value }))
-                    }
-                  />
-                </FormField>
-
-                <FormField label="סוג אריזה" htmlFor="product-pack-type">
-                  <select
-                    id="product-pack-type"
-                    disabled={!editing}
-                    className={`${inputClassName} w-full`}
-                    value={form.packType}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        packType: event.target.value as PackType | "",
-                      }))
-                    }
-                  >
-                    <option value="">—</option>
-                    <option value="pallets">משטחים</option>
-                    <option value="crates">ארגזים</option>
-                  </select>
-                </FormField>
-              </FormSection>
-
-              <FormSection
-                title="תמחור"
-                hint="מחיר קבוע, או טווח מ-/עד. השאר ריק את מה שלא רלוונטי."
-              >
-                <div className="grid grid-cols-3 gap-4">
-                  <FormField label="מחיר" htmlFor="product-price">
-                    <input
-                      id="product-price"
-                      type="number"
-                      step="0.01"
-                      disabled={!editing}
-                      className={`${inputClassName} w-full`}
-                      value={form.price}
-                      onChange={(event) =>
-                        setForm((current) => ({ ...current, price: event.target.value }))
-                      }
-                    />
-                  </FormField>
-                  <FormField label="טווח מ-" htmlFor="product-price-from">
-                    <input
-                      id="product-price-from"
-                      type="number"
-                      step="0.01"
-                      disabled={!editing}
-                      className={`${inputClassName} w-full`}
-                      value={form.priceRangeFrom}
-                      onChange={(event) =>
-                        setForm((current) => ({ ...current, priceRangeFrom: event.target.value }))
-                      }
-                    />
-                  </FormField>
-                  <FormField label="טווח עד" htmlFor="product-price-to">
-                    <input
-                      id="product-price-to"
-                      type="number"
-                      step="0.01"
-                      disabled={!editing}
-                      className={`${inputClassName} w-full`}
-                      value={form.priceRangeTo}
-                      onChange={(event) =>
-                        setForm((current) => ({ ...current, priceRangeTo: event.target.value }))
-                      }
-                    />
-                  </FormField>
-                </div>
-
-                <FormField label="סוג תמחור" htmlFor="product-price-type">
-                  <input
-                    id="product-price-type"
-                    disabled={!editing}
-                    className={`${inputClassName} w-full`}
-                    value={form.priceType}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, priceType: event.target.value }))
-                    }
-                  />
-                </FormField>
-
-                <label
-                  className={`flex items-start gap-2.5 rounded-lg bg-surface-muted/60 px-3.5 py-3 text-sm ring-1 ring-inset ring-border ${
-                    editing ? "cursor-pointer" : "cursor-default"
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    className="mt-0.5"
-                    disabled={!editing}
-                    checked={form.highlightPriceFluctuations}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        highlightPriceFluctuations: event.target.checked,
-                      }))
-                    }
-                  />
-                  <span className="font-medium text-ink">הדגש תנודות מחיר</span>
-                </label>
-              </FormSection>
-
-              <FormSection title="זמינות ומלאי">
-                <FormField label="חריגת הזמנה מותרת (No Overbooking)" htmlFor="product-overbooking">
-                  <input
-                    id="product-overbooking"
-                    type="number"
-                    step="1"
-                    min={0}
-                    disabled={!editing}
-                    className={`${inputClassName} w-full`}
-                    value={form.noOverbooking}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, noOverbooking: event.target.value }))
-                    }
-                  />
-                </FormField>
-
-                {/* The customer order screen's dropdown (order-product-list.tsx)
-                    reads this as its own ceiling — never applied to a backoffice
-                    on-behalf-of edit, where staff may deliberately exceed it. Empty
-                    means uncapped: the dropdown is then bounded by remaining stock
-                    alone. See product-variety.ts's schema comment for how this
-                    differs from the per-customer caps below (one default for every
-                    customer vs. an override for one). */}
-                <FormField
-                  label="כמות מקסימלית להזמנה ללקוח (Number of Orders per Customer)"
-                  htmlFor="product-order-cap"
-                >
-                  <input
-                    id="product-order-cap"
-                    type="number"
-                    step="1"
-                    min={0}
-                    placeholder="ללא הגבלה"
-                    disabled={!editing}
-                    className={`${inputClassName} w-full`}
-                    value={form.numberOfOrdersPerCustomer}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, numberOfOrdersPerCustomer: event.target.value }))
-                    }
-                  />
-                </FormField>
-
-                <label
-                  className={`flex items-start gap-2.5 rounded-lg bg-surface-muted/60 px-3.5 py-3 text-sm ring-1 ring-inset ring-border ${
-                    editing ? "cursor-pointer" : "cursor-default"
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    className="mt-0.5"
-                    disabled={!editing}
-                    checked={form.isSeasonalAvailable}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        isSeasonalAvailable: event.target.checked,
-                      }))
-                    }
-                  />
-                  <span>
-                    <span className="block font-medium text-ink">זמין בעונה הנוכחית</span>
-                    <span className="mt-0.5 block text-xs text-ink-muted">
-                      כשמכובה, הזן לא יופיע בחנות ולא ברשימות הליקוט.
-                    </span>
-                  </span>
-                </label>
-              </FormSection>
-
-              <FormField label="תקרת משטחים ללקוח" htmlFor="product-pallet-caps">
-                <div className="flex flex-col gap-2">
-                  {form.customerPalletCaps.map((cap, index) => (
-                    <div key={index} className="flex items-center gap-2">
-                      <select
-                        disabled={!editing}
-                        className={`${inputClassName} flex-1`}
-                        value={cap.customerCompanyId}
-                        onChange={(event) =>
-                          updateCap(index, { customerCompanyId: event.target.value })
-                        }
-                      >
-                        {customersQuery.data?.map((customer) => (
-                          <option key={customer.id} value={customer.id}>
-                            {customer.name}
-                          </option>
-                        ))}
-                      </select>
-                      <input
-                        type="number"
-                        min={0}
-                        disabled={!editing}
-                        className={`${inputClassName} w-24`}
-                        value={cap.palletCap}
-                        onChange={(event) =>
-                          updateCap(index, { palletCap: Number(event.target.value) })
-                        }
-                      />
-                      {editing && (
-                        <Button type="button" variant="ghost" onClick={() => removeCap(index)}>
-                          הסר
-                        </Button>
-                      )}
-                    </div>
-                  ))}
-                  {editing && (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={addCap}
-                      disabled={!customersQuery.data?.length}
-                    >
-                      הוסף תקרה
-                    </Button>
-                  )}
-                </div>
-              </FormField>
-
-              <ActionBar
-                editing={editing}
-                saving={saving}
-                dirty={dirty}
-                canDelete={!!selectedId}
-                onEdit={() => setEditing(true)}
-                onDiscard={handleDiscard}
-                onSave={handleSave}
-                onDelete={selectedId ? () => setDeleteOpen(true) : undefined}
-              />
-            </div>
-          )
-        }
+      <PageHeader
+        title="מוצרים"
+        subtitle="קטלוג הזנים: מחירים, אוברבוקינג, עונתיות ומגבלות ללקוח."
       />
-      <Dialog open={deleteOpen} onClose={() => setDeleteOpen(false)} title="מחיקת מוצר">
+      <RecordTable
+        columns={columns}
+        rows={rows}
+        getRowId={(row) => row.id}
+        searchText={(row) => `${row.name} ${row.product_families?.name ?? ""}`}
+        editingId={editingId}
+        savingEdit={saving}
+        dirtyEdit={dirty}
+        onEdit={handleEditRow}
+        onSaveEdit={handleSave}
+        onCancelEdit={handleCancel}
+        onDelete={(row) => setDeleteTargetId(row.id)}
+        onAdd={handleNew}
+        addLabel="מוצר חדש"
+        loading={productsQuery.isLoading || capsQuery.isLoading}
+        searchPlaceholder="חיפוש מוצר או זן"
+        emptyLabel="אין מוצרים עדיין."
+      />
+
+      <Dialog open={deleteTargetId !== null} onClose={() => setDeleteTargetId(null)} title="מחיקת מוצר">
         <p className="mb-4 text-sm">
-          האם למחוק את המוצר &quot;{selected?.name}&quot;? פעולה זו אינה הפיכה.
+          האם למחוק את המוצר &quot;{deleteTarget?.name}&quot;? פעולה זו אינה הפיכה.
         </p>
         <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={() => setDeleteOpen(false)}>
+          <Button variant="secondary" onClick={() => setDeleteTargetId(null)}>
             ביטול
           </Button>
           <Button

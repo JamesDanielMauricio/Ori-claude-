@@ -264,7 +264,7 @@ function PickDetail({
     <div className="flex flex-col gap-5">
       <PageHeader
         title="עדכון יומי"
-        subtitle="עדכן את הכמויות שנקטפו ושעת האיסוף לכל מוצר, ושלח את הליקוט למפיץ."
+        subtitle="עדכן את הכמויות שנקטפו וההערות לכל מוצר, ושלח את הליקוט למפיץ."
         actions={
           pick.status === "draft" ? (
             <Button

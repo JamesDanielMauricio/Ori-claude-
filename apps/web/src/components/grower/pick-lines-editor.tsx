@@ -9,12 +9,12 @@ import { QueryError } from "@/components/ui/query-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { hasChanges } from "@/lib/has-changes";
+import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
 
 interface PickProductLineRow {
   id: string;
   pallets_picked: string;
-  pickup_time: string | null;
   comment: string | null;
   product_varieties: {
     name: string;
@@ -26,7 +26,6 @@ interface PickProductLineRow {
 interface DraftLine {
   id: string;
   pallets: string;
-  pickupTime: string;
   comment: string;
 }
 
@@ -34,7 +33,6 @@ function toDraftLines(rows: PickProductLineRow[]): DraftLine[] {
   return rows.map((row) => ({
     id: row.id,
     pallets: row.pallets_picked,
-    pickupTime: row.pickup_time?.slice(0, 5) ?? "",
     comment: row.comment ?? "",
   }));
 }
@@ -43,7 +41,6 @@ interface PickFamilyVariety {
   id: string;
   varietyName: string;
   pallets: string;
-  pickupTime: string;
   comment: string;
 }
 
@@ -85,7 +82,6 @@ function groupDraftByFamily(rows: PickProductLineRow[], draft: DraftLine[]): Pic
       id: row.id,
       varietyName: variety.name,
       pallets: line?.pallets ?? "",
-      pickupTime: line?.pickupTime ?? "",
       comment: line?.comment ?? "",
     });
   }
@@ -107,7 +103,6 @@ function toSavedLines(lines: DraftLine[]) {
   return lines.map((line) => ({
     dailyPickProductId: line.id,
     palletsPicked: Number(line.pallets || 0),
-    pickupTime: line.pickupTime || null,
     comment: line.comment || null,
   }));
 }
@@ -178,7 +173,7 @@ export function PickLinesEditor({
       const { data, error } = await supabase
         .from("daily_pick_products")
         .select(
-          "id, pallets_picked, pickup_time, comment, product_varieties(name, family_id, product_families(name, image_url))",
+          "id, pallets_picked, comment, product_varieties(name, family_id, product_families(name, image_url))",
         )
         .eq("daily_pick_id", dailyPickId)
         .order("product_variety_id");
@@ -236,6 +231,28 @@ export function PickLinesEditor({
   // the function decides what actually changed by comparing against the stored
   // row, which is also what keeps its pick_updated notification tied to a real
   // quantity change instead of to whatever the client believed had changed.
+  // The visible pallet/comment text is already the draft, live as the grower
+  // types — nothing there waits on the network. What DOES currently wait is
+  // `dirty` (below), which is derived by comparing the draft against
+  // `linesQuery.data`: until the round trip lands and this cache refetches,
+  // the ActionBar keeps showing "unsaved changes" even though Save was
+  // already clicked. Patching the cache here with the draft's own values
+  // resolves that the instant Save is pressed; a rejection rolls it back,
+  // which reinstates `dirty` and re-enables Save/Discard exactly as if the
+  // click had never landed.
+  const saveOptimistic = optimisticUpdate<PickProductLineRow[], void>(
+    queryClient,
+    queryKey,
+    (rows) => {
+      if (!rows) return rows;
+      const draftById = new Map(draft.map((line) => [line.id, line]));
+      return rows.map((row) => {
+        const line = draftById.get(row.id);
+        return line ? { ...row, pallets_picked: line.pallets, comment: line.comment || null } : row;
+      });
+    },
+  );
+
   const saveMutation = useMutation({
     mutationFn: async () => {
       const input = savePickLinesInputSchema.parse({
@@ -245,18 +262,19 @@ export function PickLinesEditor({
       const { error } = await supabase.rpc("save_pick_lines", toSavePickLinesRpcArgs(input));
       if (error) throw error;
     },
+    onMutate: saveOptimistic.onMutate,
     onSuccess: () => {
       showToast("השורות נשמרו.", "success");
       // The draft now matches the server, so let the refetch below re-seed
       // it — otherwise the editor would stay frozen on this draft for the
       // rest of its life and quietly stop showing other people's changes.
       touched.current = false;
-      void queryClient.invalidateQueries({ queryKey: ["grower", "pick-lines", dailyPickId] });
+      void queryClient.invalidateQueries({ queryKey });
       onSaved?.();
     },
-    onError: (error: { message?: string }) => {
+    onError: mergeOnError(saveOptimistic.onError, (error: { message?: string }) => {
       showToast(`השמירה נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
-    },
+    }),
   });
 
   function updateLine(id: string, patch: Partial<DraftLine>) {
@@ -338,8 +356,8 @@ export function PickLinesEditor({
                       a header row, but that header made sense once, for a
                       flat list; repeated per family it would outweigh the
                       rows themselves. Each control still carries its own
-                      aria-label, and the number/time inputs are legible from
-                      their native browser affordances alone. */}
+                      aria-label, and the number input is legible from its
+                      native browser affordance alone. */}
                   <input
                     type="number"
                     min="0"
@@ -349,14 +367,6 @@ export function PickLinesEditor({
                     className={`${inputClassName} w-24`}
                     value={variety.pallets}
                     onChange={(event) => updateLine(variety.id, { pallets: event.target.value })}
-                  />
-                  <input
-                    type="time"
-                    disabled={locked}
-                    aria-label={`שעת איסוף — ${variety.varietyName}`}
-                    className={`${inputClassName} w-32`}
-                    value={variety.pickupTime}
-                    onChange={(event) => updateLine(variety.id, { pickupTime: event.target.value })}
                   />
                   <input
                     type="text"

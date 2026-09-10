@@ -171,7 +171,7 @@ export function TradingDayCalendarPicker({
                 type="button"
                 onClick={() => setViewDate(new Date(year, month - 1, 1))}
                 aria-label="חודש קודם"
-                className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-surface-muted hover:text-ink"
+                className="flex h-9 w-9 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-surface-muted hover:text-ink"
               >
                 {/* chevronStart points visually right (inline-start); a 180°
                     spin makes it point left — inline-end, i.e. "forward" —
@@ -189,7 +189,7 @@ export function TradingDayCalendarPicker({
                 type="button"
                 onClick={() => setViewDate(new Date(year, month + 1, 1))}
                 aria-label="חודש הבא"
-                className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-surface-muted hover:text-ink"
+                className="flex h-9 w-9 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-surface-muted hover:text-ink"
               >
                 <Icon name="chevronStart" className="h-4 w-4" />
               </button>
@@ -235,7 +235,7 @@ export function TradingDayCalendarPicker({
                       (isLiveDay ? " — היום הפעיל" : "")
                     }
                     aria-current={isShown ? "date" : undefined}
-                    className={`relative mx-auto flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold transition-colors duration-150 ${
+                    className={`relative mx-auto flex h-10 w-10 items-center justify-center rounded-full text-xs font-semibold transition-colors duration-150 ${
                       isShown
                         ? "bg-accent text-accent-ink"
                         : isLiveDay

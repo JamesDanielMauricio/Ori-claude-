@@ -17,6 +17,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { QueryError } from "@/components/ui/query-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
+import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
 import { useTradingDayView } from "@/lib/trading-day-view";
 
@@ -48,7 +49,7 @@ interface DailyOrderForDay {
 }
 
 // Same grouping as distributor-grower.tsx's groupPickLines, mirrored onto
-// order lines: no pickup time, so `secondary` is simply left unset.
+// order lines.
 function groupOrderLines(lines: OrderLineRow[]): FamilyGroupedRow[] {
   const families = new Map<string, FamilyGroupedRow>();
   for (const line of lines) {
@@ -129,8 +130,10 @@ export default function DistributorAsCustomerPage() {
   // Orders AND their lines in one request — see distributor-grower.tsx's
   // identical comment on picksForDayQuery for why: embedding
   // daily_order_products here is what makes expanding any row free.
+  const ordersForDayQueryKey = ["customer-oversight", "orders-for-day", dayId] as const;
+
   const ordersForDayQuery = useQuery({
-    queryKey: ["customer-oversight", "orders-for-day", dayId],
+    queryKey: ordersForDayQueryKey,
     enabled: !!dayId,
     queryFn: async () => {
       const { data, error } = await supabase
@@ -194,6 +197,20 @@ export default function DistributorAsCustomerPage() {
   // One mutation, keyed per call by `dailyOrderId` — see distributor-
   // grower.tsx's identical reminderMutation for why `variables` is what
   // lets each row's bell know whether it is the one currently sending.
+  // `reminder_sent_at` is real, persisted state on the order row — patch it
+  // optimistically like any other field, same treatment as
+  // distributor-grower.tsx's identical reminderMutation.
+  const reminderOptimistic = optimisticUpdate<DailyOrderForDay[], string>(
+    queryClient,
+    ordersForDayQueryKey,
+    (orders, dailyOrderId) =>
+      orders?.map((order) =>
+        order.id === dailyOrderId
+          ? { ...order, reminder_sent_at: new Date().toISOString() }
+          : order,
+      ),
+  );
+
   const reminderMutation = useMutation({
     mutationFn: async (dailyOrderId: string) => {
       const input = sendOrderReminderInputSchema.parse({ dailyOrderId });
@@ -203,15 +220,14 @@ export default function DistributorAsCustomerPage() {
       );
       if (error) throw error;
     },
+    onMutate: reminderOptimistic.onMutate,
     onSuccess: () => {
       showToast("התזכורת נשלחה.", "success");
-      void queryClient.invalidateQueries({
-        queryKey: ["customer-oversight", "orders-for-day", dayId],
-      });
+      void queryClient.invalidateQueries({ queryKey: ordersForDayQueryKey });
     },
-    onError: (error: { message?: string }) => {
+    onError: mergeOnError(reminderOptimistic.onError, (error: { message?: string }) => {
       showToast(`שליחת התזכורת נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
-    },
+    }),
   });
 
   function toggleExpanded(customerId: string) {
@@ -250,6 +266,7 @@ export default function DistributorAsCustomerPage() {
           !dayView.isLive || !order || order.status === "submitted" || reminderMutation.isPending
         }
         reminding={reminding}
+        reminded={!!order?.reminder_sent_at}
       >
         <FamilyGroupedLines families={families} emptyLabel="אין עדיין הזמנה עבור לקוח זה." />
       </ExpandableEntityRow>

@@ -12,6 +12,7 @@ import { formatPallets } from "./board-data";
 import {
   cellTarget,
   flattenMatrixRows,
+  parseMatrixQuantity,
   type Matrix,
   type MatrixProductRow,
   type MatrixRow,
@@ -481,14 +482,12 @@ export function ArrangementMatrix({
     const target = cellTarget(row, pending.col, columns);
     if (!target) return;
 
-    // A decimal comma is what a Hebrew keyboard produces on the numpad, and
-    // half-pallets (5.5) are routine — so accept both separators rather than
-    // silently discarding the entry.
-    const raw = pending.value.trim().replace(",", ".");
-    // Emptying a cell means "nothing is arranged here", which is a deletion,
-    // not a no-op. The route turns a zero into delete_arrangement_record.
-    const next = raw === "" ? 0 : Number(raw);
-    if (!Number.isFinite(next) || next < 0) return;
+    // Shared with the mobile card view (matrix-data.ts) so a quantity is
+    // accepted or rejected by the same rule wherever it's typed. Emptying a
+    // cell parses to 0, which means "nothing is arranged here" — a deletion,
+    // not a no-op; the route turns a zero into delete_arrangement_record.
+    const next = parseMatrixQuantity(pending.value);
+    if (next === null) return;
     if (next === target.current) return;
 
     await onCommit({

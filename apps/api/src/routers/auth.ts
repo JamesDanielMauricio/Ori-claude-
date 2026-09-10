@@ -1,4 +1,4 @@
-import { adminResetPassword, bulkCreateUsers, deleteUser } from "@ori/domain/auth";
+import { adminResetPassword, bulkCreateUsers, deleteUser, listUserEmails } from "@ori/domain/auth";
 import { userRoleSchema } from "@ori/shared/roles";
 import { z } from "zod";
 
@@ -47,6 +47,19 @@ export const authRouter = router({
         throw toTRPCError(error);
       }
     }),
+
+  // The Users screen's email column — `auth.users.email` isn't reachable
+  // from the browser's own Supabase client (PostgREST exposes `public`
+  // only), so the screen reads it here and joins it onto the profiles rows
+  // it already has. Read-only: changing a login email is an auth operation,
+  // not a profile edit.
+  listUserEmails: backofficeProcedure.query(async () => {
+    try {
+      return await listUserEmails();
+    } catch (error) {
+      throw toTRPCError(error);
+    }
+  }),
 
   // The Users screen's delete action — needs the service-role Admin API to
   // remove the `auth.users` identity itself, which RLS can't reach (see

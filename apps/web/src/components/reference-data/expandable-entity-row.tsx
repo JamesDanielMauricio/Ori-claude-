@@ -32,6 +32,7 @@ export function ExpandableEntityRow({
   remindLabel,
   remindDisabled,
   reminding,
+  reminded,
   children,
 }: {
   name: string;
@@ -46,12 +47,19 @@ export function ExpandableEntityRow({
   remindLabel: string;
   remindDisabled: boolean;
   reminding: boolean;
+  /**
+   * Shown as a checkmark the instant the bell is clicked, optimistically —
+   * before the RPC round trip confirms it — and cleared again either by the
+   * caller (on a failed send) or after a few seconds (on a real one). See
+   * distributor-grower.tsx / distributor-customer.tsx for the timing.
+   */
+  reminded?: boolean;
   children: ReactNode;
 }) {
   return (
     <li className="border-b border-border last:border-b-0">
       <div
-        className={`flex items-center gap-1.5 py-2 ps-1 pe-3 transition-colors duration-150 ${
+        className={`flex items-center gap-2 py-2 ps-1 pe-3 transition-colors duration-150 ${
           expanded ? "bg-accent-soft/30" : "hover:bg-surface-muted"
         }`}
       >
@@ -64,7 +72,7 @@ export function ExpandableEntityRow({
           onClick={onEdit}
           aria-label={editLabel}
           title={editLabel}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ink-subtle ring-1 ring-inset ring-border transition-colors duration-150 hover:bg-surface hover:text-accent hover:ring-accent/40"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-ink-subtle ring-1 ring-inset ring-border transition-colors duration-150 hover:bg-surface hover:text-accent hover:ring-accent/40"
         >
           <Icon name="pencil" className="h-3.5 w-3.5" />
         </button>
@@ -79,13 +87,15 @@ export function ExpandableEntityRow({
           disabled={remindDisabled}
           aria-label={remindLabel}
           title={remindLabel}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brass-soft text-brass ring-1 ring-inset ring-brass/25 transition-colors duration-150 enabled:hover:bg-brass enabled:hover:text-accent-ink disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brass-soft text-brass ring-1 ring-inset ring-brass/25 transition-colors duration-150 enabled:hover:bg-brass enabled:hover:text-accent-ink disabled:cursor-not-allowed disabled:opacity-40"
         >
           {reminding ? (
             <span
               aria-hidden
               className="animate-spin-loop h-3 w-3 rounded-full border-2 border-current border-t-transparent"
             />
+          ) : reminded ? (
+            <Icon name="checkCircle" className="h-3.5 w-3.5" />
           ) : (
             <Icon name="bell" className="h-3.5 w-3.5" />
           )}

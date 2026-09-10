@@ -51,6 +51,10 @@ export interface CreateTestGrowerWithProductOptions {
   // off a priceless product and then closing the day is therefore a state
   // the application deliberately rejects, not something to work around.
   price?: number;
+  // The grower company's default collection time — what submit_pick and
+  // close_arrangement snapshot onto daily_picks.pickup_time (0043). Defaults
+  // to null, which is fine for callers that don't exercise that snapshot.
+  defaultPickupTime?: string;
 }
 
 // A grower with exactly one in-season product — the minimum shape
@@ -61,7 +65,11 @@ export async function createTestGrowerWithProduct(
 ): Promise<TestGrowerWithProduct> {
   const [company] = await db
     .insert(companies)
-    .values({ name: `Test Grower ${randomUUID()}`, type: "grower" })
+    .values({
+      name: `Test Grower ${randomUUID()}`,
+      type: "grower",
+      ...(options.defaultPickupTime === undefined ? {} : { defaultPickupTime: options.defaultPickupTime }),
+    })
     .returning();
   if (!company) throw new Error("failed to create test grower company");
 

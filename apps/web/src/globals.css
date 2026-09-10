@@ -508,6 +508,133 @@ input[type="number"] {
 }
 
 /*
+ * ---------------------------------------------------------------------------
+ * Form controls — the half Tailwind can't reach
+ * ---------------------------------------------------------------------------
+ * The shared skin (fill, ring, focus halo, radius) is Tailwind utilities, in
+ * `inputClassName` — components/reference-data/form-field.tsx — so every
+ * screen picks it up from one string. What has to live here is the widget
+ * each control draws for ITSELF, because no class can touch those: a
+ * <select>'s chevron, a number field's spin buttons, a time field's clock,
+ * and a checkbox's entire appearance. Those leftovers are exactly what makes
+ * an otherwise-styled form still look like a browser default wearing a
+ * costume, and they're the reason the backoffice tables read as unfinished
+ * even though every field around them was themed.
+ */
+
+/* The select's own arrow, replaced with the same chevron the icon set draws
+   (icon.tsx's `chevronDown`, identical path data) so a dropdown in a table
+   cell matches the chevrons everywhere else in the app.
+   `background-position` has no logical form, so the inline end is spelled
+   `left` — correct here because the document is RTL at the root and only
+   ever RTL (see index.html's own note). The stroke colour is baked into the
+   data URI because `currentColor` resolves against the SVG document, not the
+   host element; the rail override below is what keeps it visible when a
+   subtree flips to the dark token set. */
+select.field-control {
+  appearance: none;
+  padding-inline-end: 2.25rem;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239b9284' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 9 7 7 7-7'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: left 0.8rem center;
+  background-size: 0.7rem;
+}
+
+[data-surface="rail"] select.field-control {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236d8477' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 9 7 7 7-7'/%3E%3C/svg%3E");
+}
+
+/* Spin buttons, removed. Every numeric field in this app is a price, a
+   pallet count or an overbooking buffer — typed, never nudged one at a time
+   — and the arrows eat horizontal room in table cells that are already
+   narrow, while adding a second, fussier way to change a value. */
+input.field-control[type="number"] {
+  appearance: textfield;
+}
+
+input.field-control[type="number"]::-webkit-outer-spin-button,
+input.field-control[type="number"]::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+/* The clock glyph Chrome draws inside a time field: dimmed to sit with the
+   app's muted ink rather than announcing itself in browser blue-gray, and
+   brought back to full strength on hover so it still reads as clickable. */
+input.field-control[type="time"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.45;
+  transition: opacity 0.15s var(--ease-settle);
+}
+
+input.field-control[type="time"]:hover::-webkit-calendar-picker-indicator,
+input.field-control[type="time"]:focus::-webkit-calendar-picker-indicator {
+  opacity: 0.9;
+}
+
+/*
+ * The checkbox, drawn from scratch. `accent-color` (set on every native
+ * checkbox further up this file) is the only property the native control
+ * honours, which leaves its box shape, radius and border as whatever the OS
+ * decides — so a form otherwise built from soft rounded fields ends up with
+ * a hard little system square in the middle of it.
+ *
+ * `appearance: none` on the real <input> hands us the box while keeping the
+ * element itself: still focusable, still toggled by its <label>, still
+ * announced as a checkbox, still found by `getByLabel` in the tests. The
+ * checkmark is a background image rather than a pseudo-element, which
+ * replaced <input> elements don't render reliably.
+ *
+ * Selected as `input.field-check`, not `.field-check`: the base
+ * `input[type="checkbox"]` rule above is an element-plus-attribute selector
+ * and so outranks a bare class, which would silently keep this control at
+ * the base rule's own 1rem box.
+ */
+input.field-check {
+  appearance: none;
+  width: 1.15rem;
+  height: 1.15rem;
+  flex-shrink: 0;
+  cursor: pointer;
+  border-radius: 0.35rem;
+  background-color: var(--color-surface);
+  box-shadow:
+    inset 0 0 0 1px var(--color-border-strong),
+    inset 0 1px 2px rgba(0, 0, 0, 0.06);
+  transition:
+    background-color 0.15s var(--ease-settle),
+    box-shadow 0.15s var(--ease-settle);
+}
+
+input.field-check:hover:not(:disabled) {
+  box-shadow:
+    inset 0 0 0 1px var(--color-ink-subtle),
+    inset 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+input.field-check:checked {
+  background-color: var(--color-accent);
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5.5 12.5 4.5 4.5 8.5-9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 0.8rem;
+  box-shadow: inset 0 0 0 1px var(--color-accent);
+}
+
+/* On the dark rail the accent is a BRIGHT green carrying dark ink (see the
+   `--color-accent-ink` note in the token block) — a white checkmark there
+   goes muddy the same way white text does, so it flips with everything
+   else. */
+[data-surface="rail"] input.field-check:checked {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2306170e' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5.5 12.5 4.5 4.5 8.5-9'/%3E%3C/svg%3E");
+}
+
+input.field-check:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/*
  * Modal entrance. The dialog scales and fades, the backdrop only fades.
  * Scoped to [open] so it plays when the dialog opens and never on the first
  * paint of a closed one.

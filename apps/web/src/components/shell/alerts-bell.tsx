@@ -162,7 +162,7 @@ export function AlertsBell() {
         type="button"
         onClick={() => setOpen(true)}
         aria-label="התראות"
-        className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-canvas hover:text-ink"
+        className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-canvas hover:text-ink"
       >
         <Icon name="bell" />
         {unreadCount > 0 && (
@@ -178,7 +178,7 @@ export function AlertsBell() {
             <button
               type="button"
               onClick={handleMarkAllRead}
-              className="self-end rounded px-1.5 py-0.5 text-xs font-medium text-accent transition-colors hover:bg-accent-soft"
+              className="self-end rounded px-2.5 py-1.5 text-xs font-medium text-accent transition-colors hover:bg-accent-soft"
             >
               סמן הכל כנקרא
             </button>

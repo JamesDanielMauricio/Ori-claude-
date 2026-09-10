@@ -30,6 +30,8 @@ export function GrowerSupplyColumn({
   onToggle,
   onSelect,
   onEditPick,
+  onToggleSubmit,
+  toggleSubmitDisabled = false,
 }: {
   growers: GrowerSupply[];
   selection: PickSelection | null;
@@ -37,6 +39,17 @@ export function GrowerSupplyColumn({
   onToggle: (growerId: string) => void;
   onSelect: (selection: PickSelection) => void;
   onEditPick: (grower: GrowerSupply) => void;
+  // The truck icon: submits a draft pick, or reverts an already-submitted
+  // one back to draft (a deliberate exception to the pick status state
+  // machine's otherwise forward-only rule — see migration 0044). Not
+  // offered at all once a pick is 'closed' — the trading day is done, and
+  // there is nothing left to toggle.
+  onToggleSubmit: (grower: GrowerSupply) => void;
+  // True once the trading day itself is no longer open (closed, or the
+  // sidebar's date picker has pinned a past day) — the whole column is
+  // then a read-only history view, so the truck icon is disabled the same
+  // way the pencil's edits are gated elsewhere on this screen.
+  toggleSubmitDisabled?: boolean;
 }) {
   return (
     <section className="animate-rise-in overflow-hidden rounded-xl bg-surface shadow-raised ring-1 ring-inset ring-border/70">
@@ -59,6 +72,8 @@ export function GrowerSupplyColumn({
               onToggle={() => onToggle(grower.growerId)}
               onSelect={onSelect}
               onEditPick={onEditPick}
+              onToggleSubmit={onToggleSubmit}
+              toggleSubmitDisabled={toggleSubmitDisabled}
             />
           ))}
         </ul>
@@ -75,6 +90,8 @@ function GrowerRow({
   onToggle,
   onSelect,
   onEditPick,
+  onToggleSubmit,
+  toggleSubmitDisabled,
 }: {
   grower: GrowerSupply;
   index: number;
@@ -83,6 +100,8 @@ function GrowerRow({
   onToggle: () => void;
   onSelect: (selection: PickSelection) => void;
   onEditPick: (grower: GrowerSupply) => void;
+  onToggleSubmit: (grower: GrowerSupply) => void;
+  toggleSubmitDisabled: boolean;
 }) {
   const time = formatPickupTime(grower.pickupTime);
   const free = grower.picked - grower.allocated;
@@ -142,20 +161,49 @@ function GrowerRow({
           )}
         </button>
 
-        {/* Opens the grower's pick in a popup, the same way the pencil on a
-            customer card opens their order. Not a link to the "בשם מגדל"
-            screen: the distributor is working one pick line down a list of
-            customers, and navigating away to correct a pallet count would
-            throw away the selection and everything built on top of it. */}
-        <button
-          type="button"
-          onClick={() => onEditPick(grower)}
-          aria-label={`ערוך את מלאי ${grower.growerName}`}
-          title="ערוך מלאי מגדל"
-          className="me-3 flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-subtle ring-1 ring-inset ring-border transition-colors duration-200 hover:bg-surface hover:text-accent hover:ring-accent/40"
-        >
-          <Icon name="pencil" className="h-3.5 w-3.5" />
-        </button>
+        <div className="me-3 flex shrink-0 items-center gap-1.5">
+          {/* The submit/un-submit toggle. Nothing to toggle once the pick is
+              closed — the trading day is done, so the button disappears
+              rather than sitting there disabled and unexplained. Coloured
+              like the "נבחר" pill while submitted, so a glance down the
+              column shows who's actually ready to be arranged against. */}
+          {grower.status !== "closed" && (
+            <button
+              type="button"
+              onClick={() => onToggleSubmit(grower)}
+              disabled={toggleSubmitDisabled}
+              aria-label={
+                grower.status === "submitted"
+                  ? `החזר את הליקוט של ${grower.growerName} לטיוטה`
+                  : `שלח את הליקוט של ${grower.growerName} למפיץ`
+              }
+              title={grower.status === "submitted" ? "החזר לטיוטה" : "שלח ליקוט"}
+              className={`flex h-10 w-10 items-center justify-center rounded-md ring-1 ring-inset transition-colors duration-200 disabled:pointer-events-none disabled:opacity-40 ${
+                grower.status === "submitted"
+                  ? "bg-accent-soft/60 text-accent ring-accent/40 hover:bg-accent-soft hover:ring-accent/60"
+                  : "text-ink-subtle ring-border hover:bg-surface hover:text-accent hover:ring-accent/40"
+              }`}
+            >
+              <Icon name="truck" className="h-4 w-4" />
+            </button>
+          )}
+
+          {/* Opens the grower's pick in a popup, the same way the pencil on
+              a customer card opens their order. Not a link to the "בשם
+              מגדל" screen: the distributor is working one pick line down a
+              list of customers, and navigating away to correct a pallet
+              count would throw away the selection and everything built on
+              top of it. */}
+          <button
+            type="button"
+            onClick={() => onEditPick(grower)}
+            aria-label={`ערוך את מלאי ${grower.growerName}`}
+            title="ערוך מלאי מגדל"
+            className="flex h-10 w-10 items-center justify-center rounded-md text-ink-subtle ring-1 ring-inset ring-border transition-colors duration-200 hover:bg-surface hover:text-accent hover:ring-accent/40"
+          >
+            <Icon name="pencil" className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
 
       {/* Height-animated rather than mounted/unmounted (globals.css

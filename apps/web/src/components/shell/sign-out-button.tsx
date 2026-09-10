@@ -37,8 +37,8 @@ export function SignOutButton({
   // isn't destructive, so it shouldn't read with the same alarm as one.
   const variantClasses =
     variant === "solid"
-      ? "w-full rounded-md border border-danger/25 bg-danger-soft px-3 py-2 text-center text-sm font-semibold text-danger ring-1 ring-inset ring-danger/15 transition-colors hover:bg-danger hover:text-white"
-      : "rounded-md px-2 py-1 text-sm font-medium text-danger transition-colors hover:bg-danger-soft";
+      ? "w-full rounded-md border border-danger/25 bg-danger-soft px-3 py-2.5 text-center text-sm font-semibold text-danger ring-1 ring-inset ring-danger/15 transition-colors hover:bg-danger hover:text-white"
+      : "rounded-md px-2.5 py-2 text-sm font-medium text-danger transition-colors hover:bg-danger-soft";
 
   return (
     <button

@@ -1,4 +1,4 @@
-import { numeric, pgTable, text, time, timestamp, unique, uuid } from "drizzle-orm/pg-core";
+import { numeric, pgTable, text, timestamp, unique, uuid } from "drizzle-orm/pg-core";
 
 import { dailyPicks } from "./daily-pick";
 import { productVarieties } from "./product-variety";
@@ -13,9 +13,10 @@ import { productVarieties } from "./product-variety";
 // `pallets_picked` is the field the arrangement-edit floor check guards:
 // it can never be reduced below what `arrangement_records` already
 // commits for this line (see `update_pick_product_pallets`).
-// `pickup_time` is an optional per-line override of the grower's company
-// default (`companies.default_pickup_time`) — null means "use the
-// default". `leftover_pallets` is populated once, at pick-close time, by
+// There is deliberately no pickup-time field on this table — pickup time
+// is a per-grower (company) setting, not a per-product one; see
+// `companies.default_pickup_time` and `daily_picks.pickup_time`.
+// `leftover_pallets` is populated once, at pick-close time, by
 // `close_out_pick_leftovers` (0014) — the PRD's own `leftovers` and
 // `the_number_of_leftover_pallets_after_the_day_ended` fields collapse
 // into this one column; they were never two genuinely different values,
@@ -32,7 +33,6 @@ export const dailyPickProducts = pgTable(
       .notNull()
       .references(() => productVarieties.id),
     palletsPicked: numeric("pallets_picked", { precision: 10, scale: 2 }).notNull().default("0"),
-    pickupTime: time("pickup_time"),
     comment: text("comment"),
     leftoverPallets: numeric("leftover_pallets", { precision: 10, scale: 2 }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

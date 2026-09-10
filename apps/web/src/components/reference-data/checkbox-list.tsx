@@ -1,3 +1,5 @@
+import { checkboxClassName } from "./form-field";
+
 // The shared shape behind three different business rules that are all,
 // mechanically, "pick a subset of the product catalog": a grower's
 // in-season selection, a user's product blacklist, and (rendered
@@ -31,7 +33,7 @@ export function CheckboxList({
             // start of the line is very easy to lose; a tinted row is not.
             // `cursor-default` while disabled so the row doesn't advertise
             // itself as clickable when it isn't.
-            className={`flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm transition-colors ${
+            className={`flex items-center gap-2.5 rounded-md px-2.5 py-2.5 text-sm transition-colors ${
               disabled ? "cursor-default" : "cursor-pointer"
             } ${
               checked
@@ -41,6 +43,7 @@ export function CheckboxList({
           >
             <input
               type="checkbox"
+              className={checkboxClassName}
               checked={checked}
               disabled={disabled}
               onChange={() => onToggle(option.id)}

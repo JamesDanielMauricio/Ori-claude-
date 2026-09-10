@@ -1,4 +1,6 @@
-import { useEffect, useState, type ReactElement } from "react";
+import type { ReactElement } from "react";
+
+import { useWide } from "@/lib/use-wide";
 
 // The "בשם מגדל" / "בשם לקוח" screens' layout: one column of rows on a
 // narrow screen, two side by side from `lg` up. Purely a layout concern —
@@ -6,11 +8,11 @@ import { useEffect, useState, type ReactElement } from "react";
 // family-grouped panel underneath) is `ExpandableEntityRow`; this only
 // decides how many of them sit per line.
 //
-// Decides the breakpoint in JS (`useWide` below) and renders ONE of the two
-// layouts, rather than mounting both and toggling visibility with a media
-// query — the more common React pattern, and the first one tried here. That
-// approach mounted every row TWICE (a hidden `lg:hidden` copy plus the
-// visible one), which is a real cost, not just noise: it doubles this
+// Decides the breakpoint in JS (`useWide`, lib/use-wide.ts) and renders ONE
+// of the two layouts, rather than mounting both and toggling visibility with
+// a media query — the more common React pattern, and the first one tried
+// here. That approach mounted every row TWICE (a hidden `lg:hidden` copy plus
+// the visible one), which is a real cost, not just noise: it doubles this
 // screen's DOM and accessibility tree for a list that can run to dozens of
 // companies, and it means a plain `getByRole` query in a test — or a screen
 // reader's — matches the row twice, once landing on the CSS-hidden copy,
@@ -32,26 +34,10 @@ import { useEffect, useState, type ReactElement } from "react";
 // fixed rather than rebalanced across columns every time a row's height
 // changes — the last thing an expanding accordion needs is its neighbours
 // hopping to the other column mid-interaction.
-function useWide(): boolean {
-  // Read synchronously on first render rather than defaulting to `false`
-  // and correcting in an effect: this is a plain client-rendered SPA (no
-  // SSR pass to mismatch against), so there is nothing to lose and a real
-  // flash of the wrong layout to avoid.
-  const query = "(min-width: 1024px)"; // Tailwind's `lg` breakpoint.
-  const [wide, setWide] = useState(() => window.matchMedia(query).matches);
-
-  useEffect(() => {
-    const mql = window.matchMedia(query);
-    const onChange = () => setWide(mql.matches);
-    mql.addEventListener("change", onChange);
-    return () => mql.removeEventListener("change", onChange);
-  }, []);
-
-  return wide;
-}
+const WIDE_QUERY = "(min-width: 1024px)"; // Tailwind's `lg` breakpoint.
 
 export function TwoColumnRowList({ rows }: { rows: ReactElement[] }) {
-  const wide = useWide();
+  const wide = useWide(WIDE_QUERY);
 
   const listClass =
     "divide-y divide-border overflow-hidden rounded-xl bg-surface shadow-raised ring-1 ring-inset ring-border/70";

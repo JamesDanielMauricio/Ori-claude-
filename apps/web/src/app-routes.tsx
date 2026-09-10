@@ -42,6 +42,7 @@ const CustomerHistory = lazy(() => import("@/routes/customer/history"));
 
 const GrowerLayout = lazy(() => import("@/routes/grower/layout"));
 const GrowerPicks = lazy(() => import("@/routes/grower/picks"));
+const GrowerHistory = lazy(() => import("@/routes/grower/history"));
 const GrowerLegacy = lazy(() => import("@/routes/grower/legacy"));
 
 const ProfileLayout = lazy(() => import("@/routes/profile/layout"));
@@ -103,6 +104,7 @@ export function AppRoutes() {
                 param is missing. */}
             <Route index element={<Navigate to="/grower/picks" replace />} />
             <Route path="picks" element={<GrowerPicks />} />
+            <Route path="history" element={<GrowerHistory />} />
             <Route path="legacy" element={<GrowerLegacy />} />
           </Route>
         </Route>

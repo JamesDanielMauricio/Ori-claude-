@@ -10,6 +10,12 @@ export default defineConfig({
     environment: "node",
     include: ["src/**/*.test.ts"],
     passWithNoTests: true,
+    // Borrows the single-open-trading-day slot for the duration of the run
+    // and gives it back afterwards. Without this, a seeded demo day left in
+    // `shop_open` occupies the only slot the partial unique index below
+    // allows, and every test that opens its own day fails with P0004
+    // DAY_ALREADY_OPEN — see src/lifecycle-engine/trading-day-slot.ts.
+    globalSetup: ["./src/lifecycle-engine/global-setup.ts"],
     // These tests run against the real local Supabase stack (`supabase
     // start`) — no mocked DB or Auth layer, per docs/ARCHITECTURE.md.
     // GoTrue only ever serves one database, so unlike the plain-Postgres

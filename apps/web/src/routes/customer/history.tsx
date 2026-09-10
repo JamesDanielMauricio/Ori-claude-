@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { inputClassName } from "@/components/reference-data/form-field";
 import { Icon } from "@/components/ui/icon";
 import { PageHeader } from "@/components/ui/page-header";
+import { QueryError } from "@/components/ui/query-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import { createClient } from "@/lib/supabase/client";
 
@@ -114,6 +115,14 @@ export default function CustomerOrderHistoryPage() {
             <Skeleton className="h-10 w-full" />
             <Skeleton className="h-10 w-full" />
           </div>
+        ) : ordersQuery.isError ? (
+          // Not "you have no orders yet" — that sentence would tell a customer
+          // their entire order history had vanished.
+          <QueryError
+            what="היסטוריית ההזמנות"
+            onRetry={() => void ordersQuery.refetch()}
+            retrying={ordersQuery.isFetching}
+          />
         ) : sortedOrders.length === 0 ? (
           <p className="p-4 text-sm text-ink-muted">אין עדיין הזמנות.</p>
         ) : visibleOrders.length === 0 ? (

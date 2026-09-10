@@ -37,7 +37,11 @@ test.describe("Backoffice — Transporters", () => {
     await page.goto("/backoffice/transporters");
 
     const transporterName = `E2E Transporter ${randomUUID()}`;
-    await page.getByRole("button", { name: "מוביל חדש" }).click();
+    // Two buttons carry this name by design: the one above the list, and the
+    // call-to-action inside the empty detail pane ("...או צור מוביל חדש").
+    // Both open the same blank form; `.first()` is the list-pane one, which
+    // is present whether or not anything is selected.
+    await page.getByRole("button", { name: "מוביל חדש" }).first().click();
     await page.getByLabel("שם").fill(transporterName);
     await page.getByRole("button", { name: "שמור" }).click();
 

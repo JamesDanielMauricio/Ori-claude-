@@ -9,7 +9,11 @@ import {
   runCleanup,
   signInTestUser,
 } from "@ori/domain/auth/testing";
-import { LIFECYCLE_ERROR_CODES, toInitiateBusinessDayRpcArgs, toUpdatePickProductPalletsRpcArgs } from "@ori/domain/lifecycle-engine";
+import {
+  LIFECYCLE_ERROR_CODES,
+  toInitiateBusinessDayRpcArgs,
+  toUpdatePickProductPalletsRpcArgs,
+} from "@ori/domain/lifecycle-engine";
 import {
   createTestGrowerWithProduct,
   createTestOrderProductLine,
@@ -47,7 +51,10 @@ describe("arrangement module", () => {
     adminCleanupFns.push(() => deleteTestCompany(company.id));
     const profile = await createTestProfile({ companyId: company.id, role: "backoffice" });
     adminCleanupFns.push(() => deleteTestUser(profile.userId));
-    admin = { client: await signInTestUser(profile.email, profile.password), userId: profile.userId };
+    admin = {
+      client: await signInTestUser(profile.email, profile.password),
+      userId: profile.userId,
+    };
   });
 
   afterAll(async () => {
@@ -69,7 +76,10 @@ describe("arrangement module", () => {
     cleanupFns.push(() => deleteTestCompany(customer.id));
 
     const tradeDate = new Date().toISOString().slice(0, 10);
-    const initiate = await admin.client.rpc("initiate_business_day", toInitiateBusinessDayRpcArgs({ tradeDate }));
+    const initiate = await admin.client.rpc(
+      "initiate_business_day",
+      toInitiateBusinessDayRpcArgs({ tradeDate }),
+    );
     expect(initiate.error).toBeNull();
     const day = initiate.data!;
     // Pushed before the grower/customer companies (LIFO: this runs first),
@@ -95,7 +105,12 @@ describe("arrangement module", () => {
     );
     expect(updatePallets.error).toBeNull();
 
-    const orderLine = await createTestOrderProductLine(day.id, customer.id, grower.varietyId, palletsOrdered);
+    const orderLine = await createTestOrderProductLine(
+      day.id,
+      customer.id,
+      grower.varietyId,
+      palletsOrdered,
+    );
 
     return { day, grower, customer, pickProductId: pickLine!.id, orderProductId: orderLine.id };
   }
@@ -105,17 +120,28 @@ describe("arrangement module", () => {
 
     const overSupply = await admin.client.rpc(
       "create_arrangement_record",
-      toCreateArrangementRecordRpcArgs({ dailyPickProductId: pickProductId, dailyOrderProductId: orderProductId, quantityPallets: 6 }),
+      toCreateArrangementRecordRpcArgs({
+        dailyPickProductId: pickProductId,
+        dailyOrderProductId: orderProductId,
+        quantityPallets: 6,
+      }),
     );
     expect(overSupply.error).not.toBeNull();
     expect(overSupply.error?.code).toBe(ARRANGEMENT_ERROR_CODES.OVER_ALLOCATION);
 
     const atCeiling = await admin.client.rpc(
       "create_arrangement_record",
-      toCreateArrangementRecordRpcArgs({ dailyPickProductId: pickProductId, dailyOrderProductId: orderProductId, quantityPallets: 5 }),
+      toCreateArrangementRecordRpcArgs({
+        dailyPickProductId: pickProductId,
+        dailyOrderProductId: orderProductId,
+        quantityPallets: 5,
+      }),
     );
     expect(atCeiling.error).toBeNull();
-    expect(atCeiling.data).toMatchObject({ daily_pick_product_id: pickProductId, daily_order_product_id: orderProductId });
+    expect(atCeiling.data).toMatchObject({
+      daily_pick_product_id: pickProductId,
+      daily_order_product_id: orderProductId,
+    });
   }, 30000);
 
   it("create_arrangement_record blocks over-allocation against the order line's own pallets_ordered ceiling", async () => {
@@ -123,14 +149,22 @@ describe("arrangement module", () => {
 
     const overDemand = await admin.client.rpc(
       "create_arrangement_record",
-      toCreateArrangementRecordRpcArgs({ dailyPickProductId: pickProductId, dailyOrderProductId: orderProductId, quantityPallets: 6 }),
+      toCreateArrangementRecordRpcArgs({
+        dailyPickProductId: pickProductId,
+        dailyOrderProductId: orderProductId,
+        quantityPallets: 6,
+      }),
     );
     expect(overDemand.error).not.toBeNull();
     expect(overDemand.error?.code).toBe(ARRANGEMENT_ERROR_CODES.OVER_ALLOCATION);
 
     const atCeiling = await admin.client.rpc(
       "create_arrangement_record",
-      toCreateArrangementRecordRpcArgs({ dailyPickProductId: pickProductId, dailyOrderProductId: orderProductId, quantityPallets: 4 }),
+      toCreateArrangementRecordRpcArgs({
+        dailyPickProductId: pickProductId,
+        dailyOrderProductId: orderProductId,
+        quantityPallets: 4,
+      }),
     );
     expect(atCeiling.error).toBeNull();
   }, 30000);
@@ -144,7 +178,10 @@ describe("arrangement module", () => {
     cleanupFns.push(() => deleteTestCompany(customerB.id));
 
     const tradeDate = new Date().toISOString().slice(0, 10);
-    const initiate = await admin.client.rpc("initiate_business_day", toInitiateBusinessDayRpcArgs({ tradeDate }));
+    const initiate = await admin.client.rpc(
+      "initiate_business_day",
+      toInitiateBusinessDayRpcArgs({ tradeDate }),
+    );
     expect(initiate.error).toBeNull();
     const day = initiate.data!;
     cleanupFns.push(() => deleteTestTradingDay(day.id));
@@ -171,11 +208,19 @@ describe("arrangement module", () => {
     const [first, second] = await Promise.all([
       admin.client.rpc(
         "create_arrangement_record",
-        toCreateArrangementRecordRpcArgs({ dailyPickProductId: pickLine!.id, dailyOrderProductId: orderLineA.id, quantityPallets: 6 }),
+        toCreateArrangementRecordRpcArgs({
+          dailyPickProductId: pickLine!.id,
+          dailyOrderProductId: orderLineA.id,
+          quantityPallets: 6,
+        }),
       ),
       admin.client.rpc(
         "create_arrangement_record",
-        toCreateArrangementRecordRpcArgs({ dailyPickProductId: pickLine!.id, dailyOrderProductId: orderLineB.id, quantityPallets: 6 }),
+        toCreateArrangementRecordRpcArgs({
+          dailyPickProductId: pickLine!.id,
+          dailyOrderProductId: orderLineB.id,
+          quantityPallets: 6,
+        }),
       ),
     ]);
 
@@ -207,7 +252,11 @@ describe("arrangement module", () => {
 
     const created = await admin.client.rpc(
       "create_arrangement_record",
-      toCreateArrangementRecordRpcArgs({ dailyPickProductId: pickProductId, dailyOrderProductId: orderProductId, quantityPallets: 5 }),
+      toCreateArrangementRecordRpcArgs({
+        dailyPickProductId: pickProductId,
+        dailyOrderProductId: orderProductId,
+        quantityPallets: 5,
+      }),
     );
     expect(created.error).toBeNull();
     const recordId = created.data!.id;
@@ -231,14 +280,21 @@ describe("arrangement module", () => {
     expect(overCeiling.error).not.toBeNull();
     expect(overCeiling.error?.code).toBe(ARRANGEMENT_ERROR_CODES.OVER_ALLOCATION);
 
-    const deleted = await admin.client.rpc("delete_arrangement_record", toDeleteArrangementRecordRpcArgs({ id: recordId }));
+    const deleted = await admin.client.rpc(
+      "delete_arrangement_record",
+      toDeleteArrangementRecordRpcArgs({ id: recordId }),
+    );
     expect(deleted.error).toBeNull();
 
     // With the record gone, the full ceiling is available again to a new
     // record.
     const recreated = await admin.client.rpc(
       "create_arrangement_record",
-      toCreateArrangementRecordRpcArgs({ dailyPickProductId: pickProductId, dailyOrderProductId: orderProductId, quantityPallets: 5 }),
+      toCreateArrangementRecordRpcArgs({
+        dailyPickProductId: pickProductId,
+        dailyOrderProductId: orderProductId,
+        quantityPallets: 5,
+      }),
     );
     expect(recreated.error).toBeNull();
   }, 30000);
@@ -251,7 +307,11 @@ describe("arrangement module", () => {
     // a contrived failure injection (see docs/SCHEMA_DECISIONS.md).
     const created = await admin.client.rpc(
       "create_arrangement_record",
-      toCreateArrangementRecordRpcArgs({ dailyPickProductId: pickProductId, dailyOrderProductId: orderProductId, quantityPallets: 5 }),
+      toCreateArrangementRecordRpcArgs({
+        dailyPickProductId: pickProductId,
+        dailyOrderProductId: orderProductId,
+        quantityPallets: 5,
+      }),
     );
     expect(created.error).toBeNull();
 
@@ -267,7 +327,11 @@ describe("arrangement module", () => {
     // still open, and the picks close_arrangement mass-closes earlier in
     // its own body are still NOT closed — every statement before the
     // pricing failure is undone along with it.
-    const { data: dayAfter } = await admin.client.from("trading_days").select("phase").eq("id", day.id).single();
+    const { data: dayAfter } = await admin.client
+      .from("trading_days")
+      .select("phase")
+      .eq("id", day.id)
+      .single();
     expect(dayAfter?.phase).toBe("shop_closed");
 
     const { data: arrangementAfter } = await admin.client
@@ -277,7 +341,10 @@ describe("arrangement module", () => {
       .single();
     expect(arrangementAfter?.status).toBe("open");
 
-    const { data: picksAfter } = await admin.client.from("daily_picks").select("status").eq("trading_day_id", day.id);
+    const { data: picksAfter } = await admin.client
+      .from("daily_picks")
+      .select("status")
+      .eq("trading_day_id", day.id);
     expect(picksAfter?.every((row) => row.status !== "closed")).toBe(true);
 
     // Everything close_arrangement's body runs AFTER the pricing step —
@@ -316,13 +383,21 @@ describe("arrangement module", () => {
   }, 30000);
 
   it("close_arrangement populates a priced arrangement record's price from the variety's fixed price, and writes a notification_outbox row for the customer", async () => {
-    const { day, grower, customer, pickProductId, orderProductId } = await setUpDayWithSupplyAndDemand(5, 5);
+    const { day, grower, customer, pickProductId, orderProductId } =
+      await setUpDayWithSupplyAndDemand(5, 5);
 
-    await db.update(productVarieties).set({ price: "12.50" }).where(eq(productVarieties.id, grower.varietyId));
+    await db
+      .update(productVarieties)
+      .set({ price: "12.50" })
+      .where(eq(productVarieties.id, grower.varietyId));
 
     const created = await admin.client.rpc(
       "create_arrangement_record",
-      toCreateArrangementRecordRpcArgs({ dailyPickProductId: pickProductId, dailyOrderProductId: orderProductId, quantityPallets: 5 }),
+      toCreateArrangementRecordRpcArgs({
+        dailyPickProductId: pickProductId,
+        dailyOrderProductId: orderProductId,
+        quantityPallets: 5,
+      }),
     );
     expect(created.error).toBeNull();
     const recordId = created.data!.id;
@@ -333,7 +408,9 @@ describe("arrangement module", () => {
     await db
       .update(dailyOrders)
       .set({ status: "submitted" })
-      .where(and(eq(dailyOrders.tradingDayId, day.id), eq(dailyOrders.customerCompanyId, customer.id)));
+      .where(
+        and(eq(dailyOrders.tradingDayId, day.id), eq(dailyOrders.customerCompanyId, customer.id)),
+      );
 
     const closeShop = await admin.client.rpc("close_shop");
     expect(closeShop.error).toBeNull();
@@ -341,7 +418,11 @@ describe("arrangement module", () => {
     const closeArrangement = await admin.client.rpc("close_arrangement");
     expect(closeArrangement.error).toBeNull();
 
-    const { data: recordAfter } = await admin.client.from("arrangement_records").select("price").eq("id", recordId).single();
+    const { data: recordAfter } = await admin.client
+      .from("arrangement_records")
+      .select("price")
+      .eq("id", recordId)
+      .single();
     // PostgREST returns `numeric` columns as bare JSON numbers, not
     // decimal-preserving strings — see apps/web's customer/history page
     // for the same empirically-verified behavior.
@@ -351,24 +432,40 @@ describe("arrangement module", () => {
       .from("notification_outbox")
       .select("recipient_type, recipient_company_id")
       .eq("trading_day_id", day.id);
-    expect(outboxRows).toContainEqual({ recipient_type: "customer", recipient_company_id: customer.id });
-    expect(outboxRows).toContainEqual({ recipient_type: "grower", recipient_company_id: grower.companyId });
+    expect(outboxRows).toContainEqual({
+      recipient_type: "customer",
+      recipient_company_id: customer.id,
+    });
+    expect(outboxRows).toContainEqual({
+      recipient_type: "grower",
+      recipient_company_id: grower.companyId,
+    });
   }, 30000);
 
   it("close_arrangement does not cc a transporter when the grower has none assigned", async () => {
-    const { day, grower, customer, pickProductId, orderProductId } = await setUpDayWithSupplyAndDemand(5, 5);
-    await db.update(productVarieties).set({ price: "12.50" }).where(eq(productVarieties.id, grower.varietyId));
+    const { day, grower, customer, pickProductId, orderProductId } =
+      await setUpDayWithSupplyAndDemand(5, 5);
+    await db
+      .update(productVarieties)
+      .set({ price: "12.50" })
+      .where(eq(productVarieties.id, grower.varietyId));
 
     const created = await admin.client.rpc(
       "create_arrangement_record",
-      toCreateArrangementRecordRpcArgs({ dailyPickProductId: pickProductId, dailyOrderProductId: orderProductId, quantityPallets: 5 }),
+      toCreateArrangementRecordRpcArgs({
+        dailyPickProductId: pickProductId,
+        dailyOrderProductId: orderProductId,
+        quantityPallets: 5,
+      }),
     );
     expect(created.error).toBeNull();
 
     await db
       .update(dailyOrders)
       .set({ status: "submitted" })
-      .where(and(eq(dailyOrders.tradingDayId, day.id), eq(dailyOrders.customerCompanyId, customer.id)));
+      .where(
+        and(eq(dailyOrders.tradingDayId, day.id), eq(dailyOrders.customerCompanyId, customer.id)),
+      );
 
     const closeShop = await admin.client.rpc("close_shop");
     expect(closeShop.error).toBeNull();
@@ -383,10 +480,17 @@ describe("arrangement module", () => {
   }, 30000);
 
   it("close_arrangement ccs the grower's assigned transporter with the same close_arrangement_grower message — id 8", async () => {
-    const { day, grower, customer, pickProductId, orderProductId } = await setUpDayWithSupplyAndDemand(5, 5);
-    await db.update(productVarieties).set({ price: "12.50" }).where(eq(productVarieties.id, grower.varietyId));
+    const { day, grower, customer, pickProductId, orderProductId } =
+      await setUpDayWithSupplyAndDemand(5, 5);
+    await db
+      .update(productVarieties)
+      .set({ price: "12.50" })
+      .where(eq(productVarieties.id, grower.varietyId));
 
-    const transporter = await createTestCompany(`Test Transporter ${crypto.randomUUID()}`, "transporter");
+    const transporter = await createTestCompany(
+      `Test Transporter ${crypto.randomUUID()}`,
+      "transporter",
+    );
     // Pushed after setUpDayWithSupplyAndDemand's own registrations, so
     // LIFO runs this BEFORE the day itself is deleted — meaning the day's
     // own notification_outbox rows (including the one this test creates,
@@ -400,22 +504,36 @@ describe("arrangement module", () => {
     // before it), which is what actually left a trading day stuck the
     // first time this test ran.
     cleanupFns.push(async () => {
-      await db.delete(notificationOutbox).where(eq(notificationOutbox.recipientCompanyId, transporter.id));
-      await db.update(companies).set({ transporterCompanyId: null }).where(eq(companies.id, grower.companyId));
+      await db
+        .delete(notificationOutbox)
+        .where(eq(notificationOutbox.recipientCompanyId, transporter.id));
+      await db
+        .update(companies)
+        .set({ transporterCompanyId: null })
+        .where(eq(companies.id, grower.companyId));
       await deleteTestCompany(transporter.id);
     });
-    await db.update(companies).set({ transporterCompanyId: transporter.id }).where(eq(companies.id, grower.companyId));
+    await db
+      .update(companies)
+      .set({ transporterCompanyId: transporter.id })
+      .where(eq(companies.id, grower.companyId));
 
     const created = await admin.client.rpc(
       "create_arrangement_record",
-      toCreateArrangementRecordRpcArgs({ dailyPickProductId: pickProductId, dailyOrderProductId: orderProductId, quantityPallets: 5 }),
+      toCreateArrangementRecordRpcArgs({
+        dailyPickProductId: pickProductId,
+        dailyOrderProductId: orderProductId,
+        quantityPallets: 5,
+      }),
     );
     expect(created.error).toBeNull();
 
     await db
       .update(dailyOrders)
       .set({ status: "submitted" })
-      .where(and(eq(dailyOrders.tradingDayId, day.id), eq(dailyOrders.customerCompanyId, customer.id)));
+      .where(
+        and(eq(dailyOrders.tradingDayId, day.id), eq(dailyOrders.customerCompanyId, customer.id)),
+      );
 
     const closeShop = await admin.client.rpc("close_shop");
     expect(closeShop.error).toBeNull();

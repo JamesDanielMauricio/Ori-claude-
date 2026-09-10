@@ -50,7 +50,9 @@ test.describe("Backoffice — Growers", () => {
     await page.goto("/backoffice/growers");
 
     const growerName = `E2E Grower ${randomUUID()}`;
-    await page.getByRole("button", { name: "מגדל חדש" }).click();
+    // Two buttons carry this name by design — the one above the list and the
+    // empty detail pane's call-to-action. `.first()` is the list-pane one.
+    await page.getByRole("button", { name: "מגדל חדש" }).first().click();
     await page.getByLabel("שם").fill(growerName);
     await page.getByRole("button", { name: "שמור" }).click();
 

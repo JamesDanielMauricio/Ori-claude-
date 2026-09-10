@@ -63,6 +63,9 @@ const MAX_ATTEMPTS = 5;
 interface PendingOutboxRow {
   id: string;
   template_key: string;
+  // Targets already delivered to on an earlier pass (migration 0038); skipped
+  // rather than re-sent.
+  sent_targets: string[] | null;
 }
 
 interface DispatchTarget {
@@ -161,7 +164,7 @@ Deno.serve(async (req) => {
 
   const { data: pendingRows, error: pendingError } = await client
     .from("notification_outbox")
-    .select("id, template_key")
+    .select("id, template_key, sent_targets")
     .is("sent_at", null)
     .lt("attempt_count", MAX_ATTEMPTS);
   if (pendingError) {
@@ -190,17 +193,53 @@ Deno.serve(async (req) => {
       continue;
     }
 
+    // Per-target delivery tracking — mirrors packages/domain/src/notifications/
+    // drain.ts exactly (this file is the Deno copy of that loop; see its header
+    // comment for why the duplication exists). A row fans out to one message
+    // per recipient when the company has no WhatsApp group id, and judging the
+    // row as a whole meant one unreachable number re-sent the message to every
+    // other recipient on each retry. See migration 0038.
+    const alreadySent = new Set<string>(row.sent_targets ?? []);
+    const resolvedTargets = (targets ?? []) as DispatchTarget[];
     const errors: string[] = [];
-    for (const { target, message } of (targets ?? []) as DispatchTarget[]) {
+
+    for (const { target, message } of resolvedTargets) {
+      if (alreadySent.has(target)) continue;
+
       const result = await sendWhatsAppMessage(target, message, credentials);
-      if (!result.success) errors.push(result.error ?? `send to ${target} failed`);
+      if (!result.success) {
+        errors.push(result.error ?? `send to ${target} failed`);
+        continue;
+      }
+
+      alreadySent.add(target);
+
+      const { error: recordError } = await client.rpc("record_outbox_target_sent", {
+        p_outbox_id: row.id,
+        p_target: target,
+        p_complete: false,
+      });
+      if (recordError) errors.push(recordError.message);
     }
 
     if (errors.length === 0) {
-      await client
-        .from("notification_outbox")
-        .update({ sent_at: new Date().toISOString(), last_attempted_at: new Date().toISOString() })
-        .eq("id", row.id);
+      // Stamped once after the loop from "nothing failed", not from "this was
+      // the last target": resolve_outbox_dispatch's per-user branch has no
+      // ORDER BY, so a flag hung off the final iteration would be missed
+      // whenever the last target was an already-delivered one that got
+      // skipped. The empty target carries only the flag (the function ignores
+      // a blank target for the list), which also closes out a row that
+      // resolved to no targets at all.
+      const { error: completeError } = await client.rpc("record_outbox_target_sent", {
+        p_outbox_id: row.id,
+        p_target: "",
+        p_complete: true,
+      });
+      if (completeError) {
+        await recordFailure(client, row.id, completeError.message);
+        failed += 1;
+        continue;
+      }
       sent += 1;
     } else {
       await recordFailure(client, row.id, errors.join("; "));
@@ -217,10 +256,8 @@ async function recordFailure(
   outboxId: string,
   error: string,
 ): Promise<void> {
-  const { data: current } = await client.from("notification_outbox").select("attempt_count").eq("id", outboxId).single();
-  const attemptCount = ((current as { attempt_count: number } | null)?.attempt_count ?? 0) + 1;
-  await client
-    .from("notification_outbox")
-    .update({ attempt_count: attemptCount, last_error: error, last_attempted_at: new Date().toISOString() })
-    .eq("id", outboxId);
+  // One statement that increments from the column's own value, instead of a
+  // select-then-update that loses an increment whenever two drain passes
+  // overlap. See migration 0038.
+  await client.rpc("record_outbox_attempt", { p_outbox_id: outboxId, p_error: error });
 }

@@ -29,6 +29,15 @@ export const productVarieties = pgTable("product_varieties", {
   // grower's own products_in_season_list (grower-product.ts), which
   // selects a subset of whichever varieties are seasonally available.
   isSeasonalAvailable: boolean("is_seasonal_available").notNull().default(true),
+  // The customer-facing order screen's per-line ceiling (migration 0042) —
+  // the most pallets ANY one customer may put on a single order line for
+  // this variety, independent of stock. Null means no variety-level cap
+  // (the customer's dropdown is then bounded by remaining stock alone).
+  // Distinct from product_customer_caps (product-customer-cap.ts), which
+  // caps one specific customer; this is the default that applies to
+  // everyone. Never consulted for a backoffice on-behalf-of edit — see
+  // max_orderable_for_customer's own comment.
+  numberOfOrdersPerCustomer: integer("number_of_orders_per_customer"),
   version: integer("version").notNull().default(1),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

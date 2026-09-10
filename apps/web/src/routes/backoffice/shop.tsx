@@ -3,24 +3,21 @@ import { useQuery } from "@tanstack/react-query";
 import { StatusPill } from "@/components/ui/card";
 import { Icon, type IconName } from "@/components/ui/icon";
 import { PageHeader } from "@/components/ui/page-header";
+import { QueryError } from "@/components/ui/query-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import { createClient } from "@/lib/supabase/client";
+import { useTradingDayView, type TradingDayPhase } from "@/lib/trading-day-view";
 
-type Phase = "initiated" | "shop_open" | "shop_closed" | "closed";
-
-interface OpenDay {
-  id: string;
-  trade_date: string;
-  phase: Phase;
-}
-
-// Read-only status view for today's trading day. The lifecycle controls
-// that used to live here (initiate / open shop / close shop / close
-// business day / update growers) moved to BusinessDayPanel in the
-// sidebar (mounted in BackofficeNav) so they're reachable from every
-// backoffice screen, matching the source app, and so there is exactly
-// one write surface per transition (R5) instead of two.
-const PHASE_LABEL: Record<Phase | "none", string> = {
+// Read-only status view of the day shown in the sidebar's picker — the live
+// trading day by default, or a specific past date once pinned there
+// (lib/trading-day-view.tsx). The lifecycle controls that used to live here
+// (initiate / open shop / close shop / close business day / update growers)
+// are in BusinessDayPanel in the sidebar (mounted in BackofficeNav) so
+// they're reachable from every backoffice screen, matching the source app,
+// and so there is exactly one write surface per transition (R5) instead of
+// two — and, now, so they stay tied to the live day even while this screen
+// is showing a different one.
+const PHASE_LABEL: Record<TradingDayPhase | "none", string> = {
   none: "אין יום מסחר פתוח",
   initiated: "יום עסקים נפתח — החנות עדיין סגורה",
   shop_open: "החנות פתוחה להזמנות",
@@ -30,20 +27,8 @@ const PHASE_LABEL: Record<Phase | "none", string> = {
 
 export default function ShopManagementPage() {
   const supabase = createClient();
-
-  const openDayQuery = useQuery({
-    queryKey: ["shop-panel", "open-trading-day"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("trading_days")
-        .select("id, trade_date, phase")
-        .neq("phase", "closed")
-        .maybeSingle();
-      if (error) throw error;
-      return data as OpenDay | null;
-    },
-  });
-  const day = openDayQuery.data ?? null;
+  const dayView = useTradingDayView();
+  const day = dayView.day;
 
   const metricsQuery = useQuery({
     queryKey: ["shop-panel", "metrics", day?.id],
@@ -87,10 +72,25 @@ export default function ShopManagementPage() {
       <PageHeader
         title="ניהול חנות"
         subtitle="מחזור יום המסחר: פתיחת יום ← פתיחת חנות ← סגירת חנות ← סגירת יום עסקים. הפעולות עצמן נמצאות בסרגל הצד."
+        actions={
+          // Only when the sidebar's picker has pinned a date away from the
+          // live day (lib/trading-day-view.tsx) — this screen has nothing
+          // else to distinguish "am I looking at today or last week" once a
+          // pinned day happens to still show "פעיל"-shaped phase text.
+          !dayView.isLive ? (
+            <StatusPill tone="warning">צפייה בעבר — לא ניתן לערוך</StatusPill>
+          ) : undefined
+        }
       />
 
-      {openDayQuery.isLoading ? (
+      {dayView.isLoading ? (
         <Skeleton className="h-40 w-full rounded-xl" />
+      ) : dayView.isError ? (
+        <QueryError
+          what="מצב יום המסחר"
+          onRetry={() => void dayView.refetch()}
+          retrying={dayView.isFetching}
+        />
       ) : (
         // The day's state is the whole point of this screen, so it gets a
         // hero panel rather than a line of text in a bordered box: the date
@@ -100,11 +100,11 @@ export default function ShopManagementPage() {
           <div className="flex flex-wrap items-start justify-between gap-4 p-6">
             <div className="min-w-0">
               <p className="text-[11px] font-semibold tracking-[0.08em] text-ink-subtle">
-                {tradeDateLabel ?? "אין יום פעיל"}
+                {tradeDateLabel ?? (dayView.isLive ? "אין יום פעיל" : "לא נמצא יום מסחר בתאריך זה")}
               </p>
               <h2 className="font-display mt-2 text-2xl text-ink">{PHASE_LABEL[phase]}</h2>
             </div>
-            {phase === "shop_open" ? (
+            {phase === "shop_open" && dayView.isLive ? (
               <span className="inline-flex shrink-0 items-center gap-2 rounded-full bg-accent-soft px-3 py-1.5 text-xs font-semibold text-accent ring-1 ring-inset ring-accent/25">
                 {/* The ring pulses out from behind a static dot, so nothing
                     reflows — see globals.css's `ping-ring`. */}
@@ -115,8 +115,10 @@ export default function ShopManagementPage() {
                 פעיל
               </span>
             ) : (
-              <StatusPill tone={phase === "none" ? "neutral" : "brass"}>
-                {phase === "none" ? "לא פעיל" : "בתהליך"}
+              <StatusPill
+                tone={phase === "none" ? "neutral" : phase === "closed" ? "neutral" : "brass"}
+              >
+                {phase === "none" ? "לא פעיל" : phase === "closed" ? "הסתיים" : "בתהליך"}
               </StatusPill>
             )}
           </div>
@@ -128,29 +130,36 @@ export default function ShopManagementPage() {
 
       {day && (
         <div className="flex flex-col gap-3">
-          <h2 className="text-[11px] font-semibold tracking-[0.08em] text-ink-subtle">
-            מצב היום
-          </h2>
+          <h2 className="text-[11px] font-semibold tracking-[0.08em] text-ink-subtle">מצב היום</h2>
           <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            {/* `failed` exists because these cards read "still loading" from a
+                null value, and a failed query leaves the value null forever —
+                so an error used to render as a skeleton that shimmered
+                indefinitely, with no error, no retry, and no way to tell it
+                from a slow network. */}
             <MetricCard
               label="ליקוטים שנשלחו"
               value={metricsQuery.data?.picksSubmitted ?? null}
               total={metricsQuery.data?.picksTotal ?? null}
+              failed={metricsQuery.isError}
               icon="sprout"
             />
             <MetricCard
               label="הזמנות שנשלחו"
               value={metricsQuery.data?.ordersSubmitted ?? null}
               total={metricsQuery.data?.ordersTotal ?? null}
+              failed={metricsQuery.isError}
               icon="briefcase"
             />
             <ToggleCard
               label="הודעות WhatsApp"
               enabled={settingsQuery.data?.whatsapp_enabled ?? null}
+              failed={settingsQuery.isError}
             />
             <ToggleCard
               label="WhatsApp בסגירת סידור"
               enabled={settingsQuery.data?.close_arrangement_whatsapp_enabled ?? null}
+              failed={settingsQuery.isError}
             />
           </section>
         </div>
@@ -165,14 +174,14 @@ export default function ShopManagementPage() {
 // completed steps are filled, the current one is ringed, and the connecting
 // line between them fills in behind — so "where are we in the day" is
 // readable without comparing tint values.
-function PhaseStepper({ phase }: { phase: Phase | "none" }) {
-  const steps: Array<{ key: Phase; label: string }> = [
+function PhaseStepper({ phase }: { phase: TradingDayPhase | "none" }) {
+  const steps: Array<{ key: TradingDayPhase; label: string }> = [
     { key: "initiated", label: "פתיחת יום" },
     { key: "shop_open", label: "חנות פתוחה" },
     { key: "shop_closed", label: "חנות סגורה" },
     { key: "closed", label: "סידור נסגר" },
   ];
-  const order: Record<Phase | "none", number> = {
+  const order: Record<TradingDayPhase | "none", number> = {
     none: -1,
     initiated: 0,
     shop_open: 1,
@@ -229,16 +238,21 @@ function MetricCard({
   label,
   value,
   total,
+  failed,
   icon,
 }: {
   label: string;
   value: number | null;
   total: number | null;
+  // The query errored. Distinguished from `value === null` (still loading),
+  // which it would otherwise be indistinguishable from — forever.
+  failed?: boolean;
   icon: IconName;
 }) {
-  const loading = value === null || total === null;
-  const pct = !loading && total > 0 ? Math.round((value / total) * 100) : 0;
-  const complete = !loading && total > 0 && value === total;
+  const loading = !failed && (value === null || total === null);
+  const hasValue = value !== null && total !== null;
+  const pct = hasValue && total > 0 ? Math.round((value / total) * 100) : 0;
+  const complete = hasValue && total > 0 && value === total;
 
   return (
     <div className="animate-rise-in rounded-xl bg-surface p-5 shadow-card ring-1 ring-inset ring-border/70">
@@ -248,6 +262,10 @@ function MetricCard({
       </div>
       {loading ? (
         <Skeleton className="mt-3 h-8 w-16" />
+      ) : !hasValue ? (
+        // Errored. An em dash reads as "unknown", which is the truth; a zero
+        // here would be a wrong number the distributor might act on.
+        <p className="mt-2.5 text-sm text-ink-subtle">— לא נטען</p>
       ) : (
         <>
           <p className="mt-2.5 flex items-baseline gap-1" dir="ltr">
@@ -275,14 +293,29 @@ function MetricCard({
 
 // A boolean setting. Reads as on/off at a glance via a dot rather than
 // requiring the words "פעיל" / "כבוי" to be read first.
-function ToggleCard({ label, enabled }: { label: string; enabled: boolean | null }) {
+function ToggleCard({
+  label,
+  enabled,
+  failed,
+}: {
+  label: string;
+  enabled: boolean | null;
+  // See MetricCard: without this, an errored settings query renders as a
+  // skeleton that never resolves.
+  failed?: boolean;
+}) {
   return (
     <div className="animate-rise-in rounded-xl bg-surface p-5 shadow-card ring-1 ring-inset ring-border/70">
       <div className="flex items-center gap-2 text-ink-subtle">
         <Icon name="bell" className="h-4 w-4 shrink-0" />
         <p className="truncate text-xs font-medium">{label}</p>
       </div>
-      {enabled === null ? (
+      {enabled === null && failed ? (
+        // Never guess "off" here: this card reports whether WhatsApp dispatch
+        // is live, and showing a confident "כבוי" for a failed read would be
+        // a false statement about the system's actual configuration.
+        <p className="mt-3 text-sm text-ink-subtle">— לא נטען</p>
+      ) : enabled === null ? (
         <Skeleton className="mt-3 h-7 w-20" />
       ) : (
         <div className="mt-3">

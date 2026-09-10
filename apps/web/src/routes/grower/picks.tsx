@@ -1,6 +1,7 @@
 import { submitPickInputSchema, toSubmitPickRpcArgs } from "@ori/domain/lifecycle-engine";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import { PickLinesEditor } from "@/components/grower/pick-lines-editor";
 import { Button } from "@/components/ui/button";
@@ -8,6 +9,7 @@ import { StatusPill, type StatusTone } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Icon } from "@/components/ui/icon";
 import { PageHeader } from "@/components/ui/page-header";
+import { QueryError } from "@/components/ui/query-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { useAuth } from "@/lib/auth-context";
@@ -24,7 +26,10 @@ interface DailyPickSummary {
   submitted_at: string | null;
 }
 
-const STATUS_LABEL: Record<DailyPickSummary["status"], string> = {
+// Exported for history.tsx: both screens show the same `daily_picks.status`
+// enum and must agree on what it's called and colored, so it's one lookup
+// shared between them rather than two that could drift.
+export const STATUS_LABEL: Record<DailyPickSummary["status"], string> = {
   draft: "טיוטה",
   submitted: "נשלח",
   closed: "סגור",
@@ -33,7 +38,7 @@ const STATUS_LABEL: Record<DailyPickSummary["status"], string> = {
 // Draft is the only state that still needs something from the grower, so it
 // is the one that gets an attention color; submitted is a success, closed is
 // simply over.
-const PICK_STATUS_TONE: Record<DailyPickSummary["status"], StatusTone> = {
+export const PICK_STATUS_TONE: Record<DailyPickSummary["status"], StatusTone> = {
   draft: "warning",
   submitted: "accent",
   closed: "neutral",
@@ -44,11 +49,28 @@ const PICK_STATUS_TONE: Record<DailyPickSummary["status"], StatusTone> = {
 // server (initiate_business_day → bootstrap_grower_pick) — this screen
 // only ever reads "the pick that already exists for today" and edits its
 // lines; it never creates picks or lines itself.
+//
+// An `?pickId=` search param (set by history.tsx's row links) shows a
+// specific past pick's content here instead of today's open one. Unlike the
+// customer order screen's equivalent split, a historical pick needs no
+// separate read-only view: `daily_picks.status` reaches "closed" on its own
+// (an order's status never does — see OrderLinesEditor's `readOnly`
+// comment), so PickLinesEditor already renders a closed pick locked without
+// an extra flag from here.
 export default function GrowerDailyPicksPage() {
+  const [searchParams] = useSearchParams();
+  const pickId = searchParams.get("pickId");
+
+  if (pickId) {
+    return <SpecificPickView pickId={pickId} />;
+  }
+  return <TodayPickView />;
+}
+
+function TodayPickView() {
   const { profile } = useAuth();
   const supabase = createClient();
   const queryClient = useQueryClient();
-  const { showToast } = useToast();
 
   const openDayQuery = useQuery({
     queryKey: ["grower", "open-trading-day"],
@@ -81,22 +103,6 @@ export default function GrowerDailyPicksPage() {
     },
   });
 
-  const submitMutation = useMutation({
-    mutationFn: async () => {
-      const input = submitPickInputSchema.parse({ dailyPickId: pickQuery.data!.id });
-      const { data, error } = await supabase.rpc("submit_pick", toSubmitPickRpcArgs(input));
-      if (error) throw error;
-      return data as DailyPickSummary;
-    },
-    onSuccess: () => {
-      showToast("הליקוט נשלח.", "success");
-      void queryClient.invalidateQueries({ queryKey: ["grower", "daily-pick", openDayId, companyId] });
-    },
-    onError: (error: { message?: string }) => {
-      showToast(`השליחה נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
-    },
-  });
-
   const tradeDateLabel = useMemo(() => {
     if (!openDayQuery.data) return "";
     return new Intl.DateTimeFormat("he-IL", { dateStyle: "long" }).format(new Date(openDayQuery.data.trade_date));
@@ -112,6 +118,14 @@ export default function GrowerDailyPicksPage() {
     );
   }
 
+  // A failed fetch is not evidence that there is no trading day. Telling a
+  // grower "no business day is open" when the request actually errored is the
+  // costliest wrong answer on this screen — it reads as "nothing to pick
+  // today" and they stop.
+  if (openDayQuery.isError) {
+    return <QueryError what="יום המסחר" onRetry={() => void openDayQuery.refetch()} retrying={openDayQuery.isFetching} />;
+  }
+
   if (!openDayQuery.data) {
     return (
       <div className="rounded-xl bg-surface shadow-raised ring-1 ring-inset ring-border/70">
@@ -122,6 +136,13 @@ export default function GrowerDailyPicksPage() {
         />
       </div>
     );
+  }
+
+  // Same reasoning one level down: "no pick list was created for you" is a
+  // real state that tells the grower to call the distributor, so it must not
+  // be shown for a request that simply failed.
+  if (pickQuery.isError) {
+    return <QueryError what="רשימת הליקוט" onRetry={() => void pickQuery.refetch()} retrying={pickQuery.isFetching} />;
   }
 
   if (!pickQuery.data) {
@@ -136,7 +157,108 @@ export default function GrowerDailyPicksPage() {
     );
   }
 
+  return (
+    <PickDetail
+      pick={pickQuery.data}
+      tradeDateLabel={tradeDateLabel}
+      onSubmitted={() =>
+        void queryClient.invalidateQueries({ queryKey: ["grower", "daily-pick", openDayId, companyId] })
+      }
+    />
+  );
+}
+
+interface SpecificPick extends DailyPickSummary {
+  trading_day_id: string;
+  trading_days: { trade_date: string } | null;
+}
+
+function SpecificPickView({ pickId }: { pickId: string }) {
+  const supabase = createClient();
+  const queryClient = useQueryClient();
+
+  const pickQuery = useQuery({
+    queryKey: ["grower", "pick-by-id", pickId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("daily_picks")
+        .select("id, status, submitted_at, trading_day_id, trading_days(trade_date)")
+        .eq("id", pickId)
+        .maybeSingle();
+      if (error) throw error;
+      return data as unknown as SpecificPick | null;
+    },
+  });
+
+  if (pickQuery.isLoading) {
+    return (
+      <div className="space-y-3">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-10 w-full" />
+        <Skeleton className="h-10 w-full" />
+      </div>
+    );
+  }
+
+  if (pickQuery.isError) {
+    return (
+      <QueryError what="הליקוט" onRetry={() => void pickQuery.refetch()} retrying={pickQuery.isFetching} />
+    );
+  }
+
   const pick = pickQuery.data;
+  // Either a bad id, or RLS (daily_picks_select_own) filtered out a row that
+  // isn't this grower's own — same "not found" message either way, matching
+  // the customer order screen's equivalent case.
+  if (!pick || !pick.trading_days) {
+    return <p className="text-sm text-ink-muted">הליקוט לא נמצא.</p>;
+  }
+
+  const tradeDateLabel = new Intl.DateTimeFormat("he-IL", { dateStyle: "long" }).format(
+    new Date(pick.trading_days.trade_date),
+  );
+
+  return (
+    <PickDetail
+      pick={pick}
+      tradeDateLabel={tradeDateLabel}
+      onSubmitted={() => void queryClient.invalidateQueries({ queryKey: ["grower", "pick-by-id", pickId] })}
+    />
+  );
+}
+
+// The header + status strip + editor both TodayPickView and SpecificPickView
+// render — identical either way, since a pick from history is not a
+// different kind of object, only a different way of finding one (same
+// precedent as OrderLinesEditor being shared between the customer's own
+// order screen and its history-reached view).
+function PickDetail({
+  pick,
+  tradeDateLabel,
+  onSubmitted,
+}: {
+  pick: DailyPickSummary;
+  tradeDateLabel: string;
+  onSubmitted: () => void;
+}) {
+  const supabase = createClient();
+  const { showToast } = useToast();
+
+  const submitMutation = useMutation({
+    mutationFn: async () => {
+      const input = submitPickInputSchema.parse({ dailyPickId: pick.id });
+      const { data, error } = await supabase.rpc("submit_pick", toSubmitPickRpcArgs(input));
+      if (error) throw error;
+      return data as DailyPickSummary;
+    },
+    onSuccess: () => {
+      showToast("הליקוט נשלח.", "success");
+      onSubmitted();
+    },
+    onError: (error: { message?: string }) => {
+      showToast(`השליחה נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
+    },
+  });
 
   return (
     <div className="flex flex-col gap-5">

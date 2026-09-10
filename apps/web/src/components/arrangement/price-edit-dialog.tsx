@@ -21,6 +21,7 @@ interface ProductVarietyRow {
   no_overbooking: string;
   highlight_price_fluctuations: boolean;
   is_seasonal_available: boolean;
+  number_of_orders_per_customer: number | null;
   version: number;
 }
 
@@ -53,7 +54,7 @@ export function PriceEditDialog({
       const { data, error } = await supabase
         .from("product_varieties")
         .select(
-          "id, family_id, name, sizes, pack_type, price, price_range_from, price_range_to, price_type, no_overbooking, highlight_price_fluctuations, is_seasonal_available, version, product_families(name)",
+          "id, family_id, name, sizes, pack_type, price, price_range_from, price_range_to, price_type, no_overbooking, highlight_price_fluctuations, is_seasonal_available, number_of_orders_per_customer, version, product_families(name)",
         )
         .eq("id", varietyId!)
         .single();
@@ -71,18 +72,38 @@ export function PriceEditDialog({
         .select("customer_company_id, pallet_cap")
         .eq("product_variety_id", varietyId!);
       if (error) throw error;
-      return data.map((row) => ({ customerCompanyId: row.customer_company_id, palletCap: row.pallet_cap }));
+      return data.map((row) => ({
+        customerCompanyId: row.customer_company_id,
+        palletCap: row.pallet_cap,
+      }));
     },
   });
 
+  // Seeded once per variety, not on every change of varietyQuery.data.
+  //
+  // Keyed on the data object, this re-ran on any refetch — and React Query
+  // refetches on window focus once the query is stale (30s, lib/providers.tsx).
+  // A distributor who opened this dialog, typed a new price, checked something
+  // in another window and came back found their entry replaced by the old
+  // stored value, with no indication anything had been discarded. Seeding from
+  // the id means a refetch can no longer overwrite what someone is typing.
+  const [seededVarietyId, setSeededVarietyId] = useState<string | null>(null);
   useEffect(() => {
-    if (varietyQuery.data) {
-      setPrice(varietyQuery.data.price ?? "");
-      setPriceRangeFrom(varietyQuery.data.price_range_from ?? "");
-      setPriceRangeTo(varietyQuery.data.price_range_to ?? "");
-      setPriceType(varietyQuery.data.price_type ?? "");
+    // Closing clears the marker, so reopening the SAME variety seeds again
+    // from the server rather than resurrecting the last thing typed into a
+    // dialog that was dismissed. This component stays mounted between
+    // openings — varietyId just goes back to null.
+    if (varietyId === null) {
+      setSeededVarietyId(null);
+      return;
     }
-  }, [varietyQuery.data]);
+    if (!varietyQuery.data || seededVarietyId === varietyId) return;
+    setSeededVarietyId(varietyId);
+    setPrice(varietyQuery.data.price ?? "");
+    setPriceRangeFrom(varietyQuery.data.price_range_from ?? "");
+    setPriceRangeTo(varietyQuery.data.price_range_to ?? "");
+    setPriceType(varietyQuery.data.price_type ?? "");
+  }, [varietyQuery.data, varietyId, seededVarietyId]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -100,6 +121,9 @@ export function PriceEditDialog({
         noOverbooking: Number(row.no_overbooking),
         highlightPriceFluctuations: row.highlight_price_fluctuations,
         isSeasonalAvailable: row.is_seasonal_available,
+        // This dialog only edits price — passed through unchanged, same as
+        // noOverbooking/isSeasonalAvailable above.
+        numberOfOrdersPerCustomer: row.number_of_orders_per_customer,
         expectedVersion: row.version,
         customerPalletCaps: capsQuery.data ?? [],
       });
@@ -172,7 +196,11 @@ export function PriceEditDialog({
             <Button type="button" variant="secondary" onClick={onClose}>
               ביטול
             </Button>
-            <Button type="button" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
+            <Button
+              type="button"
+              onClick={() => saveMutation.mutate()}
+              disabled={saveMutation.isPending}
+            >
               {saveMutation.isPending ? "שומר…" : "שמור"}
             </Button>
           </div>

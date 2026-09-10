@@ -87,31 +87,51 @@ export async function bulkCreateUsers({
       continue;
     }
 
-    const { data: link, error: linkError } = await supabase.auth.admin.generateLink({
-      type: "recovery",
-      email,
-    });
+    // Everything after createUser is compensated on failure. R4 asks for one
+    // transaction or "an explicit saga with compensations for steps touching
+    // external systems", and Supabase Auth is exactly such a system: no
+    // Postgres transaction can roll back an `auth.users` row the Admin API
+    // already committed, so the rollback has to be an explicit delete.
+    //
+    // Without it, a failure in either remaining step stranded an auth identity
+    // with no `profiles` row — the orphan account the sign-in path and the
+    // route guard both have to special-case ("authenticated with Supabase but
+    // missing a profiles row", see apps/web/src/routes/login.tsx and
+    // lib/require-role.tsx), and which cannot sign in or be re-created,
+    // because the retry now collides with the stranded email. Provisioning a
+    // user must either fully succeed or leave nothing behind.
+    try {
+      const { data: link, error: linkError } = await supabase.auth.admin.generateLink({
+        type: "recovery",
+        email,
+      });
+      if (linkError || !link) {
+        throw new Error(linkError?.message ?? "generateLink returned no link");
+      }
 
-    if (linkError || !link) {
+      await db.insert(profiles).values({
+        userId: created.user.id,
+        companyId: row.companyId,
+        role: row.role,
+        displayName: row.displayName,
+        mustChangePassword: true,
+      });
+
+      results[index] = {
+        email,
+        status: "created",
+        role: row.role,
+        userId: created.user.id,
+        recoveryLink: link.properties.action_link,
+      };
+    } catch {
+      // Best-effort compensation. If the delete itself fails there is nothing
+      // further this function can do, and reporting the row as created would
+      // be a lie — either way the admin sees "skipped", so a retry of the
+      // batch is always the correct next step.
+      await supabase.auth.admin.deleteUser(created.user.id).catch(() => undefined);
       results[index] = { email, status: "skipped", reason: "create_failed" };
-      continue;
     }
-
-    await db.insert(profiles).values({
-      userId: created.user.id,
-      companyId: row.companyId,
-      role: row.role,
-      displayName: row.displayName,
-      mustChangePassword: true,
-    });
-
-    results[index] = {
-      email,
-      status: "created",
-      role: row.role,
-      userId: created.user.id,
-      recoveryLink: link.properties.action_link,
-    };
   }
 
   return results;

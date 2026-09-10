@@ -86,6 +86,8 @@ export type Database = {
           id: string;
           name: string;
           category: string | null;
+          // The family photo (migration 0036). Null until a real photo is set.
+          image_url: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -93,6 +95,7 @@ export type Database = {
           id?: string;
           name: string;
           category?: string | null;
+          image_url?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -100,6 +103,7 @@ export type Database = {
           id?: string;
           name?: string;
           category?: string | null;
+          image_url?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -119,6 +123,7 @@ export type Database = {
           no_overbooking: string;
           highlight_price_fluctuations: boolean;
           is_seasonal_available: boolean;
+          number_of_orders_per_customer: number | null;
           version: number;
           created_at: string;
           updated_at: string;
@@ -136,6 +141,7 @@ export type Database = {
           no_overbooking?: string;
           highlight_price_fluctuations?: boolean;
           is_seasonal_available?: boolean;
+          number_of_orders_per_customer?: number | null;
           version?: number;
           created_at?: string;
           updated_at?: string;
@@ -153,6 +159,7 @@ export type Database = {
           no_overbooking?: string;
           highlight_price_fluctuations?: boolean;
           is_seasonal_available?: boolean;
+          number_of_orders_per_customer?: number | null;
           version?: number;
           created_at?: string;
           updated_at?: string;
@@ -737,6 +744,7 @@ export type Database = {
           attempt_count: number;
           last_error: string | null;
           last_attempted_at: string | null;
+          sent_targets: string[];
         };
         Insert: {
           id?: string;
@@ -750,6 +758,7 @@ export type Database = {
           attempt_count?: number;
           last_error?: string | null;
           last_attempted_at?: string | null;
+          sent_targets?: string[];
         };
         Update: {
           id?: string;
@@ -763,6 +772,7 @@ export type Database = {
           attempt_count?: number;
           last_error?: string | null;
           last_attempted_at?: string | null;
+          sent_targets?: string[];
         };
         Relationships: [
           {
@@ -1099,6 +1109,16 @@ export type Database = {
         };
         Returns: Database["public"]["Tables"]["daily_pick_products"]["Row"];
       };
+      // The batched, single-transaction save the pick editor uses (migration
+      // 0039). The two per-line functions above remain for genuine one-line
+      // edits and are still called elsewhere.
+      save_pick_lines: {
+        Args: {
+          p_daily_pick_id: string;
+          p_lines: Json;
+        };
+        Returns: Database["public"]["Tables"]["daily_pick_products"]["Row"][];
+      };
       send_pick_reminder: {
         Args: {
           p_daily_pick_id: string;
@@ -1132,7 +1152,23 @@ export type Database = {
           is_orderable: boolean;
           pallets_ordered: number;
           comment: string | null;
+          image_url: string | null;
+          max_orderable_for_customer: number;
         }[];
+      };
+      // The customer order screen's per-line ceiling (migration 0042):
+      // least(the variety's number_of_orders_per_customer, remaining stock
+      // excluding p_customer_company_id's own demand), floored at 0. Not
+      // meant to be called directly by client code — surfaced through
+      // get_orderable_catalog_for_customer above and enforced again inside
+      // submit_order.
+      max_orderable_for_customer: {
+        Args: {
+          p_trading_day_id: string;
+          p_product_variety_id: string;
+          p_customer_company_id: string;
+        };
+        Returns: number;
       };
       submit_order: {
         Args: {
@@ -1147,6 +1183,24 @@ export type Database = {
           p_daily_order_id: string;
         };
         Returns: Database["public"]["Tables"]["daily_orders"]["Row"];
+      };
+      // The drain job's delivery bookkeeping (migration 0038). Both are
+      // security invoker — notification_outbox's own backoffice-only RLS is
+      // what authorizes the write.
+      record_outbox_target_sent: {
+        Args: {
+          p_outbox_id: string;
+          p_target: string;
+          p_complete?: boolean;
+        };
+        Returns: void;
+      };
+      record_outbox_attempt: {
+        Args: {
+          p_outbox_id: string;
+          p_error: string;
+        };
+        Returns: number;
       };
       check_arrangement_allocation: {
         Args: {
@@ -1181,6 +1235,19 @@ export type Database = {
           p_id: string;
         };
         Returns: void;
+      };
+      // The arrangement board's one-press allocation upsert (migration 0040).
+      // Creates the customer's order line at zero pallets when they never
+      // ordered the variety, so no daily_order_product_id is passed in.
+      arrange_to_customer: {
+        Args: {
+          p_daily_pick_product_id: string;
+          p_customer_company_id: string;
+          p_quantity_pallets: number;
+          p_price?: number | null;
+          p_price_type?: string | null;
+        };
+        Returns: Database["public"]["Tables"]["arrangement_records"]["Row"];
       };
       populate_arrangement_prices: {
         Args: {

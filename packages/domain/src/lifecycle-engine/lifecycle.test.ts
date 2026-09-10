@@ -216,11 +216,24 @@ describe("lifecycle engine", () => {
     const metadata = closeArrangement.data!.metadata as {
       draftPicksForceClosed: Array<{ dailyPickId: string; growerCompanyId: string }>;
     };
-    expect(metadata.draftPicksForceClosed).toHaveLength(1);
-    expect(metadata.draftPicksForceClosed[0]).toMatchObject({
-      dailyPickId: noShowPick!.id,
-      growerCompanyId: noShowGrower.companyId,
-    });
+    // Scoped to this test's own two growers rather than asserting the list
+    // has exactly one entry. initiate_business_day bootstraps a pick for
+    // EVERY active grower with in-season products (0011/0015), so on a
+    // database that holds anything besides this fixture — seeded demo
+    // growers, another suite's leftovers — every one of those growers is
+    // also a no-show and lands in this list. The invariant under test is
+    // "the no-show is surfaced, the submitter is not", which is what these
+    // two assertions say; the total count was only ever a proxy for it that
+    // happened to hold while the database was empty.
+    expect(metadata.draftPicksForceClosed).toContainEqual(
+      expect.objectContaining({
+        dailyPickId: noShowPick!.id,
+        growerCompanyId: noShowGrower.companyId,
+      }),
+    );
+    expect(metadata.draftPicksForceClosed).not.toContainEqual(
+      expect.objectContaining({ growerCompanyId: submittingGrower.companyId }),
+    );
 
     // Invariant 3: there is no App Settings singleton to "reset" — the
     // real test is that the day's records stay reachable via their FK

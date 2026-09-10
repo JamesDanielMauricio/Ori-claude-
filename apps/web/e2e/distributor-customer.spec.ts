@@ -1,3 +1,5 @@
+import { expect, test } from "@playwright/test";
+
 import {
   createTestCompany,
   createTestProfile,
@@ -6,16 +8,23 @@ import {
   runCleanup,
   signInTestUser,
 } from "@ori/domain/auth/testing";
-import { createTestGrowerWithProduct, deleteTestGrowerWithProduct, deleteTestTradingDay } from "@ori/domain/lifecycle-engine/testing";
-import { expect, test } from "@playwright/test";
+import {
+  createTestGrowerWithProduct,
+  deleteTestGrowerWithProduct,
+  deleteTestTradingDay,
+} from "@ori/domain/lifecycle-engine/testing";
 
 // Drives the distributor's Customer Order Status oversight screen end to
-// end: the same OrderLinesEditor the customer's own order screen uses, now
-// under a backoffice session editing/submitting on the customer's behalf,
-// plus send_order_reminder. Also carries the performance requirement
-// Prompt 10 couldn't verify because this screen didn't exist yet
-// (Performance Issues spec, Issue 3, tab=distributor+customer): expanding
-// a customer already viewed in this session must not fire a fresh query —
+// end: a flat, always-visible list of every active customer (see
+// distributor-customer.tsx's own comment for why this replaced a master-
+// detail pane — same rationale as distributor-grower.spec.ts, mirrored onto
+// orders), a chevron per row revealing that customer's order grouped by
+// family, a pencil opening the exact same OrderLinesEditor the customer's
+// own order screen uses in a dialog, and a bell resending the order
+// reminder. Also carries the performance requirement Prompt 10 couldn't
+// verify because this screen didn't exist yet (Performance Issues spec,
+// Issue 3, tab=distributor+customer): reopening a customer's dialog after
+// already viewing them this session must not fire a fresh catalog query —
 // see the last test below, mirroring performance-verification.spec.ts's
 // network-counting technique.
 test.describe("Backoffice — Customer Order Status", () => {
@@ -25,7 +34,9 @@ test.describe("Backoffice — Customer Order Status", () => {
     await runCleanup(cleanupFns);
   });
 
-  test("a distributor edits a customer's order on their behalf and sends a reminder", async ({ page }) => {
+  test("a distributor expands a customer's row, edits their order via the pencil dialog, and sends a reminder", async ({
+    page,
+  }) => {
     const grower = await createTestGrowerWithProduct();
     cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
 
@@ -39,7 +50,10 @@ test.describe("Backoffice — Customer Order Status", () => {
     // bootstrap only creates a daily_orders row for customers that
     // already exist at that moment (same ordering requirement
     // performance-verification.spec.ts's Issue 4 test already established).
-    const customerCompany = await createTestCompany(`Test Customer ${crypto.randomUUID()}`, "customer");
+    const customerCompany = await createTestCompany(
+      `Test Customer ${crypto.randomUUID()}`,
+      "customer",
+    );
     cleanupFns.push(() => deleteTestCompany(customerCompany.id));
 
     const tradeDate = new Date().toISOString().slice(0, 10);
@@ -69,33 +83,70 @@ test.describe("Backoffice — Customer Order Status", () => {
     await expect(page).toHaveURL(/\/backoffice\/shop$/);
 
     await page.goto("/backoffice/distributor-customer");
-    const customerRow = page.getByRole("button", { name: new RegExp(customerCompany.name) });
-    await expect(customerRow).toBeVisible();
-    await customerRow.click();
 
-    await expect(page.getByRole("button", { name: "ערוך", exact: true })).toBeVisible();
-    // Rows render collapsed; expand the one product row before it has a
-    // pallets input to fill.
-    await page.locator("main").getByRole("button", { expanded: false }).click();
-    await page.getByRole("button", { name: "ערוך", exact: true }).click();
-    await page.locator('input[type="number"]').fill("4");
+    // Expanding shows the (still-empty) order grouped by family before any
+    // editing happens — the read-only browse view, distinct from editing.
+    // `exact`, not a regex: the row's pencil and bell are labelled "ערוך את
+    // הזמנת <name>" and "שלח תזכורת ל<name>", so a substring match on the
+    // company name resolves to all three controls. Only the row toggle is
+    // named by the company alone.
+    const expandButton = page.getByRole("button", { name: customerCompany.name, exact: true });
+    await expandButton.click();
+    // Scoped to this customer's own row: every seeded customer without an
+    // order renders the same sentence, so on a populated day the unscoped
+    // text matches a dozen of them.
+    const customerRow = page.locator("li").filter({ hasText: customerCompany.name });
+    await expect(customerRow.getByText("אין עדיין הזמנה עבור לקוח זה.")).toBeVisible();
+
+    // The pencil, not the row itself, is what opens the editor now.
+    const editButton = page.getByRole("button", { name: `ערוך את הזמנת ${customerCompany.name}` });
+    await editButton.click();
+    await expect(page.locator("dialog[open]")).toContainText(`הזמנה — ${customerCompany.name}`);
+
+    // No "ערוך" gate inside the popup: the pencil already said "I want to
+    // change this order", so the catalogue is live and "שמור" stays pinned
+    // rather than sitting under the whole list, same as the arrangement
+    // board's identical dialog.
+    await expect(page.getByRole("button", { name: "ערוך", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "שמור" })).toBeVisible();
+    // Rows render collapsed inside the dialog too; expand THIS fixture's
+    // family before it has a pallets input to fill. The dialog hosts the same
+    // full catalogue the customer's own screen does — every seeded family
+    // included — so "the collapsed row in the dialog" matches dozens.
+    const dialog = page.locator("dialog[open]");
+    const dialogFamily = dialog.locator("li").filter({ hasText: grower.familyName });
+    await dialogFamily.locator("button[aria-expanded]").first().click();
+    await expect(dialogFamily.locator('input[type="number"]')).toBeEnabled();
+    await dialogFamily.locator('input[type="number"]').fill("4");
     await page.getByRole("button", { name: "שמור" }).click();
     await expect(page.getByText("אישור הזמנה")).toBeVisible();
     await page.getByRole("button", { name: "שלח הזמנה" }).click();
     await expect(page.getByText("ההזמנה נשלחה.")).toBeVisible();
+    // No explicit close here: a successful submit closes this dialog itself
+    // (distributor-customer.tsx's onSubmitted clears the selected customer),
+    // so waiting to click "סגור" waits for a button that is already gone.
+    // The two closes later in this file are different — nothing was
+    // submitted there, so the dialog stays up until it is dismissed.
+    await expect(dialog).toHaveCount(0);
 
     // The order is now submitted — a reminder no longer makes sense, so
-    // the button is disabled instead of a second write path being exposed.
-    await expect(page.getByRole("button", { name: "שלח תזכורת" })).toBeDisabled();
+    // the bell is disabled instead of a second write path being exposed.
+    const remindButton = page.getByRole("button", { name: `שלח תזכורת ל${customerCompany.name}` });
+    await expect(remindButton).toBeDisabled();
 
     await page.reload();
-    await customerRow.click();
-    // The row collapses again on remount.
-    await page.locator("main").getByRole("button", { expanded: false }).click();
-    await expect(page.locator('input[type="number"]')).toHaveValue("4");
+    await page.getByRole("button", { name: `ערוך את הזמנת ${customerCompany.name}` }).click();
+    // Read back off this fixture's own row, not "the number input in the
+    // dialog": the dialog carries the whole catalogue, so that is one input
+    // per variety in it.
+    await expect(
+      page.locator("dialog[open] li").filter({ hasText: grower.familyName }).locator('input[type="number"]'),
+    ).toHaveValue("4");
   });
 
-  test("sending a reminder on an un-submitted order dispatches to the outbox and stamps reminder_sent_at", async ({ page }) => {
+  test("sending a reminder on an un-submitted order dispatches to the outbox and stamps reminder_sent_at", async ({
+    page,
+  }) => {
     const grower = await createTestGrowerWithProduct();
     cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
 
@@ -105,7 +156,10 @@ test.describe("Backoffice — Customer Order Status", () => {
     cleanupFns.push(() => deleteTestUser(admin.userId));
     const adminClient = await signInTestUser(admin.email, admin.password);
 
-    const customerCompany = await createTestCompany(`Test Customer ${crypto.randomUUID()}`, "customer");
+    const customerCompany = await createTestCompany(
+      `Test Customer ${crypto.randomUUID()}`,
+      "customer",
+    );
     cleanupFns.push(() => deleteTestCompany(customerCompany.id));
 
     const tradeDate = new Date().toISOString().slice(0, 10);
@@ -123,8 +177,7 @@ test.describe("Backoffice — Customer Order Status", () => {
     await expect(page).toHaveURL(/\/backoffice\/shop$/);
 
     await page.goto("/backoffice/distributor-customer");
-    await page.getByRole("button", { name: new RegExp(customerCompany.name) }).click();
-    await page.getByRole("button", { name: "שלח תזכורת" }).click();
+    await page.getByRole("button", { name: `שלח תזכורת ל${customerCompany.name}` }).click();
     await expect(page.getByText("התזכורת נשלחה.")).toBeVisible();
 
     const order = await adminClient
@@ -143,10 +196,14 @@ test.describe("Backoffice — Customer Order Status", () => {
       .select("template_key, recipient_company_id")
       .eq("recipient_company_id", customerCompany.id)
       .eq("template_key", "order_reminder");
-    expect(outbox.data).toMatchObject([{ template_key: "order_reminder", recipient_company_id: customerCompany.id }]);
+    expect(outbox.data).toMatchObject([
+      { template_key: "order_reminder", recipient_company_id: customerCompany.id },
+    ]);
   });
 
-  test("re-selecting a previously-viewed customer fires no new catalog query", async ({ page }) => {
+  test("reopening a previously-viewed customer's dialog fires no new catalog query", async ({
+    page,
+  }) => {
     const grower = await createTestGrowerWithProduct();
     cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
 
@@ -197,32 +254,48 @@ test.describe("Backoffice — Customer Order Status", () => {
 
     await page.goto("/backoffice/distributor-customer");
 
-    const rowA = page.getByRole("button", { name: new RegExp(customerA.name) });
-    const rowB = page.getByRole("button", { name: new RegExp(customerB.name) });
+    const editA = page.getByRole("button", { name: `ערוך את הזמנת ${customerA.name}` });
+    const editB = page.getByRole("button", { name: `ערוך את הזמנת ${customerB.name}` });
+    const dialog = page.locator("dialog[open]");
 
-    await rowA.click();
-    await expect(page.getByRole("button", { name: "ערוך", exact: true })).toBeVisible();
+    await editA.click();
+    // "שמור" is the editor's own landmark — it appears once the catalog
+    // query for this customer has resolved, which is exactly the moment
+    // this test is counting requests around.
+    await expect(dialog.getByRole("button", { name: "שמור" })).toBeVisible();
     const countAfterA1 = catalogRequestUrls.length;
+    // Closing unmounts OrderLinesEditor (see CustomerOrdersDialog's own
+    // comment on why: `customerId !== null` gates whether it renders at
+    // all) — the property under test is that React Query's cache, not the
+    // component instance, is what makes reopening free.
+    await dialog.getByRole("button", { name: "סגור" }).click();
+    await expect(dialog).toHaveCount(0);
 
-    await rowB.click();
-    await expect(page.getByRole("button", { name: "ערוך", exact: true })).toBeVisible();
+    await editB.click();
+    await expect(dialog.getByRole("button", { name: "שמור" })).toBeVisible();
     const countAfterB = catalogRequestUrls.length;
+    await dialog.getByRole("button", { name: "סגור" }).click();
+    await expect(dialog).toHaveCount(0);
 
-    // Re-selecting A: within the QueryClient's 30s staleTime window
+    // Reopening A: within the QueryClient's 30s staleTime window
     // (apps/web/src/lib/providers.tsx), OrderLinesEditor must reuse the
     // cached result for A's (tradingDayId, customerCompanyId) query key —
     // the same cache reuse performance-verification.spec.ts's Issue 3/5
     // test already proved for customer history, now against the screen
-    // that issue actually named.
-    await rowA.click();
-    await expect(page.getByRole("button", { name: "ערוך", exact: true })).toBeVisible();
+    // that issue actually named, and unaffected by the dialog remounting
+    // the editor on every open/close (React Query's cache lives outside
+    // the component's own mount lifecycle).
+    await editA.click();
+    await expect(dialog.getByRole("button", { name: "שמור" })).toBeVisible();
     const countAfterA2 = catalogRequestUrls.length;
 
     console.log(
-      `[perf] get_orderable_catalog_for_customer requests: ${countAfterA1} after A, ${countAfterB} after A+B, ${countAfterA2} after revisiting A`,
+      `[perf] get_orderable_catalog_for_customer requests: ${countAfterA1} after A, ${countAfterB} after A+B, ${countAfterA2} after reopening A`,
     );
     expect(countAfterA1).toBe(1);
     expect(countAfterB).toBe(2);
-    expect(countAfterA2, "revisiting A must reuse the cached result, firing no new request").toBe(countAfterB);
+    expect(countAfterA2, "reopening A must reuse the cached result, firing no new request").toBe(
+      countAfterB,
+    );
   });
 });

@@ -57,7 +57,11 @@ test.describe("Performance verification — measured against the source's docume
 
     const start = Date.now();
     await page.getByRole("link", { name: "מוצרים", exact: true }).click();
-    await expect(page.getByRole("button", { name: "מוצר חדש" })).toBeVisible();
+    // `.first()`: the products screen renders this name twice by design (the
+    // button above the list, and the empty detail pane's call-to-action).
+    // Either one appearing proves the route rendered, which is all this
+    // timing assertion waits for.
+    await expect(page.getByRole("button", { name: "מוצר חדש" }).first()).toBeVisible();
     const elapsedMs = Date.now() - start;
 
     const markerAfter = await page.evaluate(() => (window as unknown as { __navMarker: number }).__navMarker);
@@ -131,7 +135,13 @@ test.describe("Performance verification — measured against the source's docume
     await expect(page.locator('input[type="number"]')).toHaveValue("2");
     const countAfterFirstA = lineRequestUrls.filter((url) => url.includes(orderA.id)).length;
 
-    await page.goto("/customer/history");
+    // Back via the shell's own nav link, NOT page.goto: a goto is a full
+    // browser load, which tears down the QueryClient and takes its cache with
+    // it. That would guarantee a second round trip below and make this test
+    // assert the opposite of what it means to — the whole claim is that an
+    // SPA route change reuses a cached queryKey.
+    await page.getByRole("link", { name: "היסטוריית הזמנות" }).click();
+    await expect(page).toHaveURL(/\/customer\/history$/);
     await rowB.click();
     await expect(page).toHaveURL(new RegExp(`orderId=${orderB.id}`));
     await page.locator("main").getByRole("button", { expanded: false }).click();
@@ -140,7 +150,8 @@ test.describe("Performance verification — measured against the source's docume
     // Re-selecting A: within the QueryClient's 30s staleTime window
     // (apps/web/src/lib/providers.tsx), this must reuse the cached
     // result, not fire a third round trip.
-    await page.goto("/customer/history");
+    await page.getByRole("link", { name: "היסטוריית הזמנות" }).click();
+    await expect(page).toHaveURL(/\/customer\/history$/);
     await rowA.click();
     await expect(page).toHaveURL(new RegExp(`orderId=${orderA.id}`));
     await page.locator("main").getByRole("button", { expanded: false }).click();
@@ -201,11 +212,20 @@ test.describe("Performance verification — measured against the source's docume
     });
     const markerBefore = await page.evaluate(() => (window as unknown as { __navMarker: number }).__navMarker);
 
-    // Rows render collapsed; expand the one product row before it has a
-    // pallets input to fill.
-    await page.locator("main").getByRole("button", { expanded: false }).click();
-    await page.getByRole("button", { name: "ערוך" }).click();
-    await page.locator('input[type="number"]').fill("2");
+    // Rows render collapsed; expand this fixture's own product row before it
+    // has a quantity control to set. No "ערוך" click in between — the shop is
+    // open, so the order is editable on arrival (routes/customer/order.tsx's
+    // isOrderEditable) — and the control is the customer screen's capped
+    // <select>, not a typed number input.
+    //
+    // Addressed by family name rather than "the collapsed row in main":
+    // initiate_business_day bootstraps a pick for every eligible grower, so
+    // this catalog also lists every seeded demo family and that locator
+    // matches dozens of rows.
+    const familyName = grower.familyName;
+    await page.getByRole("button", { name: familyName, exact: true }).click();
+    const familyItem = page.locator("main li").filter({ hasText: familyName });
+    await familyItem.locator("select").selectOption("2");
     await page.getByRole("button", { name: "שמור" }).click();
     await expect(page.getByText("אישור הזמנה")).toBeVisible();
 

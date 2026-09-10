@@ -45,13 +45,20 @@ test.describe("Backoffice — Products", () => {
     await page.goto("/backoffice/products");
 
     const productName = `E2E Variety ${randomUUID()}`;
-    await page.getByRole("button", { name: "מוצר חדש" }).click();
+    // Two buttons carry this name by design — the one above the list and the
+    // empty detail pane's call-to-action. `.first()` is the list-pane one.
+    await page.getByRole("button", { name: "מוצר חדש" }).first().click();
     await page.getByLabel("משפחה").selectOption({ label: family.name });
     await page.getByLabel("זן / שם").fill(productName);
     await page.getByLabel("מחיר", { exact: true }).fill("12.5");
     await page.getByRole("button", { name: "שמור" }).click();
 
-    await expect(page.getByText(`${family.name} — ${productName}`)).toBeVisible();
+    // The screen never renders "<family> — <variety>" as one string: the
+    // detail header puts the variety in an <h2> with the family on its own
+    // line beneath, and the list shows them as label and meta. Asserting on
+    // the heading also keeps this independent of where the row lands in a
+    // list that is now hundreds of products long.
+    await expect(page.getByRole("heading", { name: productName })).toBeVisible();
     cleanupFns.push(async () => {
       const id = await findProductVarietyIdByName(productName);
       if (id) await deleteTestProductVariety(id);
@@ -65,6 +72,12 @@ test.describe("Backoffice — Products", () => {
     await page.getByText("זמין בעונה הנוכחית").click();
     await page.getByRole("button", { name: "שמור" }).click();
 
-    await expect(page.getByText("(לא בעונה)")).toBeVisible({ timeout: 15000 });
+    // The badge is rendered bare, without the parentheses this used to look
+    // for — and it now appears on every out-of-season product in a seeded
+    // catalog, so it has to be read off THIS product's own row.
+    await expect(page.getByRole("button", { name: new RegExp(productName) })).toContainText(
+      "לא בעונה",
+      { timeout: 15000 },
+    );
   });
 });

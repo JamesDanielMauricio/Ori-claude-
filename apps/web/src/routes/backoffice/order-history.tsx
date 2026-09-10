@@ -1,3 +1,4 @@
+import { todayIsoDate } from "@ori/shared/dates";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
@@ -38,11 +39,6 @@ const STATUS_LABEL: Record<OrderRow["status"], string> = {
   open: "פתוח",
   submitted: "נשלח",
 };
-
-function todayIsoDate(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-}
 
 // Arrangement and Orders History by Date (PRD:
 // backoffice/order-history-distributor-view.md — "arranged history" tab):

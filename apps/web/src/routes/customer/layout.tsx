@@ -13,7 +13,7 @@ const CUSTOMER_NAV = [
 // app-routes.tsx — see lib/require-role.tsx.
 export default function CustomerLayout() {
   return (
-    <RoleShell navItems={CUSTOMER_NAV} primaryAction={{ href: "/customer/order", label: "הזמנה" }}>
+    <RoleShell navItems={CUSTOMER_NAV}>
       {/* Inside the shell, so switching screens keeps the sidebar mounted. */}
       <Suspense fallback={null}>
         <PageTransition>

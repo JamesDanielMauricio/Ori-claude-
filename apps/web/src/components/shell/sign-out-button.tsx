@@ -27,11 +27,18 @@ export function SignOutButton({
   // accent is this app's "confirm / do the thing" signal (Save, Open Shop,
   // Submit Order), and spending it on the one control nobody is aiming for
   // made the loudest thing in the sidebar the thing you least want to hit by
-  // accident. A quiet bordered button still reads as a button.
+  // accident.
+  //
+  // It still needs to be found on purpose, though — a plain gray button
+  // blended into every other secondary control on the screen. This reuses
+  // the app's existing "needs attention" idiom (danger-soft fill + danger
+  // text + ring, the same treatment as an error banner) rather than the
+  // solid `danger` Button variant used for delete confirmations: sign-out
+  // isn't destructive, so it shouldn't read with the same alarm as one.
   const variantClasses =
     variant === "solid"
-      ? "w-full rounded-md border border-border-strong bg-surface px-3 py-2 text-center text-sm font-medium text-ink-muted transition-colors hover:bg-canvas hover:text-ink"
-      : "rounded-md px-2 py-1 text-sm text-ink-muted transition-colors hover:text-ink";
+      ? "w-full rounded-md border border-danger/25 bg-danger-soft px-3 py-2 text-center text-sm font-semibold text-danger ring-1 ring-inset ring-danger/15 transition-colors hover:bg-danger hover:text-white"
+      : "rounded-md px-2 py-1 text-sm font-medium text-danger transition-colors hover:bg-danger-soft";
 
   return (
     <button

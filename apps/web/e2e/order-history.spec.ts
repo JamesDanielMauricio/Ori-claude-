@@ -75,7 +75,11 @@ test.describe("Backoffice — Order History", () => {
     await expect(page).toHaveURL(/\/backoffice\/shop$/);
 
     await page.goto("/backoffice/order-history");
-    await page.getByLabel("תאריך").fill(tradeDate);
+    // `exact` matters: the backoffice rail's trading-day picker is labelled
+    // "יום מסחר מוצג — בחר תאריך", so a substring match resolves to two
+    // elements and Playwright's strict mode rejects it. This page's own
+    // field is labelled exactly "תאריך".
+    await page.getByLabel("תאריך", { exact: true }).fill(tradeDate);
 
     const customerRow = page.getByRole("button", { name: new RegExp(customerCompany.name) });
     await expect(customerRow).toBeVisible();
@@ -100,7 +104,12 @@ test.describe("Backoffice — Order History", () => {
     await expect(page).toHaveURL(/\/backoffice\/shop$/);
 
     await page.goto("/backoffice/order-history");
-    await page.getByLabel("תאריך").fill("2019-01-01");
-    await expect(page.getByText("אין יום מסחר בתאריך זה.")).toBeVisible();
+    await page.getByLabel("תאריך", { exact: true }).fill("2019-01-01");
+    // No trailing period: this copy is an EmptyState `title`, and titles
+    // across the app are written without terminal punctuation. The string
+    // here kept a period from back when the same message was a sentence,
+    // which `getByText`'s substring match can never find inside the
+    // period-less heading actually rendered.
+    await expect(page.getByText("אין יום מסחר בתאריך זה")).toBeVisible();
   });
 });

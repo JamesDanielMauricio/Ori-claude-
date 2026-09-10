@@ -30,7 +30,8 @@ export function toOrderableCatalogRpcArgs(input: OrderableCatalogInput) {
 // bootstrap_grower_pick (R3), never a per-line dash-packed call.
 export const orderLineInputSchema = z.object({
   productVarietyId: z.string().uuid(),
-  palletsOrdered: z.number().nonnegative(),
+  // Pallets are always whole units — never a fractional pallet.
+  palletsOrdered: z.number().int().nonnegative(),
   comment: z.string().nullable().optional(),
 });
 export type OrderLineInput = z.infer<typeof orderLineInputSchema>;
@@ -84,6 +85,6 @@ export const CUSTOMER_ERROR_CODES = {
   FORBIDDEN: "42501",
   /** submit_order called once the trading day is closed; send_order_reminder called on an already-submitted order. */
   INVALID_STATE: "P0007",
-  /** A line's pallet count is negative, or references a variety not in that day's shop. */
+  /** A line's pallet count is negative, references a variety not in that day's shop, or (direct customer submissions only) exceeds max_orderable_for_customer(). */
   INVALID_INPUT: "P0008",
 } as const;

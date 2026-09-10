@@ -59,6 +59,22 @@
   --color-brass: #a97e23;
   --color-brass-soft: #f4ebd5;
 
+  /* Marked — a data cell the user is meant to act on. Currently just the
+     arrangement grid, where a tinted cell means "this customer ordered this
+     product", i.e. where to type.
+
+     Deliberately a real yellow rather than another step of brass, and that is
+     a functional call rather than a decorative one: scanned across a
+     600-row × 20-column grid, a wash as quiet as `brass-soft` disappears, and
+     the tint is the only thing telling a distributor which of 12,000 cells
+     matter. Held well below highlighter saturation so it still sits inside
+     the ivory/forest palette instead of shouting over it, and paired with its
+     own ink so text on the tint keeps AA contrast — `ink-muted` on this fill
+     does not. */
+  --color-marked: #f7ecab;
+  --color-marked-edge: #ddc264;
+  --color-marked-ink: #634d0d;
+
   --color-warning: #8a5f00;
   --color-warning-soft: #f7efd8;
   --color-danger: #a8261e;
@@ -279,6 +295,20 @@ input[type="number"],
 input[type="email"] {
   direction: ltr;
   text-align: right;
+}
+
+/* Quantity fields (pallet counts, pricing, stock caps) read their value at
+   a glance — the native up/down spinner adds width and a click target that
+   isn't otherwise used here, so it's hidden on every number input in the
+   app. Two rules because WebKit/Blink and Firefox expose the same spinner
+   through different, non-overlapping properties. */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
 }
 
 /*

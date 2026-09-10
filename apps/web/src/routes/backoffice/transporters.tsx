@@ -12,6 +12,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { FormSection, StatusPill } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/components/ui/toast";
+import { hasChanges } from "@/lib/has-changes";
 import { createClient } from "@/lib/supabase/client";
 
 interface TransporterCompany {
@@ -138,8 +139,14 @@ export default function TransportersPage() {
     setEditing(true);
   }
 
+  // The values with no unsaved edits — both what "בטל שינויים" restores and
+  // what the live form is compared against. See customers.tsx for why these
+  // are one expression rather than two.
+  const baselineForm = selected ? toFormState(selected) : BLANK_FORM;
+  const dirty = hasChanges(form, baselineForm);
+
   function handleDiscard() {
-    setForm(selected ? toFormState(selected) : BLANK_FORM);
+    setForm(baselineForm);
     setEditing(false);
   }
 
@@ -252,6 +259,7 @@ export default function TransportersPage() {
               <ActionBar
                 editing={editing}
                 saving={saving}
+                dirty={dirty}
                 canDelete={!!selectedId}
                 onEdit={() => setEditing(true)}
                 onDiscard={handleDiscard}

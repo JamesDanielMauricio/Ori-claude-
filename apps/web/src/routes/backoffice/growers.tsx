@@ -13,6 +13,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { FormSection, StatusPill } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/components/ui/toast";
+import { hasChanges } from "@/lib/has-changes";
 import { createClient } from "@/lib/supabase/client";
 
 interface GrowerCompany {
@@ -220,12 +221,22 @@ export default function GrowersPage() {
     setEditing(true);
   }
 
+  // The values with no unsaved edits — both what "בטל שינויים" restores and
+  // what the live form is compared against. See customers.tsx for why these
+  // are one expression rather than two.
+  //
+  // `selectionQuery.data` is the grower's in-season variety list, fetched
+  // separately from the row itself: until it lands there is no complete
+  // baseline to compare against, and this falls back to blank exactly as
+  // discard does — so the form reads as changed, and both buttons stay live,
+  // for the moment before it arrives. Erring toward "changed" is the safe
+  // direction (see hasChanges).
+  const baselineForm =
+    selected && selectionQuery.data ? toFormState(selected, selectionQuery.data) : BLANK_FORM;
+  const dirty = hasChanges(form, baselineForm);
+
   function handleDiscard() {
-    if (selected && selectionQuery.data) {
-      setForm(toFormState(selected, selectionQuery.data));
-    } else {
-      setForm(BLANK_FORM);
-    }
+    setForm(baselineForm);
     setEditing(false);
   }
 
@@ -393,6 +404,7 @@ export default function GrowersPage() {
               <ActionBar
                 editing={editing}
                 saving={saving}
+                dirty={dirty}
                 canDelete={!!selectedId}
                 onEdit={() => setEditing(true)}
                 onDiscard={handleDiscard}

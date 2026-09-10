@@ -1,453 +1,416 @@
-import { createArrangementRecordInputSchema, toCreateArrangementRecordRpcArgs } from "@ori/domain/arrangement";
+import {
+  ARRANGEMENT_ERROR_CODES,
+  arrangeToCustomerInputSchema,
+  toArrangeToCustomerRpcArgs,
+  toDeleteArrangementRecordRpcArgs,
+} from "@ori/domain/arrangement";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
-import { FormField, inputClassName } from "@/components/reference-data/form-field";
-import { Button } from "@/components/ui/button";
-import { Card, FormSection } from "@/components/ui/card";
+import {
+  ArrangementMatrix,
+  type MatrixWrite,
+} from "@/components/arrangement/arrangement-matrix";
+import type {
+  BoardCompany,
+  BoardOrder,
+  BoardPick,
+  BoardRecord,
+} from "@/components/arrangement/board-data";
+import { buildMatrix, filterMatrixRows } from "@/components/arrangement/matrix-data";
+import { StatusPill } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Icon } from "@/components/ui/icon";
 import { PageHeader } from "@/components/ui/page-header";
+import { QueryError } from "@/components/ui/query-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { createClient } from "@/lib/supabase/client";
+import { useTradingDayView } from "@/lib/trading-day-view";
 
-// One nested row carrying the whole wizard's data — see BOARD comment in
-// the query below.
+// The whole screen's data as ONE nested row — same shape as the arrangement
+// board's own query next door, and for the same reasons (see that file).
 interface TradingDay {
   id: string;
   trade_date: string;
-  // one-to-one embed (unique trading_day_id), so an object not an array
+  phase: "initiated" | "shop_open" | "shop_closed" | "closed";
   daily_arrangements: DailyArrangement | null;
-  daily_picks: PickHeader[];
-  daily_orders: OrderHeader[];
+  daily_picks: BoardPick[];
+  daily_orders: BoardOrder[];
 }
 
 interface DailyArrangement {
   id: string;
   status: "open" | "closed";
-  arrangement_records: ExistingArrangementRecord[];
+  arrangement_records: BoardRecord[];
 }
 
-interface PickHeader {
-  id: string;
-  grower_company_id: string;
-  daily_pick_products: PickLine[];
-}
-
-interface PickLine {
-  id: string;
-  daily_pick_id: string;
-  product_variety_id: string;
-  pallets_picked: string;
-  product_varieties: Variety | null;
-}
-
-interface OrderHeader {
-  id: string;
-  customer_company_id: string;
-  daily_order_products: OrderLine[];
-}
-
-interface OrderLine {
-  id: string;
-  daily_order_id: string;
-  product_variety_id: string;
-  pallets_ordered: string;
-  product_varieties: Variety | null;
-}
-
-interface Variety {
-  id: string;
-  name: string;
-  price: number | null;
-  price_type: string | null;
-  product_families: { name: string } | null;
-}
-
-interface Company {
-  id: string;
-  name: string;
-}
-
-interface ExistingArrangementRecord {
-  daily_pick_product_id: string;
-  daily_order_product_id: string;
-  quantity_pallets: number;
-}
-
-// The focused "New Arrangement" wizard (PRD: new-arrangement-wizard.md) —
-// one record at a time: variety, then the grower pick line supplying it,
-// then the customer order line receiving it, then quantity and price.
-// Deliberately a separate route from /backoffice/arrangement (the PRD
-// itself treats them as two screens, tab=arrangement vs
-// tab=new+arrangement) even though both read the same underlying
-// supply/demand/records data — this one is optimized for fast, repeated
-// single-record entry, not for reviewing/editing the whole day at once.
-// Over-allocation on either side is enforced server-side by
-// create_arrangement_record (P0009) — the "remaining" figures shown here
-// are a courtesy, not the actual guard.
+// "סידור לפי מוצרים" — the day's whole arrangement as one spreadsheet:
+// products down the side, customers across the top, and the pallets going
+// from one to the other where they cross.
+//
+// This replaced a six-field wizard that built arrangement records one at a
+// time (variety → grower → customer → quantity → price → save). The wizard
+// was not wrong, it was just the wrong unit of work: a distributor settling a
+// day is not creating a record, they are working across a customer's whole
+// column or down a product's whole row, and doing that through a form meant
+// re-selecting the variety and the grower for every single pallet decision.
+// The matrix makes the same write — one arrangement record, one grower's lot
+// to one customer — the cost of typing a number.
+//
+// Two row shapes, which is the part worth understanding before reading
+// matrix-data.ts: a product supplied by ONE grower is typed into directly,
+// while a product supplied by SEVERAL opens to reveal a row per grower and
+// shows only a read-only sum itself. An arrangement record points at a
+// specific daily_pick_products row, so "3 pallets of lemons" is not a
+// writable fact until it says whose lemons.
+//
+// Every write is arrange_to_customer (migration 0040), the same idempotent
+// RPC the arrangement board's ✓ uses: it upserts the record, and creates the
+// customer's order line at zero pallets when they never ordered the product
+// — which is what makes the un-highlighted cells in this grid writable at
+// all. Emptying a cell is delete_arrangement_record instead.
 export default function NewArrangementPage() {
   const supabase = createClient();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
 
-  const [varietyId, setVarietyId] = useState("");
-  const [growerPickLineId, setGrowerPickLineId] = useState("");
-  const [customerOrderLineId, setCustomerOrderLineId] = useState("");
-  const [quantity, setQuantity] = useState("");
-  const [price, setPrice] = useState("");
-  const [priceType, setPriceType] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState("");
+  // Which multi-grower products are open. Product ids, not row indices, so
+  // the set survives a refetch reordering or a search narrowing the list.
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
 
-  // Same single-request shape as /backoffice/arrangement — see the long
-  // comment on that page's boardQuery for why the whole tree comes back in
-  // one round trip instead of a 3-deep chain of dependent queries.
-  const boardQuery = useQuery({
-    queryKey: ["new-arrangement", "board"],
+  // The day this grid shows: the live open day, or whatever the sidebar's
+  // picker has pinned. Same resolution every date-aware backoffice screen
+  // uses, sharing one query rather than each deciding for itself.
+  const dayView = useTradingDayView();
+  const day = dayView.day;
+
+  // Everything else in ONE request once the day is known — see the identical
+  // query on /backoffice/arrangement for why this is a single nested read
+  // rather than a chain of dependent ones. `order_submission_logs` is the one
+  // thing that tree carries and this one does not: the "changed since their
+  // last submission" flag it feeds has nowhere to go in a grid cell.
+  const boardDataQuery = useQuery({
+    queryKey: ["new-arrangement", "matrix", day?.id ?? null],
+    enabled: !!day?.id,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("trading_days")
         .select(
-          `id, trade_date,
-           daily_arrangements(id, status, arrangement_records(daily_pick_product_id, daily_order_product_id, quantity_pallets)),
-           daily_picks(id, grower_company_id, daily_pick_products(id, daily_pick_id, product_variety_id, pallets_picked, product_varieties(id, name, price, price_type, product_families(name)))),
-           daily_orders(id, customer_company_id, daily_order_products(id, daily_order_id, product_variety_id, pallets_ordered, product_varieties(id, name, price, price_type, product_families(name))))`,
+          `id, trade_date, phase,
+           daily_arrangements(id, status, arrangement_records(id, daily_pick_product_id, daily_order_product_id, customer_company_id, quantity_pallets, price, price_type)),
+           daily_picks(id, grower_company_id, status, daily_pick_products(id, daily_pick_id, product_variety_id, pallets_picked, pickup_time, comment, product_varieties(id, name, family_id, product_families(name, image_url)))),
+           daily_orders(id, customer_company_id, status, daily_order_products(id, daily_order_id, product_variety_id, pallets_ordered, comment, product_varieties(id, name, family_id, product_families(name, image_url))))`,
         )
-        .neq("phase", "closed")
+        .eq("id", day!.id)
         .maybeSingle();
       if (error) throw error;
       return data as unknown as TradingDay | null;
     },
   });
 
-  const day = boardQuery.data ?? null;
-  const arrangement = day?.daily_arrangements ?? null;
-  const records = useMemo(() => arrangement?.arrangement_records ?? [], [arrangement]);
-  const picks = useMemo(() => day?.daily_picks ?? [], [day]);
-  const orders = useMemo(() => day?.daily_orders ?? [], [day]);
-  const pickLines = useMemo(() => picks.flatMap((pick) => pick.daily_pick_products), [picks]);
-  const orderLines = useMemo(() => orders.flatMap((order) => order.daily_order_products), [orders]);
-
-  // De-duplicated from the lines that already carry them, rather than a
-  // dependent request of their own.
-  const varieties = useMemo(() => {
-    const map = new Map<string, Variety>();
-    for (const line of pickLines) if (line.product_varieties) map.set(line.product_varieties.id, line.product_varieties);
-    for (const line of orderLines) if (line.product_varieties) map.set(line.product_varieties.id, line.product_varieties);
-    return [...map.values()];
-  }, [pickLines, orderLines]);
-
-  const companiesQuery = useQuery({
-    queryKey: ["new-arrangement", "companies"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("companies").select("id, name").in("type", ["grower", "customer"]);
-      if (error) throw error;
-      return data as Company[];
-    },
-  });
-
-  const companyNameById = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const company of companiesQuery.data ?? []) map.set(company.id, company.name);
-    return map;
-  }, [companiesQuery.data]);
-
-  const growerIdByPickId = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const pick of picks) map.set(pick.id, pick.grower_company_id);
-    return map;
-  }, [picks]);
-
-  const customerIdByOrderId = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const order of orders) map.set(order.id, order.customer_company_id);
-    return map;
-  }, [orders]);
-
-  // Already-arranged pallets per pick/order line — used only to show a
-  // "remaining" hint; the server (check_arrangement_allocation) is the
-  // real enforcement.
-  const arrangedByPickLine = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const record of records) {
-      map.set(record.daily_pick_product_id, (map.get(record.daily_pick_product_id) ?? 0) + record.quantity_pallets);
-    }
-    return map;
-  }, [records]);
-
-  const arrangedByOrderLine = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const record of records) {
-      map.set(record.daily_order_product_id, (map.get(record.daily_order_product_id) ?? 0) + record.quantity_pallets);
-    }
-    return map;
-  }, [records]);
-
-  const varietyOptions = useMemo(() => {
-    return varieties
-      .map((variety) => ({
-        id: variety.id,
-        label: variety.product_families?.name ? `${variety.product_families.name} — ${variety.name}` : variety.name,
-      }))
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }, [varieties]);
-
-  const growerLineOptions = useMemo(() => {
-    if (!varietyId) return [];
-    return pickLines
-      .filter((line) => line.product_variety_id === varietyId)
-      .map((line) => {
-        const growerId = growerIdByPickId.get(line.daily_pick_id);
-        const picked = Number(line.pallets_picked);
-        const arranged = arrangedByPickLine.get(line.id) ?? 0;
-        return {
-          id: line.id,
-          label: `${growerId ? (companyNameById.get(growerId) ?? growerId) : "—"} — ${picked - arranged} נותרו מתוך ${picked}`,
-          remaining: picked - arranged,
-        };
-      })
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }, [varietyId, pickLines, growerIdByPickId, arrangedByPickLine, companyNameById]);
-
-  const customerLineOptions = useMemo(() => {
-    if (!varietyId) return [];
-    return orderLines
-      .filter((line) => line.product_variety_id === varietyId)
-      .map((line) => {
-        const customerId = customerIdByOrderId.get(line.daily_order_id);
-        const ordered = Number(line.pallets_ordered);
-        const arranged = arrangedByOrderLine.get(line.id) ?? 0;
-        return {
-          id: line.id,
-          label: `${customerId ? (companyNameById.get(customerId) ?? customerId) : "—"} — ${ordered - arranged} נותרו מתוך ${ordered}`,
-          remaining: ordered - arranged,
-        };
-      })
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }, [varietyId, orderLines, customerIdByOrderId, arrangedByOrderLine, companyNameById]);
-
-  const selectedVariety = varieties.find((variety) => variety.id === varietyId) ?? null;
-
-  // Reset the grower/customer/quantity selection whenever the variety
-  // changes — a pick/order line from a different variety is meaningless
-  // here, and re-prefill price from the newly selected variety's own
-  // configured price.
+  // Push-triggered refresh, same trigger-only shape as the arrangement
+  // board's: the payload is never read, it only means "re-run the query".
+  // This matters more here than there — two distributors can be typing into
+  // different columns of the same grid, and each needs the other's pallets to
+  // show up in the זמין column before they over-commit a lot.
   useEffect(() => {
-    setGrowerPickLineId("");
-    setCustomerOrderLineId("");
-    setQuantity("");
-    setPrice(selectedVariety?.price != null ? String(selectedVariety.price) : "");
-    setPriceType(selectedVariety?.price_type ?? "");
-  }, [varietyId, selectedVariety]);
+    if (!day?.id) return;
+    const dayId = day.id;
+    const invalidate = () => {
+      void queryClient.invalidateQueries({ queryKey: ["new-arrangement", "matrix", dayId] });
+    };
 
-  const createMutation = useMutation({
-    mutationFn: async () => {
-      const input = createArrangementRecordInputSchema.parse({
-        dailyPickProductId: growerPickLineId,
-        dailyOrderProductId: customerOrderLineId,
-        quantityPallets: Number(quantity),
-        price: price === "" ? null : Number(price),
-        priceType: priceType || null,
-      });
-      const { error } = await supabase.rpc("create_arrangement_record", toCreateArrangementRecordRpcArgs(input));
+    const channel = supabase
+      .channel(`arrangement-matrix-${dayId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "daily_arrangements" }, invalidate)
+      .on("postgres_changes", { event: "*", schema: "public", table: "daily_picks" }, invalidate)
+      .on("postgres_changes", { event: "*", schema: "public", table: "daily_orders" }, invalidate)
+      .on("postgres_changes", { event: "*", schema: "public", table: "arrangement_records" }, invalidate)
+      .on("postgres_changes", { event: "*", schema: "public", table: "daily_pick_products" }, invalidate)
+      .on("postgres_changes", { event: "*", schema: "public", table: "daily_order_products" }, invalidate)
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [day?.id, supabase, queryClient]);
+
+  // Whole-table reference data with no dependency on the day, so it starts
+  // immediately and resolves in parallel instead of adding a round trip.
+  const companiesQuery = useQuery({
+    queryKey: ["arrangement", "companies"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("companies")
+        .select("id, name, default_pickup_time")
+        .in("type", ["grower", "customer"]);
       if (error) throw error;
-    },
-    onSuccess: () => {
-      showToast("הרשומה נוצרה.", "success");
-      setGrowerPickLineId("");
-      setCustomerOrderLineId("");
-      setQuantity("");
-      // Both this wizard's board and the sibling /backoffice/arrangement
-      // page's cache — the new record has to show up in each.
-      void queryClient.invalidateQueries({ queryKey: ["new-arrangement", "board"] });
-      void queryClient.invalidateQueries({ queryKey: ["arrangement"] });
-    },
-    onError: (error: { message?: string }) => {
-      showToast(`יצירת הרשומה נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
+      return data as BoardCompany[];
     },
   });
 
-  const isLoading = boardQuery.isLoading;
+  const boardDay = boardDataQuery.data ?? null;
+  const arrangement = boardDay?.daily_arrangements ?? null;
 
-  if (isLoading) {
+  // One derivation for the whole grid, memoised on the query results only —
+  // so typing in a cell, expanding a row or searching does not re-total the
+  // day. On a ~600-line day that pass is the one genuinely expensive thing
+  // this screen does.
+  const matrix = useMemo(
+    () =>
+      buildMatrix({
+        picks: boardDay?.daily_picks ?? [],
+        orders: boardDay?.daily_orders ?? [],
+        records: arrangement?.arrangement_records ?? [],
+        companies: companiesQuery.data ?? [],
+      }),
+    [boardDay, arrangement, companiesQuery.data],
+  );
+
+  // Filtering is separate from building for the same reason `markSelected` is
+  // separate from `buildBoard` next door: a keystroke in the search box must
+  // re-filter a list, not re-derive the day.
+  const visible = useMemo(
+    () => ({ columns: matrix.columns, rows: filterMatrixRows(matrix.rows, search) }),
+    [matrix, search],
+  );
+
+  const arrangeMutation = useMutation({
+    mutationFn: async (write: MatrixWrite) => {
+      const parsed = arrangeToCustomerInputSchema.parse({
+        dailyPickProductId: write.pickLineId,
+        customerCompanyId: write.customerId,
+        quantityPallets: write.quantity,
+        // Handed back so the RPC has something to COALESCE onto an existing
+        // record; null on a fresh one leaves pricing to close_arrangement,
+        // exactly as the wizard this screen replaced did.
+        price: write.price,
+        priceType: write.priceType,
+      });
+      const { error } = await supabase.rpc(
+        "arrange_to_customer",
+        toArrangeToCustomerRpcArgs(parsed),
+      );
+      if (error) throw error;
+    },
+    onSuccess: invalidateBoards,
+    onError: (error: RpcError) => {
+      showToast(`שמירת הסידור נכשלה: ${describeRpcError(error)}`, "error");
+      // Refetch on failure too: a refusal usually means this screen's copy of
+      // the day is behind whatever caused it, so the grid should re-read
+      // rather than argue with the server.
+      invalidateBoards();
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (recordId: string) => {
+      const { error } = await supabase.rpc(
+        "delete_arrangement_record",
+        toDeleteArrangementRecordRpcArgs({ id: recordId }),
+      );
+      if (error) throw error;
+    },
+    onSuccess: invalidateBoards,
+    onError: (error: RpcError) => {
+      showToast(`מחיקת השיוך נכשלה: ${describeRpcError(error)}`, "error");
+      invalidateBoards();
+    },
+  });
+
+  function invalidateBoards() {
+    void queryClient.invalidateQueries({ queryKey: ["new-arrangement", "matrix"] });
+    // The sibling board reads the same records out of its own cache entry,
+    // so a cell typed here has to land there too.
+    void queryClient.invalidateQueries({ queryKey: ["arrangement", "board-data"] });
+  }
+
+  /**
+   * One cell, committed.
+   *
+   * Deliberately silent on success. Every other write in this app raises a
+   * toast, but a distributor filling a row types across a dozen cells in a
+   * few seconds and a dozen confirmations would bury the screen — and the
+   * confirmation is already on screen anyway, in the זמין and סה״כ חולק
+   * columns updating beside the number they just typed. Failures still toast,
+   * because those are the ones with nothing else to show for them.
+   *
+   * Resolves to whether the write landed, never rejects: the grid puts the
+   * cell back to the server's value on false.
+   */
+  const commitCell = async (write: MatrixWrite): Promise<boolean> => {
+    try {
+      if (write.quantity === 0) {
+        // Clearing a cell that never had a record is not an error, it is a
+        // distributor tabbing through an empty row.
+        if (!write.recordId) return true;
+        await deleteMutation.mutateAsync(write.recordId);
+      } else {
+        await arrangeMutation.mutateAsync(write);
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  // Two loading stages — which day, then that day's grid — held behind one
+  // skeleton so a slow connection doesn't flash an empty state between them.
+  if (dayView.isLoading || (!!day && boardDataQuery.isLoading)) {
     return (
-      <div className="space-y-2">
-        <Skeleton className="h-10 w-full" />
-        <Skeleton className="h-64 w-full" />
+      <div className="space-y-3">
+        <Skeleton className="h-10 w-64" />
+        <Skeleton className="h-[60vh] w-full" />
       </div>
     );
   }
 
-  if (!day || !arrangement) {
+  // A failed load must not present itself as "no trading day is open" — that
+  // invites the distributor to open a day that already exists.
+  if (dayView.isError || boardDataQuery.isError) {
+    return (
+      <QueryError
+        what="לוח הסידור"
+        onRetry={() => {
+          void dayView.refetch();
+          void boardDataQuery.refetch();
+        }}
+        retrying={dayView.isFetching || boardDataQuery.isFetching}
+      />
+    );
+  }
+
+  if (!boardDay || !arrangement) {
     return (
       <div className="max-w-xl rounded-xl bg-surface shadow-raised ring-1 ring-inset ring-border/70">
         <EmptyState
           icon="clock"
-          title="אין יום מסחר פתוח"
-          hint="פתח יום עסקים בסרגל הצד כדי להתחיל לסדר ליקוטים מול הזמנות."
-        />
-      </div>
-    );
-  }
-
-  if (arrangement.status !== "open") {
-    return (
-      <div className="max-w-xl rounded-xl bg-surface shadow-raised ring-1 ring-inset ring-border/70">
-        <EmptyState
-          icon="clipboard"
-          title="הסידור להיום כבר נסגר"
-          hint="לא ניתן להוסיף רשומות סידור אחרי סגירת הסידור."
-          action={
-            <Link
-              to="/backoffice/arrangement"
-              className="inline-flex h-10 items-center justify-center rounded-md bg-accent px-5 text-sm font-semibold text-accent-ink shadow-accent transition-colors duration-200 hover:bg-accent-hover"
-            >
-              לסידור המלא
-            </Link>
+          title={dayView.isLive ? "אין יום מסחר פתוח" : "לא נמצא יום מסחר בתאריך זה"}
+          hint={
+            dayView.isLive
+              ? "פתח יום עסקים בסרגל הצד כדי לסדר את ליקוטי היום מול ההזמנות."
+              : "בחר תאריך אחר בסרגל הצד, או חזור ליום הפעיל."
           }
         />
       </div>
     );
   }
 
-  const canSave = !!growerPickLineId && !!customerOrderLineId && Number(quantity) > 0;
+  // Same rule as the board: a pinned past day is read-only regardless of its
+  // phase, and a closed arrangement is read-only regardless of the picker.
+  const editable = dayView.isLive && arrangement.status === "open";
 
   return (
-    <div className="flex max-w-xl flex-col gap-6">
+    <div className="flex flex-col">
       <PageHeader
-        title="סידור חדש"
-        subtitle={`התאם קו ליקוט של מגדל לקו הזמנה של לקוח, ליום ${new Intl.DateTimeFormat("he-IL", { dateStyle: "long" }).format(new Date(day.trade_date))}.`}
+        title="סידור לפי מוצרים"
+        subtitle={new Intl.DateTimeFormat("he-IL", { dateStyle: "long" }).format(
+          new Date(boardDay.trade_date),
+        )}
         actions={
-          <Link
-            to="/backoffice/arrangement"
-            className="inline-flex h-10 items-center justify-center rounded-md bg-surface px-5 text-sm font-semibold text-ink shadow-card ring-1 ring-inset ring-border-strong transition-colors duration-200 hover:bg-surface-muted hover:text-accent hover:ring-accent/40"
-          >
-            לסידור המלא
-          </Link>
+          <>
+            {!editable && (
+              <StatusPill tone="warning">
+                {dayView.isLive ? "הסידור נסגר — קריאה בלבד" : "צפייה בעבר — לא ניתן לערוך"}
+              </StatusPill>
+            )}
+            <Link
+              to="/backoffice/arrangement"
+              className="inline-flex h-10 items-center justify-center rounded-md bg-surface px-5 text-sm font-semibold text-ink shadow-card ring-1 ring-inset ring-border-strong transition-colors duration-200 hover:bg-surface-muted hover:text-accent hover:ring-accent/40"
+            >
+              לסידור לפי מגדל
+            </Link>
+          </>
         }
       />
 
-      {/* Split into "what is being matched" and "on what terms". The form was
-          a flat run of six controls where the two halves — the three-step
-          variety→grower→customer match, and its commercial terms — carry
-          completely different questions. */}
-      <Card padded={false}>
-        <div className="flex flex-col gap-6 p-6">
-          <FormSection
-            title="התאמה"
-            hint="בחר זן תחילה — רשימות המגדל והלקוח מסוננות לפיו."
+      {/* The toolbar carries the one control the grid itself has no room for.
+          A day can run to several hundred products, so search is how a
+          distributor reaches a row at all — scrolling to it is not realistic. */}
+      <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-3">
+        <label className="relative flex-1 sm:max-w-xs">
+          <span className="sr-only">חיפוש מוצר</span>
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 start-3 flex items-center text-ink-subtle"
           >
-            <FormField label="זן" htmlFor="new-arr-variety">
-              <select
-                id="new-arr-variety"
-                className={`${inputClassName} w-full`}
-                value={varietyId}
-                onChange={(event) => setVarietyId(event.target.value)}
-              >
-                <option value="">בחר זן…</option>
-                {varietyOptions.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </FormField>
+            <Icon name="search" className="h-4 w-4" />
+          </span>
+          <input
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="חיפוש מוצר…"
+            className="h-10 w-full rounded-md bg-surface ps-9 pe-3 text-sm text-ink shadow-card ring-1 ring-inset ring-border-strong outline-none transition-colors duration-150 placeholder:text-ink-subtle focus:ring-2 focus:ring-accent/40"
+          />
+        </label>
 
-            <FormField label="מגדל (קו ליקוט)" htmlFor="new-arr-grower">
-              <select
-                id="new-arr-grower"
-                className={`${inputClassName} w-full`}
-                disabled={!varietyId}
-                value={growerPickLineId}
-                onChange={(event) => setGrowerPickLineId(event.target.value)}
-              >
-                <option value="">בחר מגדל…</option>
-                {growerLineOptions.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </FormField>
+        <p className="text-xs text-ink-muted">
+          {visible.rows.length} מוצרים · {visible.columns.length} לקוחות
+        </p>
 
-            <FormField label="לקוח (קו הזמנה)" htmlFor="new-arr-customer">
-              <select
-                id="new-arr-customer"
-                className={`${inputClassName} w-full`}
-                disabled={!varietyId}
-                value={customerOrderLineId}
-                onChange={(event) => setCustomerOrderLineId(event.target.value)}
-              >
-                <option value="">בחר לקוח…</option>
-                {customerLineOptions.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </FormField>
-          </FormSection>
+        {/* The tint is the only thing on the grid carrying meaning by colour
+            alone, so it gets said in words rather than left to be inferred. */}
+        <p className="flex items-center gap-2 text-xs text-ink-muted">
+          <span
+            aria-hidden
+            className="h-3 w-3 rounded-sm bg-marked ring-1 ring-inset ring-marked-edge"
+          />
+          תא מסומן = הלקוח הזמין את המוצר
+        </p>
 
-          <FormSection title="כמות ותמחור" columns={2}>
-            <FormField label="כמות (משטחים)" htmlFor="new-arr-quantity">
-              <input
-                id="new-arr-quantity"
-                type="number"
-                step="0.01"
-                min={0}
-                className={`${inputClassName} w-full`}
-                value={quantity}
-                onChange={(event) => setQuantity(event.target.value)}
-              />
-            </FormField>
-            <div className="hidden sm:block" />
-            <FormField label="מחיר" htmlFor="new-arr-price">
-              <input
-                id="new-arr-price"
-                type="number"
-                step="0.01"
-                className={`${inputClassName} w-full`}
-                value={price}
-                onChange={(event) => setPrice(event.target.value)}
-              />
-            </FormField>
-            <FormField label="סוג תמחור" htmlFor="new-arr-price-type">
-              <input
-                id="new-arr-price-type"
-                className={`${inputClassName} w-full`}
-                value={priceType}
-                onChange={(event) => setPriceType(event.target.value)}
-              />
-            </FormField>
-          </FormSection>
-        </div>
+        {editable && (
+          <p className="text-xs text-ink-subtle">
+            הקלד כמות ולחץ Enter או Tab. חיצים לניווט בין תאים.
+          </p>
+        )}
+      </div>
 
-        {/* The submit sits on its own tinted footer rather than floating as
-            the last item in the field stack, so "the form ends here" is a
-            visible edge and not just more whitespace. */}
-        <div className="flex items-center justify-end gap-3 border-t border-border bg-surface-muted/60 px-6 py-4">
-          {!canSave && (
-            <p className="text-xs text-ink-muted">בחר מגדל, לקוח וכמות גדולה מאפס.</p>
-          )}
-          <Button
-            type="button"
-            disabled={!canSave || saving}
-            onClick={() => {
-              setSaving(true);
-              createMutation.mutate(undefined, { onSettled: () => setSaving(false) });
-            }}
-          >
-            {saving && (
-              <span
-                aria-hidden
-                className="animate-spin-loop h-3.5 w-3.5 rounded-full border-2 border-current border-t-transparent"
-              />
-            )}
-            {saving ? "שומר…" : "צור רשומת סידור"}
-          </Button>
-        </div>
-      </Card>
+      <ArrangementMatrix
+        matrix={visible}
+        expanded={expanded}
+        onToggle={(varietyId) =>
+          setExpanded((current) => {
+            const next = new Set(current);
+            if (!next.delete(varietyId)) next.add(varietyId);
+            return next;
+          })
+        }
+        editable={editable}
+        onCommit={commitCell}
+      />
     </div>
   );
+}
+
+interface RpcError {
+  code?: string;
+  message?: string;
+}
+
+// The arrangement functions raise named SQLSTATEs (packages/domain's
+// ARRANGEMENT_ERROR_CODES). Same translation the board does — kept as its own
+// copy here rather than shared because the two screens can reasonably word
+// the same refusal differently, and this one is typed into far faster: an
+// over-allocation is a routine keystroke on a grid, not an exception.
+function describeRpcError(error: RpcError): string {
+  switch (error.code) {
+    case ARRANGEMENT_ERROR_CODES.OVER_ALLOCATION:
+      return "הכמות חורגת ממה שנקטף בשורת הליקוט או ממה שהלקוח הזמין.";
+    case ARRANGEMENT_ERROR_CODES.INVALID_STATE:
+      return "הסידור כבר סגור.";
+    case ARRANGEMENT_ERROR_CODES.NOT_FOUND:
+      return "השורה או ההזמנה כבר לא קיימות. רענן את הדף.";
+    // PostgREST's "no function matches". Worth naming because migrations here
+    // are applied by hand: every cell in this grid calls arrange_to_customer,
+    // which does not exist until 0040 is run, and the raw message reads as a
+    // bug rather than as a pending migration.
+    case "PGRST202":
+      return "פעולה זו דורשת מיגרציה שטרם הורצה (0040). הרץ pnpm db:migrate.";
+    default:
+      return error.message ?? "שגיאה לא ידועה";
+  }
 }

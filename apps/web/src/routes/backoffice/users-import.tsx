@@ -3,8 +3,16 @@ import { useState } from "react";
 import { inputClassName } from "@/components/reference-data/form-field";
 import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/card";
+import { Icon } from "@/components/ui/icon";
 import { PageHeader } from "@/components/ui/page-header";
-import { TableBody, TableCell, TableContainer, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { trpc } from "@/lib/trpc-client";
 
 interface DraftRow {
@@ -138,6 +146,20 @@ export default function BulkImportUsersPage() {
           </Button>
         </div>
       </form>
+
+      {/* A failed import used to report nothing at all: the spinner stopped,
+          no results table appeared, and the admin had no way to tell a server
+          error from a batch that silently did nothing. The sibling
+          admin-reset screen already surfaces its mutation error this way. */}
+      {bulkCreate.isError && (
+        <p
+          role="alert"
+          className="flex items-start gap-2.5 rounded-lg bg-danger-soft px-4 py-3 text-sm text-danger ring-1 ring-inset ring-danger/20"
+        >
+          <Icon name="alertCircle" className="mt-px h-4 w-4 shrink-0" />
+          הייבוא נכשל: {bulkCreate.error.message}
+        </p>
+      )}
 
       {bulkCreate.data && (
         // The results get their own titled section. Previously a second

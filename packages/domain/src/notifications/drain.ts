@@ -41,6 +41,10 @@ export interface DrainResult {
 interface PendingOutboxRow {
   id: string;
   template_key: string;
+  // Targets already delivered to on an earlier pass (migration 0038). A row
+  // only reaches this loop with a non-empty list when a previous attempt sent
+  // to some of its recipients and failed on others.
+  sent_targets: string[] | null;
 }
 
 interface NotificationSettingsRow {
@@ -74,7 +78,7 @@ export async function drainNotificationOutbox(deps: DrainDeps): Promise<DrainRes
 
   const { data: pendingRows, error: pendingError } = await client
     .from("notification_outbox")
-    .select("id, template_key")
+    .select("id, template_key, sent_targets")
     .is("sent_at", null)
     .lt("attempt_count", maxAttempts);
   if (pendingError) throw pendingError;
@@ -100,19 +104,65 @@ export async function drainNotificationOutbox(deps: DrainDeps): Promise<DrainRes
       continue;
     }
 
+    // Delivery is tracked per TARGET, not per row. One outbox row fans out to
+    // one message per recipient whenever the company has no WhatsApp group id
+    // (resolve_outbox_dispatch's per-user fallback), and the row is only
+    // finished when every one of them has landed. Judging the row as a whole
+    // meant a single unreachable number sent every other recipient a fresh
+    // copy on each retry — see migration 0038 for the full write-up.
+    const alreadySent = new Set(row.sent_targets ?? []);
+    const resolvedTargets = (targets ?? []) as DispatchTarget[];
     const errors: string[] = [];
-    for (const { target, message } of (targets ?? []) as DispatchTarget[]) {
+
+    for (const { target, message } of resolvedTargets) {
+      // Delivered on an earlier pass — skipping is the whole point of the fix.
+      if (alreadySent.has(target)) continue;
+
       const sendResult = await channel.send({ to: target, body: message });
       if (!sendResult.success) {
         errors.push(sendResult.error ?? `send to ${target} failed`);
+        continue;
       }
+
+      alreadySent.add(target);
+
+      // Recorded immediately, one target at a time, rather than batched at the
+      // end: if this process dies mid-fan-out, everything already delivered is
+      // durably marked and the next pass resumes from there instead of
+      // starting the whole row over.
+      const { error: recordError } = await client.rpc("record_outbox_target_sent", {
+        p_outbox_id: row.id,
+        p_target: target,
+        p_complete: false,
+      });
+      if (recordError) errors.push(recordError.message);
     }
 
     if (errors.length === 0) {
-      await client
-        .from("notification_outbox")
-        .update({ sent_at: new Date().toISOString(), last_attempted_at: new Date().toISOString() })
-        .eq("id", row.id);
+      // Completion is stamped once, after the loop, from "nothing failed" —
+      // deliberately NOT from "this was the last target". resolve_outbox_dispatch's
+      // per-user branch has no ORDER BY, so the target order can differ between
+      // passes; a completion flag hung off the final iteration would be missed
+      // whenever the last target was one already delivered and skipped, leaving
+      // the row pending forever with nothing left to send. Judging it after the
+      // whole loop is order-independent.
+      //
+      // The empty target carries only the flag — the function ignores a blank
+      // target for the sent_targets list, so this also covers the two cases
+      // where the loop sent nothing: every target already delivered, and a row
+      // that resolved to no targets at all (a company with no group id and no
+      // phone numbers on file), which otherwise would never stop being retried.
+      const { error: completeError } = await client.rpc("record_outbox_target_sent", {
+        p_outbox_id: row.id,
+        p_target: "",
+        p_complete: true,
+      });
+      if (completeError) {
+        await recordFailure(client, row.id, completeError.message);
+        result.failed += 1;
+        result.rows.push({ outboxId: row.id, status: "failed", error: completeError.message });
+        continue;
+      }
       result.sent += 1;
       result.rows.push({ outboxId: row.id, status: "sent" });
     } else {
@@ -126,11 +176,12 @@ export async function drainNotificationOutbox(deps: DrainDeps): Promise<DrainRes
   return result;
 }
 
+// Increments through a Postgres function rather than a select-then-update.
+// Reading attempt_count and writing back value + 1 loses an increment whenever
+// two drain passes overlap (a slow run still going when the schedule fires the
+// next one): both read N, both write N + 1, and a permanently failing row
+// never reaches maxAttempts. The function does the arithmetic from the
+// column's own value in one statement — R7, concurrency is the database's job.
 async function recordFailure(client: SupabaseClient, outboxId: string, error: string): Promise<void> {
-  const { data: current } = await client.from("notification_outbox").select("attempt_count").eq("id", outboxId).single();
-  const attemptCount = ((current as { attempt_count: number } | null)?.attempt_count ?? 0) + 1;
-  await client
-    .from("notification_outbox")
-    .update({ attempt_count: attemptCount, last_error: error, last_attempted_at: new Date().toISOString() })
-    .eq("id", outboxId);
+  await client.rpc("record_outbox_attempt", { p_outbox_id: outboxId, p_error: error });
 }

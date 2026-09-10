@@ -16,6 +16,13 @@ const API_URL = "http://localhost:4000";
 
 export default defineConfig({
   testDir: "./e2e",
+  // Borrows the single-open-trading-day slot for the run and gives it back
+  // afterwards. Every spec here opens its own day via initiate_business_day,
+  // which Lifecycle Invariant 1 refuses while any non-closed day exists — so
+  // a seeded demo day left in `shop_open` fails the entire suite at its
+  // first fixture. See packages/domain/src/lifecycle-engine/trading-day-slot.ts.
+  globalSetup: "./e2e/global-setup.ts",
+  globalTeardown: "./e2e/global-teardown.ts",
   // Specs share one database and some fixtures sign in as freshly-created
   // users — see packages/domain/vitest.config.ts for the parallelism
   // rationale. Workers are separate processes, so even per-file

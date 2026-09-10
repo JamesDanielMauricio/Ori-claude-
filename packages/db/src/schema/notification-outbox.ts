@@ -50,4 +50,11 @@ export const notificationOutbox = pgTable("notification_outbox", {
   attemptCount: integer("attempt_count").notNull().default(0),
   lastError: text("last_error"),
   lastAttemptedAt: timestamp("last_attempted_at", { withTimezone: true }),
+  // Which recipients this row has already reached (migration 0038). One
+  // outbox row fans out to one message PER recipient when the company has no
+  // WhatsApp group id, so "was this row sent" is not a single boolean:
+  // without this, a retry after one unreachable number re-sent the message to
+  // everyone who had already received it. The drain skips any target listed
+  // here and only sets sentAt once every target is accounted for.
+  sentTargets: text("sent_targets").array().notNull().default([]),
 });

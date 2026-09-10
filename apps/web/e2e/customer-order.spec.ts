@@ -45,7 +45,14 @@ test.describe("Customer — order + history", () => {
     await runCleanup(cleanupFns);
   });
 
+  // Longer than the 30s default: this walks the whole customer journey —
+  // browse, comment, submit, reload, history, back into the order — and every
+  // one of those steps re-renders a catalog that, since the seed grew to
+  // ~600 varieties, is a genuinely large list. The extra budget is for the
+  // rendering, not for hiding a hang; each individual assertion keeps its own
+  // (much shorter) expect timeout.
   test("browse (mixed family), add to cart, comment, submit, and see it in history", async ({ page }) => {
+    test.slow();
     const adminCompany = await createTestCompany();
     cleanupFns.push(() => deleteTestCompany(adminCompany.id));
     const admin = await createTestProfile({ companyId: adminCompany.id, role: "backoffice" });
@@ -104,27 +111,47 @@ test.describe("Customer — order + history", () => {
     await page.getByRole("button", { name: "התחברות" }).click();
     await expect(page).toHaveURL(/\/customer\/order$/);
 
-    // Mixed family: this grower's whole catalog is one family with two
-    // varieties. The depleted one (zero supply, not in this customer's
-    // cart) must not render at all — proven here by there being exactly
-    // one product row on the whole page, not by asserting an absence of
-    // specific text, since variety names are random per-test strings with
-    // nothing else to distinguish them by. The family itself still
-    // renders, via its one surviving variety.
-    const productList = page.locator("main ul li");
-    await expect(productList).toHaveCount(1);
+    // Mixed family: this fixture's family holds two varieties, and the
+    // depleted one (zero supply, not in this customer's cart) must not
+    // render while its in-stock sibling — and therefore the family itself —
+    // still does.
+    //
+    // Scoped to this test's own family rather than counting rows across the
+    // whole page. initiate_business_day bootstraps a pick for EVERY eligible
+    // grower, so the catalog this customer sees also contains every seeded
+    // demo family; "exactly one row on the page" only ever held while the
+    // database was empty.
+    const familyName = grower.familyName;
+    const familyItem = page.locator("main li").filter({ hasText: familyName });
+    // The toggle is addressed structurally, not by accessible name: once this
+    // family holds a quantity the row grows a filled-count chip, so its name
+    // becomes "<family> 1" and any exact-name match stops working precisely
+    // when the test starts needing it (after the order is submitted, below).
+    const familyToggle = familyItem.locator("button[aria-expanded]").first();
+    await expect(familyToggle).toBeVisible();
 
-    // Rows render collapsed (image + name + chevron); the pallets input and
-    // comment control only exist once a row is expanded.
-    const productToggle = page.locator("main").getByRole("button", { expanded: false });
-    await productToggle.click();
-    const palletsInput = page.locator('input[type="number"]');
-    await expect(palletsInput).toHaveCount(1);
+    // Rows render collapsed (image + name + chevron); the quantity dropdown
+    // and comment control only exist once a row is expanded. The customer's
+    // own order screen renders quantity as a <select> capped to remaining
+    // stock (order-product-list.tsx's quantityMode="dropdown"), not a typed
+    // number input.
+    await familyToggle.click();
+    // One select = one variety row under this family. That IS the assertion
+    // the row count used to make: the depleted sibling is absent.
+    const quantitySelect = familyItem.locator("select");
+    await expect(quantitySelect).toHaveCount(1);
 
-    await page.getByRole("button", { name: "ערוך" }).click();
-    await palletsInput.fill("4");
+    // No "ערוך" gate: the shop is open, so the order is editable, full stop
+    // (routes/customer/order.tsx's isOrderEditable). The dropdown is live
+    // immediately and "שמור" is already on screen.
+    await expect(page.getByRole("button", { name: "ערוך", exact: true })).toHaveCount(0);
+    await expect(quantitySelect).toBeEnabled();
+    await quantitySelect.selectOption("4");
 
-    await page.getByRole("button", { name: /הערה/ }).click();
+    // Scoped to this family: every other family in the catalog renders its
+    // own comment buttons too (the accordion panels stay mounted while
+    // collapsed, by design — see order-product-list.tsx).
+    await familyItem.getByRole("button", { name: /הערה/ }).click();
     await page.getByPlaceholder("הוסף הערה…").fill("gate code 4321");
     await page.getByRole("button", { name: "אישור" }).click();
 
@@ -136,14 +163,14 @@ test.describe("Customer — order + history", () => {
     await expect(page.getByText("ההזמנה נשלחה.")).toBeVisible();
 
     // Optimistic UI update: no reload needed to see the submitted state.
-    await expect(palletsInput).toHaveValue("4");
+    await expect(quantitySelect).toHaveValue("4");
 
     // A fresh reload confirms it actually persisted server-side, not just
     // in local draft state. The row collapses again on remount, so expand
-    // it before reading the input back.
+    // it before reading the value back.
     await page.reload();
-    await page.locator("main").getByRole("button", { expanded: false }).click();
-    await expect(palletsInput).toHaveValue("4");
+    await familyToggle.click();
+    await expect(quantitySelect).toHaveValue("4");
 
     await page.goto("/customer/history");
     const historyRow = page.getByRole("button", { name: "נשלח" });
@@ -154,8 +181,15 @@ test.describe("Customer — order + history", () => {
     // history routes back to the same live, editable editor — pre-filled
     // with what was just submitted — rather than a read-only view.
     await expect(page).toHaveURL(/\/customer\/order\?orderId=/);
-    await page.locator("main").getByRole("button", { expanded: false }).click();
-    await expect(page.locator('input[type="number"]')).toHaveValue("4");
-    await expect(page.getByText("הערה: gate code 4321")).toBeVisible();
+    await familyToggle.click();
+    await expect(familyItem.locator("select")).toHaveValue("4");
+    // "הערה: <text>" is the READ-ONLY rendering. This view is the live
+    // editable one (the comment two lines up says so — the day is still
+    // open), where a comment shows as the "✎ הערה" button that opens it, so
+    // the plain-text form is never in this DOM. Reading the value back out of
+    // the popup checks the same thing the text did — that the comment
+    // survived the round trip — without asserting the wrong view's markup.
+    await familyItem.getByRole("button", { name: /הערה/ }).click();
+    await expect(page.getByPlaceholder("הוסף הערה…")).toHaveValue("gate code 4321");
   });
 });

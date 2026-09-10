@@ -267,6 +267,41 @@
       "when": 1788940800000,
       "tag": "0037_auto-sync-grower-picks",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1789171200000,
+      "tag": "0038_outbox-per-target-delivery",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1789174800000,
+      "tag": "0039_save-pick-lines-transaction",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1789261200000,
+      "tag": "0040_arrange-to-customer",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1789264800000,
+      "tag": "0041_expand-realtime-publication",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1789268400000,
+      "tag": "0042_customer-order-cap",
+      "breakpoints": true
     }
   ]
 }

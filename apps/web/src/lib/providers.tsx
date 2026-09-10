@@ -5,6 +5,29 @@ import { ToastProvider } from "@/components/ui/toast";
 
 import { trpc, trpcClientConfig } from "./trpc-client";
 
+// Whether a failed READ is worth trying again. (Only reads: this is a
+// `queries` default, and mutations already default to no retries.)
+//
+// React Query's factory default retries every failure three times with
+// exponential backoff. That is right for a dropped connection and wrong for
+// an answer: a request that reached Postgres and came back refused —  a
+// malformed id, an RLS denial, one of our own P0xxx business errors — will
+// be refused identically three more times. The user waits ~15s watching a
+// loading skeleton for an error the server already had. Reaching a
+// historical order by a hand-edited or stale URL is exactly that case.
+//
+// The test is whether the error carries a PostgREST `code`. Every
+// PostgrestError does (the SQLSTATE, or PostgREST's own PGRSTxxx), and its
+// presence means the round trip completed and the server rendered a verdict.
+// A genuine transport failure — offline, DNS, TLS, a 5xx with no body —
+// throws a bare TypeError/fetch error with no such code, and still gets the
+// full three attempts, which is the case retries exist for.
+function shouldRetryRead(failureCount: number, error: unknown): boolean {
+  if (failureCount >= 3) return false;
+  const code = (error as { code?: unknown } | null | undefined)?.code;
+  return !(typeof code === "string" && code.length > 0);
+}
+
 export function Providers({ children }: { children: ReactNode }) {
   // React Query's factory default (staleTime: 0) means every query is
   // stale the instant it lands — re-mounting an already-fetched query
@@ -18,7 +41,10 @@ export function Providers({ children }: { children: ReactNode }) {
   // itself on every re-visit within this window. See docs/ARCHITECTURE.md
   // § Performance verification for the measurement that caught this.
   const [queryClient] = useState(
-    () => new QueryClient({ defaultOptions: { queries: { staleTime: 30_000 } } }),
+    () =>
+      new QueryClient({
+        defaultOptions: { queries: { staleTime: 30_000, retry: shouldRetryRead } },
+      }),
   );
   const [trpcClient] = useState(() => trpc.createClient(trpcClientConfig()));
 

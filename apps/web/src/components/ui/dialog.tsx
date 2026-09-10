@@ -10,15 +10,27 @@ import { Icon } from "./icon";
 // styled in globals.css, which is where anything that has to target
 // `dialog[open]::backdrop` has to live — a pseudo-element can't be reached
 // from a className here.)
+// Width steps. `md` is the original max-w-lg every existing caller was
+// written against, so it stays the default and nothing they render moves.
+// `lg` exists for the arrangement board's order popup, which mounts the same
+// catalog editor the full-page order screen does — at 32rem its price/pallet/
+// comment row wraps into a column and stops being scannable.
+const SIZE_CLASSES = {
+  md: "max-w-lg",
+  lg: "max-w-3xl",
+} as const;
+
 export function Dialog({
   open,
   onClose,
   title,
+  size = "md",
   children,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
+  size?: keyof typeof SIZE_CLASSES;
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -66,13 +78,28 @@ export function Dialog({
       // `overflow-hidden` is what lets the header's tinted bar meet the
       // dialog's rounded corners cleanly — without it the square-cornered
       // header paints over the radius.
-      className="m-auto w-[calc(100%-2rem)] max-w-lg overflow-hidden rounded-xl border border-border bg-surface p-0 text-ink shadow-overlay backdrop:bg-ink/50"
+      // `max-h-[85dvh]` + a scrolling body, because a dialog is not
+      // guaranteed to be short. Every modal in the app used to be a handful
+      // of fields, so nothing had ever overflowed; the arrangement board's
+      // order popup mounts the whole day's catalogue and ran straight off the
+      // bottom of the viewport with its own save button unreachable and no
+      // way to scroll to it. The cap belongs here rather than in that one
+      // caller — any dialog can grow, and none of them should be able to put
+      // their controls out of reach.
+      //
+      // `open:flex`, never a bare `flex`. A closed <dialog> is hidden by the
+      // UA stylesheet's `dialog:not([open]) { display: none }`, and an author
+      // `display: flex` beats it — so setting it unconditionally paints every
+      // mounted-but-closed dialog into the page. This screen mounts two of
+      // them at all times, and both appeared as stray form fragments below
+      // the board until the variant was added.
+      className={`m-auto max-h-[85dvh] w-[calc(100%-2rem)] flex-col overflow-hidden rounded-xl border border-border bg-surface p-0 text-ink shadow-overlay backdrop:bg-ink/50 open:flex ${SIZE_CLASSES[size]}`}
     >
       {/* A brass hairline along the very top edge — the one place the second
           brand color appears in the chrome. It gives the modal a "front", so
           it reads as a distinct object over the page rather than as another
           card that happens to float, without tinting the whole header. */}
-      <div className="relative flex items-center justify-between gap-4 border-b border-border bg-surface-muted px-6 py-4">
+      <div className="relative flex shrink-0 items-center justify-between gap-4 border-b border-border bg-surface-muted px-6 py-4">
         <span aria-hidden className="absolute inset-x-0 top-0 h-px bg-brass/70" />
         <h2 className="font-display text-xl">{title}</h2>
         <button
@@ -89,7 +116,11 @@ export function Dialog({
           <Icon name="close" className="h-4 w-4" />
         </button>
       </div>
-      <div className="px-6 py-5">{children}</div>
+      {/* The scrolling part. `min-h-0` is what actually lets it shrink: a
+          flex child defaults to `min-height: auto`, which refuses to go below
+          its content's height and would push the overflow back outside the
+          dialog no matter what the cap above says. */}
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">{children}</div>
     </dialog>,
     document.body,
   );

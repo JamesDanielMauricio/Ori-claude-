@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 
 import { AuthCard } from "@/components/auth/auth-card";
 import { FormField, inputClassName } from "@/components/reference-data/form-field";
@@ -64,9 +65,11 @@ export default function RequestPasswordResetPage() {
       )}
 
       <p className="mt-4 text-center text-sm">
-        <a href="/login" className="text-accent hover:underline">
+        {/* <Link>, not <a href> — see login.tsx: a bare anchor full-reloads
+            the SPA to reach a route the router already holds. */}
+        <Link to="/login" className="text-accent hover:underline">
           חזרה להתחברות
-        </a>
+        </Link>
       </p>
     </AuthCard>
   );

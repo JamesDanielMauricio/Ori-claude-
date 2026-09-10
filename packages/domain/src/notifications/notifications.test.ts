@@ -354,4 +354,98 @@ describe("notifications module", () => {
       .single();
     expect(afterRetry?.sent_at).not.toBeNull();
   }, 30000);
+
+  // The multi-recipient fan-out is where "did this row send" stops being a
+  // single boolean. A company with no whatsapp_group_id resolves to one
+  // message PER profile with a phone number (resolve_outbox_dispatch, 0024),
+  // and before migration 0038 a failure on any one of them re-sent the message
+  // to all of them on the next pass — five copies for the reachable
+  // recipients by the time attempt_count hit MAX_ATTEMPTS.
+  it("does not re-send to recipients already delivered to when a sibling target failed", async () => {
+    const template = await createTestNotificationTemplate({ content: "%FIRST_NAME% - %ORDER_DETAILS%" });
+    cleanupFns.push(() => deleteTestNotificationTemplate(template.id));
+
+    // No whatsapp_group_id, so dispatch falls back to per-user messaging.
+    const company = await createTestCompany(`Test Customer ${crypto.randomUUID()}`, "customer");
+    cleanupFns.push(() => deleteTestCompany(company.id));
+
+    // resolve_outbox_dispatch builds the target as '972' + the number with a
+    // leading zero stripped, so these arrive as 972500000001 / 972500000002.
+    const reachable = await createTestProfile({
+      companyId: company.id,
+      role: "customer",
+      displayName: "Reachable User",
+      phoneNumber: "0500000001",
+    });
+    cleanupFns.push(() => deleteTestUser(reachable.userId));
+    const unreachable = await createTestProfile({
+      companyId: company.id,
+      role: "customer",
+      displayName: "Unreachable User",
+      phoneNumber: "0500000002",
+    });
+    cleanupFns.push(() => deleteTestUser(unreachable.userId));
+
+    const admin2 = await createTestBackofficeAdmin();
+    cleanupFns.push(() => deleteTestBackofficeAdmin(admin2));
+    // phase 'closed' deliberately. Nothing in the dispatch path reads the
+    // day's phase — resolve_outbox_dispatch goes outbox -> template -> company
+    // -> profiles and never looks at it — so this fixture has no reason to
+    // compete for the single-open-trading-day partial unique index (0009),
+    // which any real open day in the target database would already hold.
+    const day = await createTestTradingDay({ initiatedByUserId: admin2.userId, phase: "closed" });
+    cleanupFns.push(() => deleteTestTradingDay(day.id));
+
+    const outboxRow = await createTestOutboxRow({
+      tradingDayId: day.id,
+      recipientType: "customer",
+      recipientCompanyId: company.id,
+      templateKey: template.templateKey,
+      payload: { lines: [] },
+    });
+
+    await admin.client
+      .from("notification_settings")
+      .update({ whatsapp_enabled: true, close_arrangement_whatsapp_enabled: true })
+      .eq("id", true);
+
+    // Pass 1: one number is permanently unreachable, the other takes delivery.
+    const firstChannel = new FakeNotificationChannel(["972500000002"]);
+    const firstPass = await drainNotificationOutbox({ client: admin.client, channel: firstChannel });
+    expect(firstPass.failed).toBe(1);
+    expect(firstChannel.sent.map((message) => message.to).sort()).toEqual([
+      "972500000001",
+      "972500000002",
+    ]);
+
+    const { data: afterFirst } = await admin.client
+      .from("notification_outbox")
+      .select("sent_at, attempt_count, sent_targets")
+      .eq("id", outboxRow.id)
+      .single();
+    // The row stays open for retry, but the success is now durably recorded.
+    expect(afterFirst?.sent_at).toBeNull();
+    expect(afterFirst?.attempt_count).toBe(1);
+    expect(afterFirst?.sent_targets).toEqual(["972500000001"]);
+
+    // Pass 2: the same number still fails. The reachable recipient must NOT be
+    // contacted again — this assertion is the regression itself.
+    const secondChannel = new FakeNotificationChannel(["972500000002"]);
+    await drainNotificationOutbox({ client: admin.client, channel: secondChannel });
+    expect(secondChannel.sent.map((message) => message.to)).toEqual(["972500000002"]);
+
+    // Pass 3: the number recovers. The row finishes without a duplicate.
+    const thirdChannel = new FakeNotificationChannel();
+    const thirdPass = await drainNotificationOutbox({ client: admin.client, channel: thirdChannel });
+    expect(thirdPass.sent).toBe(1);
+    expect(thirdChannel.sent.map((message) => message.to)).toEqual(["972500000002"]);
+
+    const { data: afterThird } = await admin.client
+      .from("notification_outbox")
+      .select("sent_at, sent_targets")
+      .eq("id", outboxRow.id)
+      .single();
+    expect(afterThird?.sent_at).not.toBeNull();
+    expect((afterThird?.sent_targets ?? []).sort()).toEqual(["972500000001", "972500000002"]);
+  }, 30000);
 });

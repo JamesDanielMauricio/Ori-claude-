@@ -37,7 +37,9 @@ test.describe("Backoffice — Customers", () => {
     await page.goto("/backoffice/customers");
 
     const customerName = `E2E Customer ${randomUUID()}`;
-    await page.getByRole("button", { name: "לקוח חדש" }).click();
+    // Two buttons carry this name by design — the one above the list and the
+    // empty detail pane's call-to-action. `.first()` is the list-pane one.
+    await page.getByRole("button", { name: "לקוח חדש" }).first().click();
     await page.getByLabel("שם").fill(customerName);
     await page.getByRole("button", { name: "שמור" }).click();
 
@@ -53,7 +55,11 @@ test.describe("Backoffice — Customers", () => {
 
     await page.getByRole("button", { name: "ערוך" }).click();
     await page.getByLabel("שם").fill(`${customerName} (edited)`);
-    await page.getByText("מציג מחירים בהתראות WhatsApp").click();
+    // The label reads "מציג מחירים בהתראות" on its own line now, with
+    // WhatsApp named only in the hint underneath it ("...הודעות ה-WhatsApp
+    // ללקוח זה..."), so the old single-line string matches no node at all.
+    // The <label> wraps the checkbox, so clicking its text still toggles it.
+    await page.getByText("מציג מחירים בהתראות").click();
     await page.getByRole("button", { name: "שמור" }).click();
 
     await expect(page.getByRole("button", { name: `${customerName} (edited)` })).toBeVisible();

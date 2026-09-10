@@ -15,6 +15,7 @@ import { FormSection, StatusPill } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/components/ui/toast";
+import { hasChanges } from "@/lib/has-changes";
 import { createClient } from "@/lib/supabase/client";
 import { trpc } from "@/lib/trpc-client";
 
@@ -196,10 +197,22 @@ export default function UsersPage() {
     setEditing(false);
   }
 
+  // The values with no unsaved edits — both what "בטל שינויים" restores and
+  // what the live form is compared against. See customers.tsx for why these
+  // are one expression rather than two.
+  //
+  // Null while the user's blacklist is still loading (this screen has no
+  // "new record" mode — accounts are provisioned by the bulk import, see
+  // this file's header — so there is no blank-form case, only a
+  // not-loaded-yet one). With no baseline there is nothing to compare
+  // against and discard would restore nothing, so the form reads as changed
+  // and both buttons stay live: the safe direction (see hasChanges).
+  const baselineForm =
+    selected && blockedQuery.data ? toFormState(selected, blockedQuery.data) : null;
+  const dirty = baselineForm === null || hasChanges(form, baselineForm);
+
   function handleDiscard() {
-    if (selected && blockedQuery.data) {
-      setForm(toFormState(selected, blockedQuery.data));
-    }
+    if (baselineForm) setForm(baselineForm);
     setEditing(false);
   }
 
@@ -352,6 +365,7 @@ export default function UsersPage() {
               <ActionBar
                 editing={editing}
                 saving={saving}
+                dirty={dirty}
                 onEdit={() => setEditing(true)}
                 onDiscard={handleDiscard}
                 onSave={handleSave}

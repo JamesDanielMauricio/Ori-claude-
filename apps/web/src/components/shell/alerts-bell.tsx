@@ -1,9 +1,11 @@
+import { REALTIME_CHANNEL_STATES } from "@supabase/supabase-js";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { Dialog } from "@/components/ui/dialog";
 import { Icon } from "@/components/ui/icon";
+import { useAuth } from "@/lib/auth-context";
 import { createClient } from "@/lib/supabase/client";
 
 interface AlertRow {
@@ -32,6 +34,7 @@ export function AlertsBell() {
   const supabase = createClient();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [open, setOpen] = useState(false);
 
   const alertsQuery = useQuery({
@@ -48,11 +51,70 @@ export function AlertsBell() {
       return data as unknown as AlertRow[];
     },
     // Alerts are typically created by a backoffice action (e.g. Close
-    // Arrangement) the signed-in user isn't the one triggering — poll
-    // rather than relying purely on an action in this same tab to
-    // invalidate the query.
+    // Arrangement) the signed-in user isn't the one triggering — poll as a
+    // fallback for a dropped websocket, alongside the realtime push below
+    // which is what normally delivers these within seconds instead of up
+    // to 60s later.
     refetchInterval: 60000,
   });
+
+  // Push-triggered refresh, same trigger-only shape as
+  // order-lines-editor.tsx (the payload is never read, only used to
+  // re-run this RLS-governed query). `alerts` is in the realtime
+  // publication (packages/db/migrations/0041_expand-realtime-publication.sql).
+  // Unlike that precedent, this filters server-side to the signed-in
+  // user's own rows — alerts is a tenant-wide table every signed-in user's
+  // bell would otherwise wake up for on every notification anyone gets.
+  useEffect(() => {
+    if (!user) return;
+    const userId = user.id;
+
+    // supabase.channel(topic) returns the SAME object for a topic already
+    // registered on this client rather than a new one (RealtimeClient's own
+    // doc comment: "If a channel with the same topic already exists it will
+    // be returned instead of creating a duplicate connection") — and this
+    // component is mounted TWICE at once by RoleShell (one copy in the
+    // mobile header, one in the desktop sidebar; both always in the DOM,
+    // only one visible at a time via CSS — see that file's own comment).
+    // Without this guard, the second mount's effect calls `.on()` on a
+    // channel the first mount already `.subscribe()`d, which throws
+    // ("cannot add `postgres_changes` callbacks... after `subscribe()`") —
+    // and since nothing in this app has an error boundary, that uncaught
+    // effect error unmounts the entire page, not just this component.
+    // Skipping the second `.on()`/`.subscribe()` is safe: only one
+    // listener needs to fire, since every mount invalidates the same
+    // shared queryClient key regardless of which channel object triggered
+    // it.
+    const channel = supabase.channel(`alerts-own-${userId}`);
+    const alreadySubscribed = channel.state !== REALTIME_CHANNEL_STATES.closed;
+
+    if (!alreadySubscribed) {
+      channel
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "alerts",
+            filter: `intended_for_user_id=eq.${userId}`,
+          },
+          () => {
+            void queryClient.invalidateQueries({ queryKey: ["alerts", "own"] });
+          },
+        )
+        .subscribe();
+    }
+
+    return () => {
+      // Only the mount that actually subscribed tears it down — the other
+      // mount's cleanup would otherwise remove a channel the first one's
+      // cleanup already removed, which is harmless but redundant.
+      if (!alreadySubscribed) {
+        void supabase.removeChannel(channel);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   const unreadCount = alertsQuery.data?.filter((alert) => !alert.read).length ?? 0;
 
@@ -66,10 +128,19 @@ export function AlertsBell() {
     setOpen(false);
     if (alert.alert_types) {
       const { app_screen, url_parameter } = alert.alert_types;
+      // `app_screen` is admin-configurable data (alert_types is a
+      // backoffice-writable bank, migration 0023), so it is not guaranteed to
+      // be the absolute path the seeded rows use. React Router treats a
+      // navigate() target with no leading slash as RELATIVE to the current
+      // route, so a row saved as "customer/history" would resolve against
+      // whatever screen the bell happened to be opened from and land
+      // somewhere that doesn't exist. Normalizing here keeps the alert
+      // pointing at one fixed screen regardless of where it was clicked.
+      const screen = app_screen.startsWith("/") ? app_screen : `/${app_screen}`;
       const target =
         url_parameter && alert.display_record_id
-          ? `${app_screen}?${url_parameter}=${encodeURIComponent(alert.display_record_id)}`
-          : app_screen;
+          ? `${screen}?${url_parameter}=${encodeURIComponent(alert.display_record_id)}`
+          : screen;
       navigate(target);
     }
   }

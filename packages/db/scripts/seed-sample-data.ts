@@ -261,16 +261,27 @@ async function main() {
   }
   summary.familyIds = familyIds;
 
-  const cabbage = await saveProduct(client, { familyId: familyIds["כרוב"], name: "כרוב לבן", price: 8 });
+  // Indexing a Record<string, string> yields `string | undefined` under
+  // noUncheckedIndexedAccess, and passing that straight into saveProduct was
+  // failing `pnpm typecheck` for the whole repo. Reading through this helper
+  // both satisfies the compiler and turns a mistyped family name into an
+  // immediate, named error instead of an insert with an undefined family id.
+  function familyId(name: string): string {
+    const id = familyIds[name];
+    if (!id) throw new Error(`seed bug: no product family was created for "${name}"`);
+    return id;
+  }
+
+  const cabbage = await saveProduct(client, { familyId: familyId("כרוב"), name: "כרוב לבן", price: 8 });
   const tomatoTamar = await saveProduct(client, {
-    familyId: familyIds["עגבניות"],
+    familyId: familyId("עגבניות"),
     name: "עגבנית תמר",
     price: 12,
     customerPalletCaps: [{ customerCompanyId: CUSTOMER_01, palletCap: 6 }],
   });
-  const tomatoCluster = await saveProduct(client, { familyId: familyIds["עגבניות"], name: "עגבנית אשכולות", price: 15 });
+  const tomatoCluster = await saveProduct(client, { familyId: familyId("עגבניות"), name: "עגבנית אשכולות", price: 15 });
   const melon = await saveProduct(client, {
-    familyId: familyIds["מלון"],
+    familyId: familyId("מלון"),
     name: "מלון גליה",
     priceRangeFrom: 10,
     priceRangeTo: 14,

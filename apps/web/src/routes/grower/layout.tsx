@@ -6,6 +6,7 @@ import { RoleShell } from "@/components/shell/role-shell";
 
 const GROWER_NAV = [
   { href: "/grower/picks", label: "עדכון יומי" },
+  { href: "/grower/history", label: "היסטוריית ליקוט" },
   { href: "/grower/legacy", label: "מצב מוצרים (ישן)" },
 ];
 
@@ -13,7 +14,7 @@ const GROWER_NAV = [
 // app-routes.tsx — see lib/require-role.tsx.
 export default function GrowerLayout() {
   return (
-    <RoleShell navItems={GROWER_NAV} primaryAction={{ href: "/grower/picks", label: "עדכון" }}>
+    <RoleShell navItems={GROWER_NAV}>
       {/* Inside the shell, so switching screens keeps the sidebar mounted. */}
       <Suspense fallback={null}>
         <PageTransition>

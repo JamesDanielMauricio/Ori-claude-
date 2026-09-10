@@ -7,8 +7,10 @@ import { OrderLinesEditor } from "@/components/customer/order-lines-editor";
 import { OrderProductList, type OrderFamilyRow } from "@/components/customer/order-product-list";
 import { Icon } from "@/components/ui/icon";
 import { PageHeader } from "@/components/ui/page-header";
+import { QueryError } from "@/components/ui/query-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import { createClient } from "@/lib/supabase/client";
+import { useOpenTradingDay, type TradingDayPhase } from "@/lib/trading-day-view";
 
 // Customer-facing catalog browsing + order placement (PRD:
 // place-edit-today-s-order.md, order-form.md). The actual catalog/draft/
@@ -17,10 +19,9 @@ import { createClient } from "@/lib/supabase/client";
 // — see that component's header comment.
 //
 // An `?orderId=` search param (set by history.tsx's row links) shows a
-// specific past order's content here instead of today's open one — live
-// and editable if its trading day hasn't closed yet (submit_order allows
-// re-submitting up to that point, same as the default view), read-only
-// once it has.
+// specific past order's content here instead of today's open one, under the
+// same one rule both views use: editable while the shop is open, read-only
+// otherwise (see isOrderEditable).
 export default function CustomerOrderPage() {
   const [searchParams] = useSearchParams();
   const orderId = searchParams.get("orderId");
@@ -31,29 +32,62 @@ export default function CustomerOrderPage() {
   return <TodayOrderView />;
 }
 
-function TodayOrderView() {
-  const supabase = createClient();
+// The one rule that decides whether a customer may change an order: the
+// trading day's shop is open, or it isn't. There is deliberately no second,
+// per-session "ערוך" gate on top of it — see OrderLinesEditor's `readOnly`.
+//
+// Deliberately stricter than submit_order, which only refuses once the day
+// reaches phase 'closed' (P0007, packages/db/migrations/0042_customer-order-
+// cap.sql). The two phases in between are ones the server would still accept
+// a write in, but the business doesn't:
+//
+//   initiated   — the day exists but open_shop hasn't run yet, so this
+//                 customer has no daily_orders header for it at all and a
+//                 save would fail with P0002 regardless. Nothing to edit.
+//   shop_closed — ordering is over. close_shop's own contract says it
+//                 ("customers can no longer order; growers may still edit
+//                 picks" — 0011_lifecycle-functions.sql), and the
+//                 distributor is by then building the day's arrangement out
+//                 of exactly these numbers, so a customer moving them
+//                 underneath is the thing closing the shop exists to stop.
+//
+// This being stricter than the database is fine in this direction, and only
+// this direction: it's a UI declining to offer a write, not a security
+// boundary. Anything that genuinely must not happen — another company's
+// order, a closed day, a quantity over the customer's cap — is still refused
+// by the RPC itself, which is the only place a refusal counts.
+function isOrderEditable(phase: TradingDayPhase): boolean {
+  return phase === "shop_open";
+}
 
-  const openDayQuery = useQuery({
-    queryKey: ["customer", "open-trading-day"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("trading_days")
-        .select("id, trade_date")
-        .neq("phase", "closed")
-        .maybeSingle();
-      if (error) throw error;
-      return data as { id: string; trade_date: string } | null;
-    },
-  });
-  const dayId = openDayQuery.data?.id;
+// Says which of those states the reader is in, since the screen otherwise
+// changes only by NOT having a save button — an absence is a poor way to
+// learn that the shop closed twenty minutes ago.
+const PHASE_SUBTITLE: Record<TradingDayPhase, string> = {
+  initiated: "יום המסחר נפתח אך החנות עדיין סגורה — ניתן יהיה להזמין עם פתיחתה.",
+  shop_open: "עדכן כמויות ולחץ שמירה — ההזמנה נשלחת רק לאחר אישור הסיכום.",
+  shop_closed: "החנות נסגרה להזמנות — תצוגה בלבד.",
+  // Unreachable from either view below (both hand a closed day to
+  // ClosedOrderView, which writes its own richer subtitle including the
+  // submission timestamp) — present so this map stays exhaustive over the
+  // enum rather than needing a fallback branch at each use.
+  closed: "יום המסחר הסתיים — תצוגה בלבד.",
+};
+
+function TodayOrderView() {
+  // The shared "live open trading day" query (lib/trading-day-view.tsx),
+  // not a private copy of it: it selects `phase`, which this screen now
+  // needs, and it already polls + subscribes to trading_days over realtime.
+  // That last part is what keeps the rule honest — when the distributor
+  // closes the shop, this page drops to read-only within seconds instead of
+  // staying editable until the customer happens to reload.
+  const openDayQuery = useOpenTradingDay();
+  const day = openDayQuery.data ?? null;
 
   const tradeDateLabel = useMemo(() => {
-    if (!openDayQuery.data) return "";
-    return new Intl.DateTimeFormat("he-IL", { dateStyle: "long" }).format(
-      new Date(openDayQuery.data.trade_date),
-    );
-  }, [openDayQuery.data]);
+    if (!day) return "";
+    return new Intl.DateTimeFormat("he-IL", { dateStyle: "long" }).format(new Date(day.trade_date));
+  }, [day]);
 
   if (openDayQuery.isLoading) {
     return (
@@ -65,17 +99,31 @@ function TodayOrderView() {
     );
   }
 
-  if (!dayId) {
+  // "There is no open trading day right now" is a claim about the business,
+  // and a failed request cannot support it — a customer who reads that when
+  // the shop is in fact open simply doesn't order.
+  if (openDayQuery.isError) {
+    return (
+      <QueryError
+        what="יום המסחר"
+        onRetry={() => void openDayQuery.refetch()}
+        retrying={openDayQuery.isFetching}
+      />
+    );
+  }
+
+  if (!day) {
     return <p className="text-sm text-ink-muted">אין יום מסחר פתוח כרגע.</p>;
   }
 
   return (
     <div className="flex flex-col gap-2">
-      <PageHeader
-        title={`הזמנה — ${tradeDateLabel}`}
-        subtitle="עדכן כמויות ולחץ שמירה — ההזמנה נשלחת רק לאחר אישור הסיכום."
+      <PageHeader title={`הזמנה — ${tradeDateLabel}`} subtitle={PHASE_SUBTITLE[day.phase]} />
+      <OrderLinesEditor
+        tradingDayId={day.id}
+        tradeDate={day.trade_date}
+        readOnly={!isOrderEditable(day.phase)}
       />
-      <OrderLinesEditor tradingDayId={dayId} tradeDate={openDayQuery.data!.trade_date} />
     </div>
   );
 }
@@ -85,7 +133,7 @@ interface SpecificOrder {
   status: "open" | "submitted";
   submitted_at: string | null;
   trading_day_id: string;
-  trading_days: { trade_date: string; phase: "initiated" | "shop_open" | "shop_closed" | "closed" } | null;
+  trading_days: { trade_date: string; phase: TradingDayPhase } | null;
 }
 
 function SpecificOrderView({ orderId }: { orderId: string }) {
@@ -114,6 +162,20 @@ function SpecificOrderView({ orderId }: { orderId: string }) {
     );
   }
 
+  // A failed request is not a missing order. Keeping these apart also keeps
+  // the "not found" message below honest: it deliberately does not distinguish
+  // "doesn't exist" from "not yours", and folding transport failures into it
+  // too would make it mean nothing at all.
+  if (orderQuery.isError) {
+    return (
+      <QueryError
+        what="ההזמנה"
+        onRetry={() => void orderQuery.refetch()}
+        retrying={orderQuery.isFetching}
+      />
+    );
+  }
+
   const order = orderQuery.data;
   // Either a bad id, or RLS (daily_orders_select_own) filtered out a row
   // that isn't this customer's own — same "not found" message either way,
@@ -123,18 +185,30 @@ function SpecificOrderView({ orderId }: { orderId: string }) {
     return <p className="text-sm text-ink-muted">ההזמנה לא נמצאה.</p>;
   }
 
-  // Trading day not closed yet: reuse the exact same live, editable editor
-  // the default (no orderId) view renders — submit_order allows
-  // re-submitting an already-"submitted" order up until the day closes, so
-  // "sent" orders are still editable here too, not just "new" drafts.
+  // Trading day not closed yet: reuse the exact same editor the default (no
+  // orderId) view renders, under the same isOrderEditable rule — an order
+  // reached from the history list is not a different kind of object, so it
+  // must not obey a different rule about when it can be changed. Note that
+  // "already submitted" is not one of those rules: submit_order allows
+  // re-submitting while the shop is open, so a sent order stays editable
+  // here too, not just a new draft.
+  //
+  // The single-open-day index (trading_days_single_open_idx) means a
+  // non-closed day IS the current day, so no extra "is this today's day?"
+  // check is needed on top of the phase.
   if (order.trading_days.phase !== "closed") {
+    const { phase, trade_date } = order.trading_days;
     return (
       <div className="flex flex-col gap-2">
         <PageHeader
-          title={`הזמנה — ${new Intl.DateTimeFormat("he-IL", { dateStyle: "long" }).format(new Date(order.trading_days.trade_date))}`}
-          subtitle="עדכן כמויות ולחץ שמירה — ההזמנה נשלחת רק לאחר אישור הסיכום."
+          title={`הזמנה — ${new Intl.DateTimeFormat("he-IL", { dateStyle: "long" }).format(new Date(trade_date))}`}
+          subtitle={PHASE_SUBTITLE[phase]}
         />
-        <OrderLinesEditor tradingDayId={order.trading_day_id} tradeDate={order.trading_days.trade_date} />
+        <OrderLinesEditor
+          tradingDayId={order.trading_day_id}
+          tradeDate={trade_date}
+          readOnly={!isOrderEditable(phase)}
+        />
       </div>
     );
   }

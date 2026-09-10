@@ -16,6 +16,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { FormSection, StatusPill } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/components/ui/toast";
+import { hasChanges } from "@/lib/has-changes";
 import { createClient } from "@/lib/supabase/client";
 
 type PackType = "pallets" | "crates";
@@ -33,6 +34,7 @@ interface ProductVariety {
   no_overbooking: string;
   highlight_price_fluctuations: boolean;
   is_seasonal_available: boolean;
+  number_of_orders_per_customer: number | null;
   version: number;
 }
 
@@ -53,6 +55,10 @@ interface FormState {
   noOverbooking: string;
   highlightPriceFluctuations: boolean;
   isSeasonalAvailable: boolean;
+  // Empty string = no variety-level cap (see product-variety.ts's schema
+  // comment). Kept as a string here for the same reason every other numeric
+  // form field is: an <input> can't hold `null`.
+  numberOfOrdersPerCustomer: string;
   version: number | null;
   customerPalletCaps: PalletCap[];
 }
@@ -70,6 +76,7 @@ function blankForm(defaultFamilyId: string): FormState {
     noOverbooking: "0",
     highlightPriceFluctuations: false,
     isSeasonalAvailable: true,
+    numberOfOrdersPerCustomer: "",
     version: null,
     customerPalletCaps: [],
   };
@@ -88,6 +95,8 @@ function toFormState(row: ProductVariety, caps: PalletCap[]): FormState {
     noOverbooking: row.no_overbooking,
     highlightPriceFluctuations: row.highlight_price_fluctuations,
     isSeasonalAvailable: row.is_seasonal_available,
+    numberOfOrdersPerCustomer:
+      row.number_of_orders_per_customer == null ? "" : String(row.number_of_orders_per_customer),
     version: row.version,
     customerPalletCaps: caps,
   };
@@ -128,7 +137,7 @@ export default function ProductsPage() {
       const { data, error } = await supabase
         .from("product_varieties")
         .select(
-          "id, family_id, name, sizes, pack_type, price, price_range_from, price_range_to, price_type, no_overbooking, highlight_price_fluctuations, is_seasonal_available, version, product_families(name)",
+          "id, family_id, name, sizes, pack_type, price, price_range_from, price_range_to, price_type, no_overbooking, highlight_price_fluctuations, is_seasonal_available, number_of_orders_per_customer, version, product_families(name)",
         )
         .order("name");
       if (error) throw error;
@@ -203,6 +212,8 @@ export default function ProductsPage() {
         noOverbooking: Number(form.noOverbooking || "0"),
         highlightPriceFluctuations: form.highlightPriceFluctuations,
         isSeasonalAvailable: form.isSeasonalAvailable,
+        numberOfOrdersPerCustomer:
+          form.numberOfOrdersPerCustomer === "" ? null : Number(form.numberOfOrdersPerCustomer),
         expectedVersion: form.version,
         customerPalletCaps: form.customerPalletCaps,
       });
@@ -265,12 +276,23 @@ export default function ProductsPage() {
     setEditing(true);
   }
 
+  // The values with no unsaved edits — both what "בטל שינויים" restores and
+  // what the live form is compared against. See customers.tsx for why these
+  // are one expression rather than two.
+  //
+  // `version` rides along inside FormState but can never differ between the
+  // two sides: nothing in this form edits it, and a save that bumps it also
+  // re-seeds the form from the returned row. It is the optimistic-locking
+  // token (R7), not a field, so it neither can nor should make the form read
+  // as changed.
+  const baselineForm =
+    selected && capsQuery.data
+      ? toFormState(selected, capsQuery.data)
+      : blankForm(familiesQuery.data?.[0]?.id ?? "");
+  const dirty = hasChanges(form, baselineForm);
+
   function handleDiscard() {
-    setForm(
-      selected && capsQuery.data
-        ? toFormState(selected, capsQuery.data)
-        : blankForm(familiesQuery.data?.[0]?.id ?? ""),
-    );
+    setForm(baselineForm);
     setEditing(false);
   }
 
@@ -514,12 +536,39 @@ export default function ProductsPage() {
                   <input
                     id="product-overbooking"
                     type="number"
-                    step="0.01"
+                    step="1"
+                    min={0}
                     disabled={!editing}
                     className={`${inputClassName} w-full`}
                     value={form.noOverbooking}
                     onChange={(event) =>
                       setForm((current) => ({ ...current, noOverbooking: event.target.value }))
+                    }
+                  />
+                </FormField>
+
+                {/* The customer order screen's dropdown (order-product-list.tsx)
+                    reads this as its own ceiling — never applied to a backoffice
+                    on-behalf-of edit, where staff may deliberately exceed it. Empty
+                    means uncapped: the dropdown is then bounded by remaining stock
+                    alone. See product-variety.ts's schema comment for how this
+                    differs from the per-customer caps below (one default for every
+                    customer vs. an override for one). */}
+                <FormField
+                  label="כמות מקסימלית להזמנה ללקוח (Number of Orders per Customer)"
+                  htmlFor="product-order-cap"
+                >
+                  <input
+                    id="product-order-cap"
+                    type="number"
+                    step="1"
+                    min={0}
+                    placeholder="ללא הגבלה"
+                    disabled={!editing}
+                    className={`${inputClassName} w-full`}
+                    value={form.numberOfOrdersPerCustomer}
+                    onChange={(event) =>
+                      setForm((current) => ({ ...current, numberOfOrdersPerCustomer: event.target.value }))
                     }
                   />
                 </FormField>
@@ -601,6 +650,7 @@ export default function ProductsPage() {
               <ActionBar
                 editing={editing}
                 saving={saving}
+                dirty={dirty}
                 canDelete={!!selectedId}
                 onEdit={() => setEditing(true)}
                 onDiscard={handleDiscard}

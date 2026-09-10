@@ -7,7 +7,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./env": "./src/env.ts",
-    "./roles": "./src/roles.ts"
+    "./roles": "./src/roles.ts",
+    "./dates": "./src/dates.ts"
   },
   "scripts": {
     "lint": "eslint .",

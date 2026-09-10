@@ -4,22 +4,23 @@ import {
   toInitiateBusinessDayRpcArgs,
   toOpenShopRpcArgs,
 } from "@ori/domain/lifecycle-engine";
+import { todayIsoDate } from "@ori/shared/dates";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
+import { Icon } from "@/components/ui/icon";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { createClient } from "@/lib/supabase/client";
+import {
+  OPEN_TRADING_DAY_QUERY_KEY,
+  useOpenTradingDay,
+  useSelectedTradingDay,
+} from "@/lib/trading-day-view";
 
-type Phase = "initiated" | "shop_open" | "shop_closed" | "closed";
-
-interface OpenDay {
-  id: string;
-  trade_date: string;
-  phase: Phase;
-}
+import { TradingDayCalendarPicker } from "./trading-day-calendar-picker";
 
 type ConfirmAction = "initiate" | "openShop" | "closeShop" | "closeDay" | null;
 
@@ -47,6 +48,16 @@ type ConfirmAction = "initiate" | "openShop" | "closeShop" | "closeDay" | null;
 // exists as a bulk/repair path; it is deliberately no longer wired to a
 // control here, because it is a data refresh and this panel is the day's
 // lifecycle (open day → open shop → close shop → close day).
+//
+// The date shown here is a picker (lib/trading-day-view.tsx): choosing a
+// past date pins every date-aware backoffice screen — Shop, Arrangement,
+// Grower Inventory Status, Customer Order Status — to that day's own data
+// instead of the live one, read-only, until "חזרה ליום הפעיל" clears it. The
+// lifecycle buttons below are deliberately UNAFFECTED by that pin — they
+// always act on the actual open day (useOpenTradingDay, not the picked
+// date), because there is only ever one non-closed trading day at a time
+// (trading_days_single_open_idx) and "open the shop" has no meaning applied
+// to a day someone is merely looking back at.
 export function BusinessDayPanel() {
   const supabase = createClient();
   const queryClient = useQueryClient();
@@ -54,21 +65,12 @@ export function BusinessDayPanel() {
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null);
   const [canSeePrices, setCanSeePrices] = useState(true);
 
-  const openDayQuery = useQuery({
-    queryKey: ["business-day-panel", "open-trading-day"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("trading_days")
-        .select("id, trade_date, phase")
-        .neq("phase", "closed")
-        .maybeSingle();
-      if (error) throw error;
-      return data as OpenDay | null;
-    },
-    refetchInterval: 60000,
-  });
+  const openDayQuery = useOpenTradingDay();
   const day = openDayQuery.data ?? null;
   const phase = day?.phase;
+
+  const { selectedDate, setSelectedDate } = useSelectedTradingDay();
+  const isViewingPinnedDate = selectedDate !== null;
 
   // Read-only display of the flag once the shop is already open — this
   // panel doesn't add a way to change it after the fact; canSeePrices is
@@ -89,13 +91,25 @@ export function BusinessDayPanel() {
 
   function invalidate() {
     void queryClient.invalidateQueries({ queryKey: ["business-day-panel"] });
+    // The shared "live open day" entry (lib/trading-day-view.tsx) — every
+    // date-aware screen currently following live reads this same cache
+    // entry, so refetching it here is what shows them the new phase without
+    // each needing its own invalidation call.
+    void queryClient.invalidateQueries({ queryKey: OPEN_TRADING_DAY_QUERY_KEY });
     // The Shop screen's own status/metrics queries key off the same data.
     void queryClient.invalidateQueries({ queryKey: ["shop-panel"] });
   }
 
   const initiateMutation = useMutation({
     mutationFn: async () => {
-      const tradeDate = new Date().toISOString().slice(0, 10);
+      // The local calendar date, never a UTC-derived one. `toISOString()
+      // .slice(0, 10)` converts to UTC first, so every local moment between
+      // midnight and the offset (UTC+2/+3 here) reports *yesterday* — opening
+      // the day at 01:00 would stamp it with the previous date, and nothing
+      // downstream rejects that: trading_days has no unique constraint on
+      // trade_date, only the partial "one non-closed day" index. See
+      // @ori/shared/dates.
+      const tradeDate = todayIsoDate();
       const input = initiateBusinessDayInputSchema.parse({ tradeDate });
       const { error } = await supabase.rpc(
         "initiate_business_day",
@@ -205,13 +219,30 @@ export function BusinessDayPanel() {
 
   return (
     <div className="flex flex-col gap-2 border-b border-border bg-surface-muted px-3 py-3">
-      <p className="px-1 text-xs font-semibold text-ink-muted">
-        {day
-          ? new Intl.DateTimeFormat("he-IL", { dateStyle: "short" }).format(
-              new Date(day.trade_date),
-            )
-          : "אין יום מסחר פתוח"}
-      </p>
+      {/* The day this whole backoffice area is showing. Picking a date here
+          pins Shop, Arrangement, Grower Inventory Status and Customer Order
+          Status to that day's own data — read-only, since only the live day
+          below can ever be edited — until "חזרה ליום הפעיל" clears it. See
+          lib/trading-day-view.tsx for why that pin is deliberately kept
+          separate from the lifecycle actions beneath it. */}
+      <TradingDayCalendarPicker
+        selectedDate={selectedDate}
+        liveDate={day?.trade_date ?? null}
+        onSelect={setSelectedDate}
+      />
+
+      {isViewingPinnedDate && (
+        <button
+          type="button"
+          onClick={() => setSelectedDate(null)}
+          className="flex items-center gap-1 self-start px-1 text-[11px] font-semibold text-accent transition-colors hover:text-accent-hover"
+        >
+          <Icon name="chevronStart" className="h-3 w-3" />
+          חזרה ליום הפעיל
+          {day &&
+            ` (${new Intl.DateTimeFormat("he-IL", { dateStyle: "short" }).format(new Date(day.trade_date))})`}
+        </button>
+      )}
 
       {phase !== undefined && (
         <Button
@@ -305,7 +336,6 @@ export function BusinessDayPanel() {
           onConfirm={() => closeDayMutation.mutate()}
         />
       </Dialog>
-
     </div>
   );
 }

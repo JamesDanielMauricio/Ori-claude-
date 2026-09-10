@@ -10,7 +10,8 @@ import { z } from "zod";
 export const createArrangementRecordInputSchema = z.object({
   dailyPickProductId: z.string().uuid(),
   dailyOrderProductId: z.string().uuid(),
-  quantityPallets: z.number().positive(),
+  // Pallets are always whole units — never a fractional pallet.
+  quantityPallets: z.number().int().positive(),
   price: z.number().nonnegative().nullable().optional(),
   priceType: z.string().nullable().optional(),
 });
@@ -28,7 +29,7 @@ export function toCreateArrangementRecordRpcArgs(input: CreateArrangementRecordI
 
 export const updateArrangementRecordInputSchema = z.object({
   id: z.string().uuid(),
-  quantityPallets: z.number().positive(),
+  quantityPallets: z.number().int().positive(),
   price: z.number().nonnegative().nullable().optional(),
   priceType: z.string().nullable().optional(),
 });
@@ -38,6 +39,37 @@ export function toUpdateArrangementRecordRpcArgs(input: UpdateArrangementRecordI
   return {
     p_id: input.id,
     p_quantity_pallets: input.quantityPallets,
+    p_price: input.price ?? null,
+    p_price_type: input.priceType ?? null,
+  };
+}
+
+// The arrangement board's ✓ button (migration 0040). One idempotent
+// "this customer gets N pallets off this grower's line", rather than the
+// client choosing between create and update — it cannot know whether a
+// record exists without a round trip, and two presses would race.
+//
+// There is no `dailyOrderProductId` here on purpose: the customer may not
+// have an order line for this variety at all, and creating one at zero
+// pallets is part of what the function does.
+export const arrangeToCustomerInputSchema = z.object({
+  dailyPickProductId: z.string().uuid(),
+  customerCompanyId: z.string().uuid(),
+  quantityPallets: z.number().int().positive(),
+  price: z.number().nonnegative().nullable().optional(),
+  priceType: z.string().nullable().optional(),
+});
+export type ArrangeToCustomerInput = z.infer<typeof arrangeToCustomerInputSchema>;
+
+export function toArrangeToCustomerRpcArgs(input: ArrangeToCustomerInput) {
+  return {
+    p_daily_pick_product_id: input.dailyPickProductId,
+    p_customer_company_id: input.customerCompanyId,
+    p_quantity_pallets: input.quantityPallets,
+    // Null means "leave whatever is already on the record" here, not
+    // "clear it" — arrange_to_customer COALESCEs these onto the existing
+    // row precisely so a quantity press can't blank a price. That is the
+    // opposite of update_arrangement_record above, which assigns them.
     p_price: input.price ?? null,
     p_price_type: input.priceType ?? null,
   };

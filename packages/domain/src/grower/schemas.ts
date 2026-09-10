@@ -51,6 +51,41 @@ export function toUpdatePickProductDetailsRpcArgs(input: UpdatePickProductDetail
   };
 }
 
+// One line's full desired state, not a diff. save_pick_lines (migration 0039)
+// compares each line against the stored row itself rather than trusting the
+// caller to have worked out what changed — which is what keeps the
+// pick_updated notification firing on a real quantity change and not on a
+// no-op save.
+export const pickLineInputSchema = z.object({
+  dailyPickProductId: z.string().uuid(),
+  palletsPicked: z.number().nonnegative(),
+  pickupTime: timeOfDay,
+  comment: z.string().nullable(),
+});
+export type PickLineInput = z.infer<typeof pickLineInputSchema>;
+
+// The whole editor's save, as ONE call. Replaces the previous fan-out of one
+// update_pick_product_pallets / update_pick_product_details RPC per changed
+// line, where each was its own transaction and any one could fail while the
+// rest committed — see 0039's header for the failure this closes.
+export const savePickLinesInputSchema = z.object({
+  dailyPickId: z.string().uuid(),
+  lines: z.array(pickLineInputSchema),
+});
+export type SavePickLinesInput = z.infer<typeof savePickLinesInputSchema>;
+
+export function toSavePickLinesRpcArgs(input: SavePickLinesInput) {
+  return {
+    p_daily_pick_id: input.dailyPickId,
+    p_lines: input.lines.map((line) => ({
+      dailyPickProductId: line.dailyPickProductId,
+      palletsPicked: line.palletsPicked,
+      pickupTime: line.pickupTime,
+      comment: line.comment,
+    })),
+  };
+}
+
 export const sendPickReminderInputSchema = z.object({
   dailyPickId: z.string().uuid(),
 });
@@ -68,6 +103,10 @@ export const GROWER_ERROR_CODES = {
   NOT_FOUND: "P0002",
   /** current_role() <> 'backoffice', or a grower acting on a line that isn't theirs. */
   FORBIDDEN: "42501",
-  /** update_pick_product_details or send_pick_reminder called against an already-closed pick. */
+  /** update_pick_product_details, save_pick_lines or send_pick_reminder called against an already-closed pick. */
   INVALID_STATE: "P0007",
+  /** save_pick_lines: a quantity below what's already committed in arrangement_records for that line. */
+  CONFLICT: "P0006",
+  /** save_pick_lines: a negative or missing pallet count. */
+  INVALID_INPUT: "P0008",
 } as const;

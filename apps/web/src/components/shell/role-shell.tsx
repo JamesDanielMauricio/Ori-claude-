@@ -15,27 +15,24 @@ export interface RoleShellNavItem {
 
 export interface RoleShellProps {
   navItems: RoleShellNavItem[];
-  primaryAction: RoleShellNavItem;
   children: ReactNode;
 }
 
-// The primary action's appearance now lives in NavLink's `primary` variant
-// rather than in an override string appended here. Concatenating utilities
-// onto a component that already sets the same properties only works when the
-// generated stylesheet happens to order them favorably — and it did not: on
-// any screen where this route was not the active one, the idle state's
-// `text-ink-muted` beat the override's `text-accent-ink` and the button
-// rendered muted green on solid green. See NavLink's `variant` comment.
-
 // The single component both Grower Home and Customer Home mount — per the
 // PRD, the two roles see the identical header + floating-sidebar shape;
-// only labels (passed in via `navItems`/`primaryAction`) differ. Rebuilt,
-// not ported: the source's header/sidebar pair is reproduced here as one
-// shared component with two responsive presentations (a top strip + hamburger
-// overlay on narrow viewports, a persistent floating sidebar on wide ones),
-// exactly like the source, but as real CSS breakpoints instead of
-// duplicated Bubble element trees.
-export function RoleShell({ navItems, primaryAction, children }: RoleShellProps) {
+// only labels (passed in via `navItems`) differ. Rebuilt, not ported: the
+// source's header/sidebar pair is reproduced here as one shared component
+// with two responsive presentations (a top strip + hamburger overlay on
+// narrow viewports, a persistent floating sidebar on wide ones), exactly
+// like the source, but as real CSS breakpoints instead of duplicated Bubble
+// element trees.
+//
+// Used to also take a `primaryAction` — a second, solid-accent NavLink
+// rendered above the list, e.g. "הזמנה" on the customer shell and "עדכון" on
+// the grower shell. Removed: on both shells it pointed at the exact route
+// the first item in `navItems` already does, so it was a second button for
+// a destination already one click away.
+export function RoleShell({ navItems, children }: RoleShellProps) {
   const { profile, loading } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -78,11 +75,7 @@ export function RoleShell({ navItems, primaryAction, children }: RoleShellProps)
 
         {menuOpen && (
           <div className="animate-rise-in border-t border-border px-3 py-3">
-            <HamburgerMenuContents
-              navItems={navItems}
-              primaryAction={primaryAction}
-              onNavigate={() => setMenuOpen(false)}
-            />
+            <HamburgerMenuContents navItems={navItems} onNavigate={() => setMenuOpen(false)} />
           </div>
         )}
       </div>
@@ -119,12 +112,10 @@ export function RoleShell({ navItems, primaryAction, children }: RoleShellProps)
         </div>
 
         {/* `outline` rather than the solid `filled` active state these rows
-            used to have. The shells' primary action is itself a solid green
-            row, and on the customer shell it points at the same route as the
-            first nav item — so with both solid, the sidebar showed two
-            identical green "הזמנה" buttons stacked on top of each other. Only
-            the call to action is solid now; the current page is marked with a
-            soft tint and an edge bar, exactly as in the backoffice rail. */}
+            used to have — matches the current page's treatment in the
+            backoffice rail: a soft tint plus an edge bar rather than a solid
+            fill, so an active row doesn't compete with the sign-out button
+            below for "loudest thing in the sidebar". */}
         <nav aria-label="ניווט" className="flex flex-col gap-0.5">
           {navItems.map((item) => (
             <NavLink key={item.href} href={item.href} variant="outline">
@@ -133,15 +124,12 @@ export function RoleShell({ navItems, primaryAction, children }: RoleShellProps)
           ))}
         </nav>
 
-        {/* The enable-condition for this button (today's pick/order must
-            already exist) is real product logic that lands with the
-            grower/customer domain modules — this shell only wires the
-            control itself, per this prompt's "no product logic yet" scope. */}
-        <NavLink href={primaryAction.href} variant="primary">
-          {primaryAction.label}
-        </NavLink>
-
-        <SignOutButton className="mt-auto self-start" />
+        {/* `solid` — the bordered, filled treatment — rather than the bare
+            text link this used to be. It was easy to miss sitting under a
+            wall of nav rows, and on mobile it was missing outright (see
+            HamburgerMenuContents below), so the desktop and mobile versions
+            now match. */}
+        <SignOutButton variant="solid" className="mt-auto" />
       </aside>
 
       {/* More generous than the previous p-6. Space is most of what separates
@@ -182,23 +170,30 @@ function IdentityStrip({
 
 function HamburgerMenuContents({
   navItems,
-  primaryAction,
   onNavigate,
 }: {
   navItems: RoleShellNavItem[];
-  primaryAction: RoleShellNavItem;
   onNavigate: () => void;
 }) {
   return (
-    <div className="flex flex-col gap-1" onClick={onNavigate}>
-      <NavLink href={primaryAction.href} variant="primary">
-        {primaryAction.label}
-      </NavLink>
-      {navItems.map((item) => (
-        <NavLink key={item.href} href={item.href} variant="outline">
-          {item.label}
-        </NavLink>
-      ))}
+    <div className="flex flex-col gap-1">
+      <div onClick={onNavigate} className="flex flex-col gap-1">
+        {navItems.map((item) => (
+          <NavLink key={item.href} href={item.href} variant="outline">
+            {item.label}
+          </NavLink>
+        ))}
+      </div>
+
+      {/* Was missing from this menu entirely — on mobile, customer/grower
+          users had no way to sign out at all, since the desktop sidebar's
+          copy of this button is hidden below the `md` breakpoint. Kept
+          outside the `onNavigate` click handler above: signing out already
+          navigates to /login itself, so closing the menu first is redundant
+          and would fire a state update on a component about to unmount. */}
+      <div className="mt-1 border-t border-border pt-2">
+        <SignOutButton variant="solid" />
+      </div>
     </div>
   );
 }

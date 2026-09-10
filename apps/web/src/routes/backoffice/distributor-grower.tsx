@@ -8,16 +8,26 @@ import { saveGrowerInputSchema, toSaveGrowerRpcArgs } from "@ori/domain/referenc
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
-import { PickLinesEditor } from "@/components/grower/pick-lines-editor";
+import { formatPallets, formatPickupTime } from "@/components/arrangement/board-data";
+import { GrowerPickDialog } from "@/components/arrangement/grower-pick-dialog";
 import { CheckboxList } from "@/components/reference-data/checkbox-list";
-import { ListDetailLayout } from "@/components/reference-data/list-detail-layout";
-import { RecordList } from "@/components/reference-data/record-list";
-import { PageHeader } from "@/components/ui/page-header";
+import { ExpandableEntityRow } from "@/components/reference-data/expandable-entity-row";
+import {
+  FamilyGroupedLines,
+  type FamilyGroupedRow,
+} from "@/components/reference-data/family-grouped-lines";
+import { TwoColumnRowList } from "@/components/reference-data/two-column-row-list";
 import { Button } from "@/components/ui/button";
+import { StatusPill } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Icon } from "@/components/ui/icon";
+import { PageHeader } from "@/components/ui/page-header";
+import { QueryError } from "@/components/ui/query-error";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { createClient } from "@/lib/supabase/client";
+import { useTradingDayView } from "@/lib/trading-day-view";
 
 interface GrowerCompany {
   id: string;
@@ -28,51 +38,106 @@ interface GrowerCompany {
   transporter_company_id: string | null;
 }
 
+interface PickLineRow {
+  id: string;
+  pallets_picked: string;
+  pickup_time: string | null;
+  comment: string | null;
+  product_varieties: {
+    id: string;
+    name: string;
+    family_id: string;
+    product_families: { id: string; name: string; image_url: string | null } | null;
+  } | null;
+}
+
 interface DailyPickForDay {
   id: string;
   grower_company_id: string;
   status: "draft" | "submitted" | "closed";
   submitted_at: string | null;
   reminder_sent_at: string | null;
+  daily_pick_products: PickLineRow[];
 }
 
-const STATUS_LABEL: Record<DailyPickForDay["status"], string> = {
-  draft: "טיוטה",
-  submitted: "נשלח",
-  closed: "סגור",
-};
+// One pick's lines, grouped by family — the read view an expanded row shows.
+// Same shape the arrangement board's grower column derives (board-data.ts's
+// GrowerFamilyGroup), rebuilt small here rather than imported: that one is
+// entangled with allocation totals and a selection this screen has no use
+// for, and pulling it in would mean carrying arrangement_records into a
+// query that has nothing to do with them.
+function groupPickLines(lines: PickLineRow[]): FamilyGroupedRow[] {
+  const families = new Map<string, FamilyGroupedRow>();
+  for (const line of lines) {
+    const variety = line.product_varieties;
+    if (!variety) continue;
+    let group = families.get(variety.family_id);
+    if (!group) {
+      group = {
+        familyId: variety.family_id,
+        familyName: variety.product_families?.name ?? "",
+        imageUrl: variety.product_families?.image_url ?? null,
+        lines: [],
+      };
+      families.set(variety.family_id, group);
+    }
+    const pallets = Number(line.pallets_picked) || 0;
+    group.lines.push({
+      id: line.id,
+      varietyName: variety.name,
+      quantityLabel: formatPallets(pallets),
+      hasQuantity: pallets > 0,
+      secondary: formatPickupTime(line.pickup_time),
+      comment: line.comment,
+    });
+  }
+  const groups = [...families.values()];
+  for (const group of groups) {
+    group.lines.sort((a, b) => a.varietyName.localeCompare(b.varietyName, "he"));
+  }
+  return groups.sort((a, b) => a.familyName.localeCompare(b.familyName, "he"));
+}
 
 // Distributor-facing "Grower Inventory Status" oversight (PRD:
-// backoffice.md's "distributor+grower" tab — "Distributor as Grower
-// View": a shared view used when the Distributor needs to act on a
-// grower's behalf). Reuses the exact same PickLinesEditor the grower's
-// own screen uses — update_pick_product_pallets/update_pick_product_details
-// both already accept "the owning grower, or backoffice" — so editing a
-// submission here is not a special case, just the same component under a
-// backoffice session.
+// backoffice.md's "distributor+grower" tab — "Distributor as Grower View":
+// a shared view used when the Distributor needs to act on a grower's
+// behalf). One row per active grower — a status-colored name, an expand
+// chevron revealing that grower's pick grouped by family (read-only), and
+// two actions: a pencil that opens GrowerPickDialog — the exact same
+// PickLinesEditor the grower's own screen and the arrangement board's
+// pencil already use, since save_pick_lines already accepts "the owning
+// grower, or backoffice" — and a bell that resends the pick reminder.
+//
+// Replaced a master-detail layout (pick a grower on the left, edit their
+// pick on the right) with this flat, always-expandable list: the earlier
+// shape made "who hasn't picked yet" a one-at-a-time question, answerable
+// only by clicking through every grower in turn. Scanning name color down
+// two columns answers it at a glance, and expanding is now a browse action
+// separate from editing — editing was folded into a dialog instead of
+// owning half the screen, matching the reference design.
 export default function DistributorAsGrowerPage() {
   const supabase = createClient();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [productsDialogOpen, setProductsDialogOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [pickDialogGrower, setPickDialogGrower] = useState<{
+    pickId: string;
+    status: string;
+    growerName: string;
+  } | null>(null);
+  const [productsDialogGrower, setProductsDialogGrower] = useState<GrowerCompany | null>(null);
   const [productDraft, setProductDraft] = useState<Set<string>>(new Set());
   const [savingProducts, setSavingProducts] = useState(false);
 
-  const openDayQuery = useQuery({
-    queryKey: ["grower-oversight", "open-trading-day"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("trading_days")
-        .select("id, trade_date")
-        .neq("phase", "closed")
-        .maybeSingle();
-      if (error) throw error;
-      return data as { id: string; trade_date: string } | null;
-    },
-  });
-  const openDayId = openDayQuery.data?.id;
+  // The day this oversight screen shows: the live open day by default, or —
+  // once the sidebar's picker has pinned one (lib/trading-day-view.tsx) —
+  // that specific date's day instead. `isLive` is what gates every write
+  // control below; a pinned day is browse-only here regardless of its own
+  // pick statuses, the same rule the arrangement board's popup follows.
+  const dayView = useTradingDayView();
+  const dayId = dayView.day?.id;
 
   const growersQuery = useQuery({
     queryKey: ["grower-oversight", "growers"],
@@ -88,18 +153,52 @@ export default function DistributorAsGrowerPage() {
     },
   });
 
+  // Picks AND their lines in one request — embedding daily_pick_products
+  // rather than a second query per expanded row, so opening a tenth grower's
+  // chevron costs nothing this screen hasn't already paid for the first.
   const picksForDayQuery = useQuery({
-    queryKey: ["grower-oversight", "picks-for-day", openDayId],
-    enabled: !!openDayId,
+    queryKey: ["grower-oversight", "picks-for-day", dayId],
+    enabled: !!dayId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("daily_picks")
-        .select("id, grower_company_id, status, submitted_at, reminder_sent_at")
-        .eq("trading_day_id", openDayId!);
+        .select(
+          `id, grower_company_id, status, submitted_at, reminder_sent_at,
+           daily_pick_products(id, pallets_picked, pickup_time, comment, product_varieties(id, name, family_id, product_families(id, name, image_url)))`,
+        )
+        .eq("trading_day_id", dayId!);
       if (error) throw error;
-      return data as DailyPickForDay[];
+      return data as unknown as DailyPickForDay[];
     },
   });
+
+  // Push-triggered refresh: a pick edited elsewhere (the grower's own
+  // screen, the arrangement board's pencil) has to show up here without a
+  // manual reload. Same trigger-only shape used throughout — payload
+  // unread, only "re-run the query."
+  useEffect(() => {
+    if (!dayId) return;
+    const channel = supabase
+      .channel(`grower-oversight-picks-${dayId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "daily_picks" }, () => {
+        void queryClient.invalidateQueries({
+          queryKey: ["grower-oversight", "picks-for-day", dayId],
+        });
+      })
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "daily_pick_products" },
+        () => {
+          void queryClient.invalidateQueries({
+            queryKey: ["grower-oversight", "picks-for-day", dayId],
+          });
+        },
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [dayId, supabase, queryClient]);
 
   const pickByGrowerId = useMemo(() => {
     const map = new Map<string, DailyPickForDay>();
@@ -120,23 +219,23 @@ export default function DistributorAsGrowerPage() {
   });
 
   const growerProductsQuery = useQuery({
-    queryKey: ["grower-oversight", "grower-products", selectedId],
-    enabled: !!selectedId,
+    queryKey: ["grower-oversight", "grower-products", productsDialogGrower?.id ?? null],
+    enabled: !!productsDialogGrower,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("grower_products")
         .select("product_variety_id")
-        .eq("company_id", selectedId!);
+        .eq("company_id", productsDialogGrower!.id);
       if (error) throw error;
       return data.map((row) => row.product_variety_id);
     },
   });
 
   useEffect(() => {
-    if (productsDialogOpen && growerProductsQuery.data) {
+    if (productsDialogGrower && growerProductsQuery.data) {
       setProductDraft(new Set(growerProductsQuery.data));
     }
-  }, [productsDialogOpen, growerProductsQuery.data]);
+  }, [productsDialogGrower, growerProductsQuery.data]);
 
   const catalogOptions = useMemo(
     () =>
@@ -149,39 +248,33 @@ export default function DistributorAsGrowerPage() {
     [catalogQuery.data],
   );
 
-  const selected = growersQuery.data?.find((row) => row.id === selectedId) ?? null;
-  const selectedPick = selectedId ? (pickByGrowerId.get(selectedId) ?? null) : null;
-
-  // Pick status as a trailing pill per grower, so "who still hasn't sent a
-  // pick" is scannable down the list — the question this oversight screen
-  // exists to answer.
-  const listItems = useMemo(
-    () =>
-      (growersQuery.data ?? []).map((row) => {
-        const pick = pickByGrowerId.get(row.id);
-        return {
-          id: row.id,
-          label: row.name,
-          badge: pick ? STATUS_LABEL[pick.status] : "אין ליקוט",
-        };
-      }),
-    [growersQuery.data, pickByGrowerId],
-  );
+  // Alphabetical once, here — both the single-column and two-column layouts
+  // (TwoColumnRowList) read off this same order, so a column split never has
+  // to re-derive it.
+  const sortedGrowers = useMemo(() => {
+    const rows = growersQuery.data ?? [];
+    const needle = search.trim().toLocaleLowerCase("he");
+    const filtered = needle
+      ? rows.filter((row) => row.name.toLocaleLowerCase("he").includes(needle))
+      : rows;
+    return [...filtered].sort((a, b) => a.name.localeCompare(b.name, "he"));
+  }, [growersQuery.data, search]);
 
   const saveProductsMutation = useMutation({
     mutationFn: async () => {
-      if (!selected) throw new Error("no grower selected");
+      const grower = productsDialogGrower;
+      if (!grower) throw new Error("no grower selected");
       const saveInput = saveGrowerInputSchema.parse({
-        id: selected.id,
-        name: selected.name,
-        status: selected.status,
-        defaultPickupTime: selected.default_pickup_time,
-        whatsappGroupId: selected.whatsapp_group_id,
+        id: grower.id,
+        name: grower.name,
+        status: grower.status,
+        defaultPickupTime: grower.default_pickup_time,
+        whatsappGroupId: grower.whatsapp_group_id,
         productVarietyIds: [...productDraft],
         // Preserved as-is — this dialog only edits in-season products;
         // save_grower replaces the whole row, so an unset value here
         // would silently wipe out an existing transporter assignment.
-        transporterCompanyId: selected.transporter_company_id,
+        transporterCompanyId: grower.transporter_company_id,
       });
       const { error: saveError } = await supabase.rpc(
         "save_grower",
@@ -189,10 +282,10 @@ export default function DistributorAsGrowerPage() {
       );
       if (saveError) throw saveError;
 
-      if (openDayId) {
+      if (dayId) {
         const bootstrapInput = bootstrapGrowerPickInputSchema.parse({
-          tradingDayId: openDayId,
-          growerCompanyId: selected.id,
+          tradingDayId: dayId,
+          growerCompanyId: grower.id,
         });
         const { error: bootstrapError } = await supabase.rpc(
           "bootstrap_grower_pick",
@@ -203,39 +296,46 @@ export default function DistributorAsGrowerPage() {
     },
     onSuccess: () => {
       showToast("רשימת המוצרים עודכנה.", "success");
-      setProductsDialogOpen(false);
+      setProductsDialogGrower(null);
+      void queryClient.invalidateQueries({ queryKey: ["grower-oversight", "grower-products"] });
       void queryClient.invalidateQueries({
-        queryKey: ["grower-oversight", "grower-products", selectedId],
+        queryKey: ["grower-oversight", "picks-for-day", dayId],
       });
-      void queryClient.invalidateQueries({
-        queryKey: ["grower-oversight", "picks-for-day", openDayId],
-      });
-      if (selectedPick) {
-        void queryClient.invalidateQueries({ queryKey: ["grower", "pick-lines", selectedPick.id] });
-      }
     },
     onError: (error: { message?: string }) => {
       showToast(`העדכון נכשל: ${error.message ?? "שגיאה לא ידועה"}`, "error");
     },
   });
 
+  // One mutation, keyed per call by `dailyPickId` rather than by a single
+  // "selected grower" — this screen has no selection any more, every row's
+  // bell can fire independently. `variables` (react-query's own record of
+  // what a pending call was invoked with) is what lets each row know
+  // whether it, specifically, is the one currently sending.
   const reminderMutation = useMutation({
-    mutationFn: async () => {
-      if (!selectedPick) throw new Error("no pick to remind about");
-      const input = sendPickReminderInputSchema.parse({ dailyPickId: selectedPick.id });
+    mutationFn: async (dailyPickId: string) => {
+      const input = sendPickReminderInputSchema.parse({ dailyPickId });
       const { error } = await supabase.rpc("send_pick_reminder", toSendPickReminderRpcArgs(input));
       if (error) throw error;
     },
     onSuccess: () => {
       showToast("התזכורת נשלחה.", "success");
       void queryClient.invalidateQueries({
-        queryKey: ["grower-oversight", "picks-for-day", openDayId],
+        queryKey: ["grower-oversight", "picks-for-day", dayId],
       });
     },
     onError: (error: { message?: string }) => {
       showToast(`שליחת התזכורת נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
     },
   });
+
+  function toggleExpanded(growerId: string) {
+    setExpandedIds((current) => {
+      const next = new Set(current);
+      if (!next.delete(growerId)) next.add(growerId);
+      return next;
+    });
+  }
 
   function toggleProduct(id: string) {
     setProductDraft((current) => {
@@ -251,90 +351,126 @@ export default function DistributorAsGrowerPage() {
     saveProductsMutation.mutate(undefined, { onSettled: () => setSavingProducts(false) });
   }
 
+  const isLoading = growersQuery.isLoading || (!!dayId && picksForDayQuery.isLoading);
+
+  const rows = sortedGrowers.map((grower) => {
+    const pick = pickByGrowerId.get(grower.id) ?? null;
+    const tone = !pick ? "warning" : pick.status === "draft" ? "neutral" : "accent";
+    const caption =
+      pick?.status === "submitted" && pick.submitted_at
+        ? `נשלח ב-${new Date(pick.submitted_at).toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" })}`
+        : pick?.status === "closed"
+          ? "סגור"
+          : null;
+    const families = pick ? groupPickLines(pick.daily_pick_products) : [];
+    const reminding = reminderMutation.isPending && reminderMutation.variables === pick?.id;
+
+    return (
+      <ExpandableEntityRow
+        key={grower.id}
+        name={grower.name}
+        tone={tone}
+        caption={caption}
+        expanded={expandedIds.has(grower.id)}
+        onToggle={() => toggleExpanded(grower.id)}
+        onEdit={() => {
+          if (pick) {
+            setPickDialogGrower({ pickId: pick.id, status: pick.status, growerName: grower.name });
+          } else {
+            // No pick exists yet for this grower today — nothing for
+            // GrowerPickDialog to open. The products dialog is what
+            // creates one (save_grower + bootstrap_grower_pick, exactly
+            // the flow the old master-detail screen's "ערוך מוצרים בעונה"
+            // button drove), so the pencil opens that instead.
+            setProductsDialogGrower(grower);
+          }
+        }}
+        editLabel={pick ? `ערוך את מלאי ${grower.name}` : `הוסף מוצרים בעונה עבור ${grower.name}`}
+        onRemind={() => pick && reminderMutation.mutate(pick.id)}
+        remindLabel={`שלח תזכורת ל${grower.name}`}
+        remindDisabled={
+          !dayView.isLive || !pick || pick.status === "closed" || reminderMutation.isPending
+        }
+        reminding={reminding}
+      >
+        <FamilyGroupedLines families={families} emptyLabel="אין מוצרים בעונה עבור מגדל זה." />
+      </ExpandableEntityRow>
+    );
+  });
+
   return (
     <>
-      <ListDetailLayout
-        header={
-          <PageHeader
-            title="בשם מגדל"
-            subtitle="צפייה ועריכה של ליקוטי היום בשם כל מגדל, ושליחת תזכורות."
-          />
-        }
-        list={
-          <RecordList
-            icon="sprout"
-            items={listItems}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-            loading={growersQuery.isLoading || (!!openDayId && picksForDayQuery.isLoading)}
-            searchPlaceholder="חיפוש מגדל"
-            emptyLabel="אין מגדלים פעילים."
-          />
-        }
-        detail={
-          !selected ? (
-            <EmptyState
-              icon="sprout"
-              title="לא נבחר מגדל"
-              hint="בחר מגדל מהרשימה כדי לצפות בליקוט היום שלו, לערוך אותו בשמו או לשלוח תזכורת."
-            />
-          ) : (
-            <div className="flex flex-col gap-5">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h1 className="text-lg font-semibold">{selected.name}</h1>
-                  <p className="text-sm text-ink-muted">
-                    {selectedPick ? (
-                      <>
-                        סטטוס: {STATUS_LABEL[selectedPick.status]}
-                        {selectedPick.submitted_at &&
-                          ` · נשלח ב-${new Date(selectedPick.submitted_at).toLocaleString("he-IL")}`}
-                        {selectedPick.reminder_sent_at &&
-                          ` · תזכורת נשלחה ב-${new Date(selectedPick.reminder_sent_at).toLocaleString("he-IL")}`}
-                      </>
-                    ) : (
-                      "אין ליקוט עבור מגדל זה היום."
-                    )}
-                  </p>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => setProductsDialogOpen(true)}
-                  >
-                    ערוך מוצרים בעונה
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => reminderMutation.mutate()}
-                    disabled={
-                      !selectedPick ||
-                      selectedPick.status === "closed" ||
-                      reminderMutation.isPending
-                    }
-                  >
-                    {reminderMutation.isPending ? "שולח…" : "שלח תזכורת"}
-                  </Button>
-                </div>
-              </div>
-
-              {selectedPick ? (
-                <PickLinesEditor dailyPickId={selectedPick.id} pickStatus={selectedPick.status} />
-              ) : (
-                <p className="text-sm text-ink-muted">
-                  הוסף מוצרים בעונה כדי ליצור ליקוט עבור מגדל זה.
-                </p>
-              )}
-            </div>
-          )
+      <PageHeader
+        title="בשם מגדל"
+        subtitle="צפייה ועריכה של ליקוטי היום בשם כל מגדל, ושליחת תזכורות."
+        actions={
+          !dayView.isLive ? (
+            <StatusPill tone="warning">צפייה בעבר — לא ניתן לערוך</StatusPill>
+          ) : undefined
         }
       />
+
+      <label className="relative mb-4 block max-w-xs">
+        <span className="sr-only">חיפוש מגדל</span>
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-y-0 start-3 flex items-center text-ink-subtle"
+        >
+          <Icon name="search" className="h-4 w-4" />
+        </span>
+        <input
+          type="search"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="חיפוש מגדל…"
+          className="h-10 w-full rounded-md bg-surface ps-9 pe-3 text-sm text-ink shadow-card ring-1 ring-inset ring-border-strong outline-none transition-colors duration-150 placeholder:text-ink-subtle focus:ring-2 focus:ring-accent/40"
+        />
+      </label>
+
+      {isLoading ? (
+        <div className="space-y-2">
+          <Skeleton className="h-14 w-full" />
+          <Skeleton className="h-14 w-full" />
+          <Skeleton className="h-14 w-full" />
+        </div>
+      ) : growersQuery.isError || picksForDayQuery.isError ? (
+        <QueryError
+          what="מגדלים"
+          onRetry={() => {
+            void growersQuery.refetch();
+            void picksForDayQuery.refetch();
+          }}
+          retrying={growersQuery.isFetching || picksForDayQuery.isFetching}
+        />
+      ) : rows.length === 0 ? (
+        <EmptyState
+          icon="sprout"
+          title="אין מגדלים להצגה"
+          hint={search ? "נסה מונח חיפוש אחר." : "אין מגדלים פעילים במערכת."}
+        />
+      ) : (
+        <TwoColumnRowList rows={rows} />
+      )}
+
+      <GrowerPickDialog
+        pickId={pickDialogGrower?.pickId ?? null}
+        pickStatus={pickDialogGrower?.status ?? "closed"}
+        growerName={pickDialogGrower?.growerName ?? ""}
+        onClose={() => setPickDialogGrower(null)}
+        onSaved={() => {
+          void queryClient.invalidateQueries({
+            queryKey: ["grower-oversight", "picks-for-day", dayId],
+          });
+        }}
+        readOnly={!dayView.isLive}
+      />
+
       <Dialog
-        open={productsDialogOpen}
-        onClose={() => setProductsDialogOpen(false)}
-        title="מוצרים בעונה"
+        open={productsDialogGrower !== null}
+        onClose={() => setProductsDialogGrower(null)}
+        title={
+          productsDialogGrower ? `מוצרים בעונה — ${productsDialogGrower.name}` : "מוצרים בעונה"
+        }
       >
         <div className="flex flex-col gap-4">
           <CheckboxList
@@ -343,7 +479,7 @@ export default function DistributorAsGrowerPage() {
             onToggle={toggleProduct}
           />
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="secondary" onClick={() => setProductsDialogOpen(false)}>
+            <Button type="button" variant="secondary" onClick={() => setProductsDialogGrower(null)}>
               ביטול
             </Button>
             <Button type="button" onClick={handleSaveProducts} disabled={savingProducts}>

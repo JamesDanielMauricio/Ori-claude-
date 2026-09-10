@@ -13,13 +13,14 @@ import {
 } from "@ori/domain/auth/testing";
 import {
   createTestGrowerWithProduct,
+  createTestOrderProductLine,
   createTestTradingDay,
   deleteTestGrowerWithProduct,
   deleteTestTradingDay,
 } from "@ori/domain/lifecycle-engine/testing";
 import { createTestProductVariety, deleteTestProductVariety } from "@ori/domain/reference-data/testing";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -175,14 +176,15 @@ describe("customer ordering module", () => {
     // THEY still see it — is_orderable: false, but present — while the
     // in-stock variety is also present on its own merits. Neither
     // customer's view affects the other's.
-    const submitCarveOut = await client2.rpc(
-      "submit_order",
-      toSubmitOrderRpcArgs({
-        tradingDayId: day.id,
-        lines: [{ productVarietyId: depletedVariety.id, palletsOrdered: 3, comment: null }],
-      }),
-    );
-    expect(submitCarveOut.error).toBeNull();
+    // Direct-inserted rather than submitted through the RPC. The line this
+    // test needs is one placed while the variety still had stock — the whole
+    // point of the carve-out is that it survives the stock running out. Since
+    // migration 0042 submit_order refuses a line above
+    // max_orderable_for_customer, which for a zero-supply variety is 0, so
+    // the RPC can no longer create this precondition at all. Arranging it
+    // directly also stops a test about the CATALOG's carve-out from failing
+    // whenever submit_order's own rules change.
+    await createTestOrderProductLine(day.id, customer2.companyId, depletedVariety.id, 3);
 
     const catalog2 = await client2.rpc(
       "get_orderable_catalog_for_customer",
@@ -324,9 +326,19 @@ describe("customer ordering module", () => {
     const grower = await createTestGrowerWithProduct();
     cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
     const day = await createOpenTestDay(admin.userId);
-    // Total supply: 5. Two customers will together order 7 — genuinely
-    // exceeding what's available.
-    await pickLine(day.id, grower.companyId, grower.varietyId, 5);
+    // Total supply: 7, which the two orders below (3 + 4) consume exactly.
+    //
+    // Deliberately exact rather than the oversubscription this used to set
+    // up (supply 5 against the same 3 + 4). Since migration 0042 a direct
+    // customer submission may not exceed max_orderable_for_customer —
+    // (supply + overbooking) minus every OTHER customer's demand — so under
+    // supply 5 whichever of these two committed second was refused with
+    // P0008 and the test failed on whichever order the race happened to
+    // take. At supply 7 both fit in either order (7-0 ≥ 4, then 7-4 ≥ 3, and
+    // vice versa), so the concurrency claim this test exists to make is the
+    // only thing left that can fail it. Demand still lands exactly on
+    // supply, which is what the observer assertion below needs.
+    await pickLine(day.id, grower.companyId, grower.varietyId, 7);
 
     const customerA = await createTestCustomer(day.id);
     const clientA = await signedInCustomer(customerA.companyId);
@@ -615,12 +627,20 @@ describe("customer ordering module", () => {
       .where(eq(notificationOutbox.recipientCompanyId, admin.companyId));
     expect(afterStillOrderable.filter((row) => row.templateKey === "stock_fully_exhausted")).toHaveLength(0);
 
-    // Demand 12 -> 16: consumes supply + overbooking entirely.
+    // Demand 12 -> 15: consumes supply + overbooking exactly.
+    //
+    // Exactly 15, not 16. Since migration 0042 a direct customer submission
+    // is also capped at max_orderable_for_customer() — (supply + overbooking)
+    // minus every OTHER customer's demand, so 15 here — and asking for 16
+    // is refused with P0008 before any notification logic runs. 15 is also
+    // the value this test actually wants: the id 11 threshold is
+    // `demand_after >= supply + overbooking`, which 15 meets, so this still
+    // exercises the exhaustion edge rather than stepping past it.
     const crossing = await client.rpc(
       "submit_order",
       toSubmitOrderRpcArgs({
         tradingDayId: day.id,
-        lines: [{ productVarietyId: grower.varietyId, palletsOrdered: 16, comment: null }],
+        lines: [{ productVarietyId: grower.varietyId, palletsOrdered: 15, comment: null }],
       }),
     );
     expect(crossing.error).toBeNull();
@@ -632,5 +652,75 @@ describe("customer ordering module", () => {
     const exhaustedRows = afterCrossing.filter((row) => row.templateKey === "stock_fully_exhausted");
     expect(exhaustedRows).toHaveLength(1);
     expect(exhaustedRows[0]).toMatchObject({ recipientType: "backoffice" });
+  }, 30000);
+
+  it("max_orderable_for_customer (migration 0042) tracks the lower of the variety's cap and remaining stock, and submit_order enforces it only on a direct customer submission", async () => {
+    const grower = await createTestGrowerWithProduct();
+    cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
+    const day = await createOpenTestDay(admin.userId);
+
+    // 10 pallets picked, cap set to 5 — the dropdown ceiling is whichever
+    // is lower (the PRD example this mirrors: cap 5 against stock 10 offers
+    // 0-5; stock dropping to 3 offers 0-3 even though the cap is still 5).
+    const pick = await pickLine(day.id, grower.companyId, grower.varietyId, 10);
+    await db
+      .update(productVarieties)
+      .set({ numberOfOrdersPerCustomer: 5 })
+      .where(eq(productVarieties.id, grower.varietyId));
+
+    const customer = await createTestCustomer(day.id);
+    const client = await signedInCustomer(customer.companyId);
+    cleanupFns.push(() => deleteTestTradingDay(day.id));
+
+    const withPlentyOfStock = await client.rpc(
+      "get_orderable_catalog_for_customer",
+      toOrderableCatalogRpcArgs({ tradingDayId: day.id }),
+    );
+    expect(withPlentyOfStock.error).toBeNull();
+    expect(withPlentyOfStock.data!.find((row) => row.variety_id === grower.varietyId)).toMatchObject({
+      max_orderable_for_customer: 5,
+    });
+
+    // Stock drops to 3 (below the cap) — the ceiling follows stock down.
+    await db
+      .update(dailyPickProducts)
+      .set({ palletsPicked: "3" })
+      .where(and(eq(dailyPickProducts.dailyPickId, pick.id), eq(dailyPickProducts.productVarietyId, grower.varietyId)));
+
+    const withScarceStock = await client.rpc(
+      "get_orderable_catalog_for_customer",
+      toOrderableCatalogRpcArgs({ tradingDayId: day.id }),
+    );
+    expect(withScarceStock.error).toBeNull();
+    expect(withScarceStock.data!.find((row) => row.variety_id === grower.varietyId)).toMatchObject({
+      max_orderable_for_customer: 3,
+    });
+
+    // A direct customer submission over that ceiling is rejected...
+    const overCap = await client.rpc(
+      "submit_order",
+      toSubmitOrderRpcArgs({
+        tradingDayId: day.id,
+        lines: [{ productVarietyId: grower.varietyId, palletsOrdered: 4, comment: null }],
+      }),
+    );
+    expect(overCap.error).not.toBeNull();
+    expect(overCap.error?.code).toBe(CUSTOMER_ERROR_CODES.INVALID_INPUT);
+
+    // ...but the identical line succeeds from backoffice acting on the
+    // customer's behalf: the cap is a customer-facing UI promise, not a
+    // hard ceiling on staff overriding it.
+    const backofficeOverride = await admin.client.rpc(
+      "submit_order",
+      toSubmitOrderRpcArgs({
+        tradingDayId: day.id,
+        lines: [{ productVarietyId: grower.varietyId, palletsOrdered: 4, comment: null }],
+        customerCompanyId: customer.companyId,
+      }),
+    );
+    expect(backofficeOverride.error).toBeNull();
+
+    const line = await getOrderProductLine((await getDailyOrderForCustomer(day.id, customer.companyId))!.id, grower.varietyId);
+    expect(line).toMatchObject({ palletsOrdered: "4.00" });
   }, 30000);
 });

@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { FormField, inputClassName } from "@/components/reference-data/form-field";
 import { Card, FormSection } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
+import { QueryError } from "@/components/ui/query-error";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
@@ -100,6 +101,20 @@ export default function UserProfilePage() {
         <Skeleton className="h-10 w-full" />
         <Skeleton className="h-10 w-full" />
       </div>
+    );
+  }
+
+  // A failed read left the form rendering with empty inputs — indistinguishable
+  // from a profile that genuinely has no name on file, and one Save away from
+  // the user "correcting" it and overwriting their real phone number with
+  // nothing. Refusing to render the form is the only safe answer.
+  if (profileQuery.isError) {
+    return (
+      <QueryError
+        what="הפרופיל"
+        onRetry={() => void profileQuery.refetch()}
+        retrying={profileQuery.isFetching}
+      />
     );
   }
 

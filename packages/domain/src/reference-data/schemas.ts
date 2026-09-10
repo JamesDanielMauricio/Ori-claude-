@@ -91,9 +91,15 @@ export const saveProductInputSchema = z.object({
   priceRangeFrom: z.number().nullable(),
   priceRangeTo: z.number().nullable(),
   priceType: z.string().nullable(),
-  noOverbooking: z.number(),
+  // Pallets are always whole units — never a fractional pallet.
+  noOverbooking: z.number().int(),
   highlightPriceFluctuations: z.boolean(),
   isSeasonalAvailable: z.boolean(),
+  // The customer order screen's per-line ceiling (migration 0042). Null
+  // means no variety-level cap — see product-variety.ts's own comment for
+  // how this differs from customerPalletCaps below (one default for every
+  // customer vs. an override for one).
+  numberOfOrdersPerCustomer: z.number().int().positive().nullable(),
   // Required when updating (the version the client last read); ignored by
   // the function on create. Null only ever legitimately occurs on create.
   expectedVersion: z.number().int().nullable(),
@@ -115,6 +121,7 @@ export function toSaveProductRpcArgs(input: SaveProductInput) {
     p_no_overbooking: input.noOverbooking,
     p_highlight_price_fluctuations: input.highlightPriceFluctuations,
     p_is_seasonal_available: input.isSeasonalAvailable,
+    p_number_of_orders_per_customer: input.numberOfOrdersPerCustomer,
     p_expected_version: input.expectedVersion,
     p_customer_pallet_caps: input.customerPalletCaps.map((cap) => ({
       customerCompanyId: cap.customerCompanyId,

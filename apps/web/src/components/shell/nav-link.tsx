@@ -19,20 +19,15 @@ export function NavLink({
   className?: string;
   // "filled" is the original solid-accent active state every existing
   // caller (RoleShell) still relies on. "outline" is additive, opted into
-  // only by BackofficeNav. "primary" is the shells' one call-to-action row
-  // (RoleShell's `primaryAction`), which is solid accent whether or not it
-  // is the current route.
+  // only by BackofficeNav.
   //
-  // "primary" exists because the previous approach — a filled NavLink plus a
-  // PRIMARY_ACTION_CLASSES string appended to `className` — produced an
-  // unreadable button on any screen where that route was NOT active: the
-  // idle state's `text-ink-muted` and the override's `text-accent-ink` are
-  // both single-class utilities of equal specificity, so which one wins is
-  // decided by their order in Tailwind's generated sheet, not by the order
-  // they are concatenated here. Muted green on solid green was the result.
-  // Encoding the intent as a variant removes the collision entirely rather
-  // than betting on emit order or reaching for `!important`.
-  variant?: "filled" | "outline" | "primary";
+  // A third variant, "primary", used to live here for the shells' one
+  // call-to-action row (RoleShell's `primaryAction`) — a NavLink that was
+  // solid accent whether or not it was the current route. It was removed
+  // along with `primaryAction` itself: on both shells that row pointed at
+  // the exact same destination as the first item in `navItems` right below
+  // it, so it was a second button for a link already on screen.
+  variant?: "filled" | "outline";
 }) {
   const { pathname } = useLocation();
   const active = pathname === href || pathname.startsWith(`${href}/`);
@@ -53,11 +48,6 @@ export function NavLink({
   // it: its active state is already a solid accent fill, so a bar of the same
   // color would be invisible there and — worse — would be plainly visible on
   // its *idle* rows, which is the opposite of what it means.
-  // The call-to-action row looks the same in both states, so there is nothing
-  // to branch on — it only ever darkens on hover.
-  const PRIMARY_CLASSES =
-    "justify-center bg-accent font-semibold text-accent-ink shadow-accent shadow-[inset_0_1px_0_0_rgb(255_255_255/0.16)] hover:bg-accent-hover";
-
   const activeClasses =
     variant === "outline"
       ? "bg-accent-soft font-semibold text-accent before:scale-y-100 before:opacity-100"
@@ -68,8 +58,7 @@ export function NavLink({
       ? "text-ink-muted hover:bg-accent-soft/50 hover:text-accent"
       : "text-ink-muted hover:bg-accent-soft/60 hover:text-accent";
 
-  const stateClasses =
-    variant === "primary" ? PRIMARY_CLASSES : active ? activeClasses : idleClasses;
+  const stateClasses = active ? activeClasses : idleClasses;
 
   return (
     <Link

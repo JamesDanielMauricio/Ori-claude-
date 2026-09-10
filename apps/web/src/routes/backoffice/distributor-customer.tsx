@@ -1,20 +1,41 @@
 import { sendOrderReminderInputSchema, toSendOrderReminderRpcArgs } from "@ori/domain/customer";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { OrderLinesEditor } from "@/components/customer/order-lines-editor";
-import { ListDetailLayout } from "@/components/reference-data/list-detail-layout";
-import { RecordList } from "@/components/reference-data/record-list";
-import { PageHeader } from "@/components/ui/page-header";
-import { Button } from "@/components/ui/button";
+import { formatPallets } from "@/components/arrangement/board-data";
+import { CustomerOrdersDialog } from "@/components/arrangement/customer-orders-dialog";
+import { ExpandableEntityRow } from "@/components/reference-data/expandable-entity-row";
+import {
+  FamilyGroupedLines,
+  type FamilyGroupedRow,
+} from "@/components/reference-data/family-grouped-lines";
+import { TwoColumnRowList } from "@/components/reference-data/two-column-row-list";
+import { StatusPill } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Icon } from "@/components/ui/icon";
+import { PageHeader } from "@/components/ui/page-header";
+import { QueryError } from "@/components/ui/query-error";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { createClient } from "@/lib/supabase/client";
+import { useTradingDayView } from "@/lib/trading-day-view";
 
 interface CustomerCompany {
   id: string;
   name: string;
   status: "active" | "inactive";
+}
+
+interface OrderLineRow {
+  id: string;
+  pallets_ordered: string;
+  comment: string | null;
+  product_varieties: {
+    id: string;
+    name: string;
+    family_id: string;
+    product_families: { id: string; name: string; image_url: string | null } | null;
+  } | null;
 }
 
 interface DailyOrderForDay {
@@ -23,53 +44,73 @@ interface DailyOrderForDay {
   status: "open" | "submitted";
   submitted_at: string | null;
   reminder_sent_at: string | null;
+  daily_order_products: OrderLineRow[];
 }
 
-const STATUS_LABEL: Record<DailyOrderForDay["status"], string> = {
-  open: "פתוח",
-  submitted: "נשלח",
-};
+// Same grouping as distributor-grower.tsx's groupPickLines, mirrored onto
+// order lines: no pickup time, so `secondary` is simply left unset.
+function groupOrderLines(lines: OrderLineRow[]): FamilyGroupedRow[] {
+  const families = new Map<string, FamilyGroupedRow>();
+  for (const line of lines) {
+    const variety = line.product_varieties;
+    if (!variety) continue;
+    let group = families.get(variety.family_id);
+    if (!group) {
+      group = {
+        familyId: variety.family_id,
+        familyName: variety.product_families?.name ?? "",
+        imageUrl: variety.product_families?.image_url ?? null,
+        lines: [],
+      };
+      families.set(variety.family_id, group);
+    }
+    const pallets = Number(line.pallets_ordered) || 0;
+    group.lines.push({
+      id: line.id,
+      varietyName: variety.name,
+      quantityLabel: formatPallets(pallets),
+      hasQuantity: pallets > 0,
+      comment: line.comment,
+    });
+  }
+  const groups = [...families.values()];
+  for (const group of groups) {
+    group.lines.sort((a, b) => a.varietyName.localeCompare(b.varietyName, "he"));
+  }
+  return groups.sort((a, b) => a.familyName.localeCompare(b.familyName, "he"));
+}
 
 // Distributor-facing "Customer Order Status" oversight (PRD:
 // backoffice.md's "distributor+customer" tab — "Distributor as Customer
 // View": a shared view used when the Distributor needs to act on a
-// customer's behalf, no dedicated PRD doc beyond that one-line
-// description — same situation the Grower Inventory Status screen was in,
-// see distributor-grower/page.tsx). Reuses the exact same OrderLinesEditor
-// the customer's own order screen uses — get_orderable_catalog_for_customer
-// and submit_order both accept "the owning customer, or backoffice" (see
-// packages/db/migrations/0028) — so editing an order here is not a
-// special case, just the same component under a backoffice session.
+// customer's behalf). Same shape as distributor-grower.tsx, mirrored onto
+// orders: a status-colored name per row, an expand chevron revealing that
+// customer's order grouped by family (read-only), a pencil that opens
+// CustomerOrdersDialog — the exact same OrderLinesEditor the customer's own
+// screen and the arrangement board's pencil already use
+// (get_orderable_catalog_for_customer and submit_order both accept "the
+// owning customer, or backoffice") — and a bell that resends the order
+// reminder.
 //
-// The performance requirement Prompt 10 couldn't verify because this
-// screen didn't exist yet (Performance Issues spec, Issue 3 — located at
-// tab=distributor+customer): expanding a customer already viewed in this
-// session must not fire a fresh query. Selecting a customer keys
-// OrderLinesEditor's catalog query off (tradingDayId, customerCompanyId)
-// — the same React Query cache + staleTime the customer's own screen
-// already proved this out with (docs/PERFORMANCE_VERIFICATION.md) — so
-// re-selecting a previously viewed customer reuses the cached result with
-// zero new requests. See e2e/distributor-customer.spec.ts for the assertion.
+// Replaced the same master-detail layout distributor-grower.tsx did, for
+// the same reason: scanning who hasn't ordered yet used to be a one-
+// customer-at-a-time question. See that file's own comment for the fuller
+// rationale — it applies here unchanged.
 export default function DistributorAsCustomerPage() {
   const supabase = createClient();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [ordersDialogCustomer, setOrdersDialogCustomer] = useState<CustomerCompany | null>(null);
 
-  const openDayQuery = useQuery({
-    queryKey: ["customer-oversight", "open-trading-day"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("trading_days")
-        .select("id, trade_date")
-        .neq("phase", "closed")
-        .maybeSingle();
-      if (error) throw error;
-      return data as { id: string; trade_date: string } | null;
-    },
-  });
-  const openDayId = openDayQuery.data?.id;
+  // The day this oversight screen shows: the live open day by default, or —
+  // once the sidebar's picker has pinned one (lib/trading-day-view.tsx) —
+  // that specific date's day instead. `isLive` is what gates every write
+  // control below, the same rule the arrangement board's popup follows.
+  const dayView = useTradingDayView();
+  const dayId = dayView.day?.id;
 
   const customersQuery = useQuery({
     queryKey: ["customer-oversight", "customers"],
@@ -85,18 +126,53 @@ export default function DistributorAsCustomerPage() {
     },
   });
 
+  // Orders AND their lines in one request — see distributor-grower.tsx's
+  // identical comment on picksForDayQuery for why: embedding
+  // daily_order_products here is what makes expanding any row free.
   const ordersForDayQuery = useQuery({
-    queryKey: ["customer-oversight", "orders-for-day", openDayId],
-    enabled: !!openDayId,
+    queryKey: ["customer-oversight", "orders-for-day", dayId],
+    enabled: !!dayId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("daily_orders")
-        .select("id, customer_company_id, status, submitted_at, reminder_sent_at")
-        .eq("trading_day_id", openDayId!);
+        .select(
+          `id, customer_company_id, status, submitted_at, reminder_sent_at,
+           daily_order_products(id, pallets_ordered, comment, product_varieties(id, name, family_id, product_families(id, name, image_url)))`,
+        )
+        .eq("trading_day_id", dayId!);
       if (error) throw error;
-      return data as DailyOrderForDay[];
+      return data as unknown as DailyOrderForDay[];
     },
   });
+
+  // Push-triggered refresh — same trigger-only shape as distributor-
+  // grower.tsx's, mirrored onto orders: an order edited elsewhere (the
+  // customer's own screen, the arrangement board's pencil, or the
+  // arrangement board pushing surplus onto a zero-pallet line) has to show
+  // up here without a manual reload.
+  useEffect(() => {
+    if (!dayId) return;
+    const channel = supabase
+      .channel(`customer-oversight-orders-${dayId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "daily_orders" }, () => {
+        void queryClient.invalidateQueries({
+          queryKey: ["customer-oversight", "orders-for-day", dayId],
+        });
+      })
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "daily_order_products" },
+        () => {
+          void queryClient.invalidateQueries({
+            queryKey: ["customer-oversight", "orders-for-day", dayId],
+          });
+        },
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [dayId, supabase, queryClient]);
 
   const orderByCustomerId = useMemo(() => {
     const map = new Map<string, DailyOrderForDay>();
@@ -104,29 +180,23 @@ export default function DistributorAsCustomerPage() {
     return map;
   }, [ordersForDayQuery.data]);
 
-  const selected = customersQuery.data?.find((row) => row.id === selectedId) ?? null;
+  // Alphabetical once, here — both the single-column and two-column layouts
+  // (TwoColumnRowList) read off this same order.
+  const sortedCustomers = useMemo(() => {
+    const rows = customersQuery.data ?? [];
+    const needle = search.trim().toLocaleLowerCase("he");
+    const filtered = needle
+      ? rows.filter((row) => row.name.toLocaleLowerCase("he").includes(needle))
+      : rows;
+    return [...filtered].sort((a, b) => a.name.localeCompare(b.name, "he"));
+  }, [customersQuery.data, search]);
 
-  // Order status as a trailing pill per customer, so "who still hasn't
-  // ordered" is scannable down the list — which is the question this
-  // oversight screen exists to answer.
-  const listItems = useMemo(
-    () =>
-      (customersQuery.data ?? []).map((row) => {
-        const order = orderByCustomerId.get(row.id);
-        return {
-          id: row.id,
-          label: row.name,
-          badge: order ? STATUS_LABEL[order.status] : "אין הזמנה",
-        };
-      }),
-    [customersQuery.data, orderByCustomerId],
-  );
-  const selectedOrder = selectedId ? (orderByCustomerId.get(selectedId) ?? null) : null;
-
+  // One mutation, keyed per call by `dailyOrderId` — see distributor-
+  // grower.tsx's identical reminderMutation for why `variables` is what
+  // lets each row's bell know whether it is the one currently sending.
   const reminderMutation = useMutation({
-    mutationFn: async () => {
-      if (!selectedOrder) throw new Error("no order to remind about");
-      const input = sendOrderReminderInputSchema.parse({ dailyOrderId: selectedOrder.id });
+    mutationFn: async (dailyOrderId: string) => {
+      const input = sendOrderReminderInputSchema.parse({ dailyOrderId });
       const { error } = await supabase.rpc(
         "send_order_reminder",
         toSendOrderReminderRpcArgs(input),
@@ -136,7 +206,7 @@ export default function DistributorAsCustomerPage() {
     onSuccess: () => {
       showToast("התזכורת נשלחה.", "success");
       void queryClient.invalidateQueries({
-        queryKey: ["customer-oversight", "orders-for-day", openDayId],
+        queryKey: ["customer-oversight", "orders-for-day", dayId],
       });
     },
     onError: (error: { message?: string }) => {
@@ -144,84 +214,131 @@ export default function DistributorAsCustomerPage() {
     },
   });
 
-  return (
-    <ListDetailLayout
-      header={
-        <PageHeader
-          title="בשם לקוח"
-          subtitle="צפייה ועריכה של הזמנות היום בשם כל לקוח, ושליחת תזכורות."
-        />
-      }
-      list={
-        <RecordList
-          icon="briefcase"
-          items={listItems}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
-          loading={customersQuery.isLoading || (!!openDayId && ordersForDayQuery.isLoading)}
-          searchPlaceholder="חיפוש לקוח"
-          emptyLabel="אין לקוחות פעילים."
-        />
-      }
-      detail={
-        !selected ? (
-          <EmptyState
-            icon="briefcase"
-            title="לא נבחר לקוח"
-            hint="בחר לקוח מהרשימה כדי לצפות בהזמנת היום שלו, לערוך אותה בשמו או לשלוח תזכורת."
-          />
-        ) : !openDayId ? (
-          <EmptyState
-            icon="clock"
-            title="אין יום מסחר פתוח"
-            hint="פתח יום עסקים בסרגל הצד כדי לנהל הזמנות בשם לקוחות."
-          />
-        ) : (
-          <div className="flex flex-col gap-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h1 className="text-lg font-semibold">{selected.name}</h1>
-                <p className="text-sm text-ink-muted">
-                  {selectedOrder ? (
-                    <>
-                      סטטוס: {STATUS_LABEL[selectedOrder.status]}
-                      {selectedOrder.submitted_at &&
-                        ` · נשלח ב-${new Date(selectedOrder.submitted_at).toLocaleString("he-IL")}`}
-                      {selectedOrder.reminder_sent_at &&
-                        ` · תזכורת נשלחה ב-${new Date(selectedOrder.reminder_sent_at).toLocaleString("he-IL")}`}
-                    </>
-                  ) : (
-                    "אין הזמנה עבור לקוח זה היום."
-                  )}
-                </p>
-              </div>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => reminderMutation.mutate()}
-                disabled={
-                  !selectedOrder ||
-                  selectedOrder.status === "submitted" ||
-                  reminderMutation.isPending
-                }
-              >
-                {reminderMutation.isPending ? "שולח…" : "שלח תזכורת"}
-              </Button>
-            </div>
+  function toggleExpanded(customerId: string) {
+    setExpandedIds((current) => {
+      const next = new Set(current);
+      if (!next.delete(customerId)) next.add(customerId);
+      return next;
+    });
+  }
 
-            <OrderLinesEditor
-              key={selected.id}
-              tradingDayId={openDayId}
-              customerCompanyId={selected.id}
-              onSubmitted={() => {
-                void queryClient.invalidateQueries({
-                  queryKey: ["customer-oversight", "orders-for-day", openDayId],
-                });
-              }}
-            />
-          </div>
-        )
-      }
-    />
+  const isLoading = customersQuery.isLoading || (!!dayId && ordersForDayQuery.isLoading);
+
+  const rows = sortedCustomers.map((customer) => {
+    const order = orderByCustomerId.get(customer.id) ?? null;
+    const tone = !order ? "warning" : order.status === "submitted" ? "accent" : "neutral";
+    const caption =
+      order?.status === "submitted" && order.submitted_at
+        ? `נשלח ב-${new Date(order.submitted_at).toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" })}`
+        : null;
+    const families = order ? groupOrderLines(order.daily_order_products) : [];
+    const reminding = reminderMutation.isPending && reminderMutation.variables === order?.id;
+
+    return (
+      <ExpandableEntityRow
+        key={customer.id}
+        name={customer.name}
+        tone={tone}
+        caption={caption}
+        expanded={expandedIds.has(customer.id)}
+        onToggle={() => toggleExpanded(customer.id)}
+        onEdit={() => setOrdersDialogCustomer(customer)}
+        editLabel={`ערוך את הזמנת ${customer.name}`}
+        onRemind={() => order && reminderMutation.mutate(order.id)}
+        remindLabel={`שלח תזכורת ל${customer.name}`}
+        remindDisabled={
+          !dayView.isLive || !order || order.status === "submitted" || reminderMutation.isPending
+        }
+        reminding={reminding}
+      >
+        <FamilyGroupedLines families={families} emptyLabel="אין עדיין הזמנה עבור לקוח זה." />
+      </ExpandableEntityRow>
+    );
+  });
+
+  return (
+    <>
+      <PageHeader
+        title="בשם לקוח"
+        subtitle="צפייה ועריכה של הזמנות היום בשם כל לקוח, ושליחת תזכורות."
+        actions={
+          !dayView.isLive ? (
+            <StatusPill tone="warning">צפייה בעבר — לא ניתן לערוך</StatusPill>
+          ) : undefined
+        }
+      />
+
+      <label className="relative mb-4 block max-w-xs">
+        <span className="sr-only">חיפוש לקוח</span>
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-y-0 start-3 flex items-center text-ink-subtle"
+        >
+          <Icon name="search" className="h-4 w-4" />
+        </span>
+        <input
+          type="search"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="חיפוש לקוח…"
+          className="h-10 w-full rounded-md bg-surface ps-9 pe-3 text-sm text-ink shadow-card ring-1 ring-inset ring-border-strong outline-none transition-colors duration-150 placeholder:text-ink-subtle focus:ring-2 focus:ring-accent/40"
+        />
+      </label>
+
+      {isLoading ? (
+        <div className="space-y-2">
+          <Skeleton className="h-14 w-full" />
+          <Skeleton className="h-14 w-full" />
+          <Skeleton className="h-14 w-full" />
+        </div>
+      ) : customersQuery.isError || ordersForDayQuery.isError ? (
+        <QueryError
+          what="לקוחות"
+          onRetry={() => {
+            void customersQuery.refetch();
+            void ordersForDayQuery.refetch();
+          }}
+          retrying={customersQuery.isFetching || ordersForDayQuery.isFetching}
+        />
+      ) : !dayId ? (
+        // Without a day, no customer has a `daily_orders` header — the
+        // list below would otherwise render every row as "אין הזמנה" and
+        // let its pencil open CustomerOrdersDialog with no real day for
+        // OrderLinesEditor's catalog RPC to query against. Blocked here,
+        // same message the original master-detail screen's detail pane
+        // used, rather than letting a pencil discover the problem itself.
+        <EmptyState
+          icon="clock"
+          title={dayView.isLive ? "אין יום מסחר פתוח" : "לא נמצא יום מסחר בתאריך זה"}
+          hint={
+            dayView.isLive
+              ? "פתח יום עסקים בסרגל הצד כדי לנהל הזמנות בשם לקוחות."
+              : "בחר תאריך אחר בסרגל הצד, או חזור ליום הפעיל."
+          }
+        />
+      ) : rows.length === 0 ? (
+        <EmptyState
+          icon="briefcase"
+          title="אין לקוחות להצגה"
+          hint={search ? "נסה מונח חיפוש אחר." : "אין לקוחות פעילים במערכת."}
+        />
+      ) : (
+        <TwoColumnRowList rows={rows} />
+      )}
+
+      <CustomerOrdersDialog
+        tradingDayId={dayId ?? ""}
+        customerId={ordersDialogCustomer?.id ?? null}
+        customerName={ordersDialogCustomer?.name ?? ""}
+        onClose={() => setOrdersDialogCustomer(null)}
+        onSubmitted={() => {
+          void queryClient.invalidateQueries({
+            queryKey: ["customer-oversight", "orders-for-day", dayId],
+          });
+          setOrdersDialogCustomer(null);
+        }}
+        readOnly={!dayView.isLive}
+      />
+    </>
   );
 }

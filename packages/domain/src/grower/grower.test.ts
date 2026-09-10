@@ -26,6 +26,7 @@ import {
   GROWER_ERROR_CODES,
   toBootstrapGrowerPickRpcArgs,
   toCloseOutPickLeftoversRpcArgs,
+  toSavePickLinesRpcArgs,
   toSendPickReminderRpcArgs,
   toUpdatePickProductDetailsRpcArgs,
 } from "./schemas";
@@ -412,5 +413,148 @@ describe("grower picking module", () => {
     );
     expect(afterClose.error).not.toBeNull();
     expect(afterClose.error?.code).toBe(GROWER_ERROR_CODES.INVALID_STATE);
+  }, 30000);
+
+  // The regression this function exists for. The editor used to save by firing
+  // one RPC per changed line, each its own transaction, so a rejection on ONE
+  // line still committed every other line — the grower saw an error over a
+  // table that had been partly written. Two lines, the second guaranteed to be
+  // rejected by the arrangement floor, is the smallest case that tells the two
+  // behaviours apart.
+  it("save_pick_lines applies every line or none: one rejected line rolls back the whole save", async () => {
+    const { client: backoffice, userId: adminId } = await signedInBackoffice();
+    const grower = await createTestGrowerWithProduct();
+    cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
+    const secondProduct = await addGrowerProduct(grower.companyId);
+    cleanupFns.push(() => removeGrowerProduct(grower.companyId, secondProduct.varietyId));
+    cleanupFns.push(() => deleteTestProductVariety(secondProduct));
+
+    const { day, arrangement } = await createClosedTestDay(adminId);
+    const customer = await createTestCompany("Test Customer", "customer");
+    cleanupFns.push(() => deleteTestCompany(customer.id));
+    // Pushed after every fixture the day's cascade could collide with — see
+    // createClosedTestDay's comment on LIFO ordering.
+    cleanupFns.push(() => deleteTestTradingDay(day.id));
+
+    const bootstrap = await backoffice.rpc(
+      "bootstrap_grower_pick",
+      toBootstrapGrowerPickRpcArgs({ tradingDayId: day.id, growerCompanyId: grower.companyId }),
+    );
+    const pickId = bootstrap.data!.id;
+    const lineA = await getPickProductLine(pickId, grower.varietyId);
+    const lineB = await getPickProductLine(pickId, secondProduct.varietyId);
+
+    const growerClient = await signedInGrowerFor(grower.companyId);
+
+    // Both lines start at 10 picked, and 6 pallets of line B are already
+    // arranged to a customer — so line B can never drop below 6.
+    const seed = await growerClient.rpc(
+      "save_pick_lines",
+      toSavePickLinesRpcArgs({
+        dailyPickId: pickId,
+        lines: [
+          { dailyPickProductId: lineA!.id, palletsPicked: 10, pickupTime: null, comment: null },
+          { dailyPickProductId: lineB!.id, palletsPicked: 10, pickupTime: null, comment: null },
+        ],
+      }),
+    );
+    expect(seed.error).toBeNull();
+
+    const orderLine = await createTestOrderProductLine(day.id, customer.id, secondProduct.varietyId, 6);
+    await createTestArrangementRecord({
+      dailyArrangementId: arrangement.id,
+      dailyPickProductId: lineB!.id,
+      dailyOrderProductId: orderLine.id,
+      customerCompanyId: customer.id,
+      quantityPallets: 6,
+    });
+
+    // Line A is a perfectly valid edit; line B breaches the floor. Under the
+    // old fan-out, A committed and B failed.
+    const rejected = await growerClient.rpc(
+      "save_pick_lines",
+      toSavePickLinesRpcArgs({
+        dailyPickId: pickId,
+        lines: [
+          { dailyPickProductId: lineA!.id, palletsPicked: 99, pickupTime: "05:30", comment: "changed" },
+          { dailyPickProductId: lineB!.id, palletsPicked: 1, pickupTime: null, comment: null },
+        ],
+      }),
+    );
+    expect(rejected.error).not.toBeNull();
+    expect(rejected.error?.code).toBe(GROWER_ERROR_CODES.CONFLICT);
+
+    // The assertion that matters: line A must be untouched, not 99.
+    const afterA = await getPickProductLine(pickId, grower.varietyId);
+    expect(afterA).toMatchObject({ palletsPicked: "10.00", pickupTime: null, comment: null });
+    const afterB = await getPickProductLine(pickId, secondProduct.varietyId);
+    expect(afterB).toMatchObject({ palletsPicked: "10.00" });
+
+    // And a save where every line is valid still applies in full.
+    const accepted = await growerClient.rpc(
+      "save_pick_lines",
+      toSavePickLinesRpcArgs({
+        dailyPickId: pickId,
+        lines: [
+          { dailyPickProductId: lineA!.id, palletsPicked: 99, pickupTime: "05:30", comment: "changed" },
+          { dailyPickProductId: lineB!.id, palletsPicked: 7, pickupTime: null, comment: null },
+        ],
+      }),
+    );
+    expect(accepted.error).toBeNull();
+    expect(await getPickProductLine(pickId, grower.varietyId)).toMatchObject({
+      palletsPicked: "99.00",
+      comment: "changed",
+    });
+    expect(await getPickProductLine(pickId, secondProduct.varietyId)).toMatchObject({
+      palletsPicked: "7.00",
+    });
+  }, 30000);
+
+  // A batch takes a list of line ids, which the per-line functions never had
+  // to cross-check against the pick they belong to. Authorizing the pick alone
+  // would let a grower pair their own pick id with someone else's line ids.
+  it("save_pick_lines rejects a line id belonging to a different pick", async () => {
+    const { client: backoffice, userId: adminId } = await signedInBackoffice();
+    const growerOne = await createTestGrowerWithProduct();
+    cleanupFns.push(() => deleteTestGrowerWithProduct(growerOne));
+    const growerTwo = await createTestGrowerWithProduct();
+    cleanupFns.push(() => deleteTestGrowerWithProduct(growerTwo));
+    const { day } = await createClosedTestDay(adminId);
+    cleanupFns.push(() => deleteTestTradingDay(day.id));
+
+    const pickOne = await backoffice.rpc(
+      "bootstrap_grower_pick",
+      toBootstrapGrowerPickRpcArgs({ tradingDayId: day.id, growerCompanyId: growerOne.companyId }),
+    );
+    const pickTwo = await backoffice.rpc(
+      "bootstrap_grower_pick",
+      toBootstrapGrowerPickRpcArgs({ tradingDayId: day.id, growerCompanyId: growerTwo.companyId }),
+    );
+    const lineOne = await getPickProductLine(pickOne.data!.id, growerOne.varietyId);
+    const lineTwo = await getPickProductLine(pickTwo.data!.id, growerTwo.varietyId);
+
+    const growerOneClient = await signedInGrowerFor(growerOne.companyId);
+    const crossed = await growerOneClient.rpc(
+      "save_pick_lines",
+      toSavePickLinesRpcArgs({
+        // Grower one's own pick — authorized — but carrying grower two's line.
+        dailyPickId: pickOne.data!.id,
+        lines: [
+          { dailyPickProductId: lineOne!.id, palletsPicked: 5, pickupTime: null, comment: null },
+          { dailyPickProductId: lineTwo!.id, palletsPicked: 5, pickupTime: null, comment: null },
+        ],
+      }),
+    );
+    expect(crossed.error).not.toBeNull();
+    expect(crossed.error?.code).toBe(GROWER_ERROR_CODES.FORBIDDEN);
+
+    // Rolled back whole, so grower one's own line is unchanged too.
+    expect(await getPickProductLine(pickOne.data!.id, growerOne.varietyId)).toMatchObject({
+      palletsPicked: "0.00",
+    });
+    expect(await getPickProductLine(pickTwo.data!.id, growerTwo.varietyId)).toMatchObject({
+      palletsPicked: "0.00",
+    });
   }, 30000);
 });

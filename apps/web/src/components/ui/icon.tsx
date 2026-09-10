@@ -136,6 +136,15 @@ const PATHS: Record<string, ReactNode> = {
       <path d="m19.5 19.5-4.3-4.3" />
     </>
   ),
+  // Drawn on the same 24×24 grid as the rest: a nib and its shaft on the
+  // 45° diagonal, plus the short "ink" stroke that reads as the tip. Added
+  // for the arrangement board, where every editable row carries one.
+  pencil: (
+    <>
+      <path d="M4.5 19.5h3.2L18.4 8.8a2.26 2.26 0 0 0-3.2-3.2L4.5 16.3z" />
+      <path d="m14.2 6.6 3.2 3.2" />
+    </>
+  ),
 };
 
 export type IconName = keyof typeof PATHS;

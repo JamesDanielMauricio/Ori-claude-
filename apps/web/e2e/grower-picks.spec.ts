@@ -63,8 +63,9 @@ test.describe("Grower — daily picking input", () => {
     await page.getByRole("button", { name: "התחברות" }).click();
     await expect(page).toHaveURL(/\/grower\/picks$/);
 
-    await expect(page.getByRole("button", { name: "ערוך", exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "ערוך", exact: true }).click();
+    // No "ערוך" gate: the fields are live the moment the editor mounts
+    // (pick-lines-editor.tsx dropped the per-session edit gate).
+    await expect(page.getByRole("button", { name: "ערוך", exact: true })).toHaveCount(0);
 
     const palletsInput = page.locator('input[type="number"]');
     const pickupInput = page.locator('input[type="time"]');
@@ -81,6 +82,23 @@ test.describe("Grower — daily picking input", () => {
     // <input type="number"> normalizes its DOM value (strips insignificant
     // trailing zeros) regardless of the exact string the numeric(10,2)
     // column round-trips as — "12.5" here, not "12.50".
+    await expect(palletsInput).toHaveValue("12.5");
+    await expect(pickupInput).toHaveValue("09:15");
+    await expect(commentInput).toHaveValue("gate code 4321");
+
+    // The pick history list (routes/grower/history.tsx), the grower-module
+    // counterpart of the customer's order history. This pick was only saved,
+    // never submitted, so it's still "טיוטה" — same badge picks.tsx itself
+    // shows.
+    await page.goto("/grower/history");
+    const historyRow = page.getByRole("button", { name: "טיוטה" });
+    await expect(historyRow).toBeVisible();
+    await historyRow.click();
+
+    // Routes back to the same editor, pre-filled with what was just saved —
+    // a pick reached from history is not a different kind of object, only a
+    // different way of finding one.
+    await expect(page).toHaveURL(/\/grower\/picks\?pickId=/);
     await expect(palletsInput).toHaveValue("12.5");
     await expect(pickupInput).toHaveValue("09:15");
     await expect(commentInput).toHaveValue("gate code 4321");
@@ -103,8 +121,8 @@ test.describe("Grower — daily picking input", () => {
     await expect(page).toHaveURL(/\/grower\/picks$/);
 
     // Establish a real, saved baseline first, so "the original values"
-    // means something other than the bootstrap default.
-    await page.getByRole("button", { name: "ערוך", exact: true }).click();
+    // means something other than the bootstrap default. No "ערוך" gate to
+    // open first — see the previous test.
     const palletsInput = page.locator('input[type="number"]');
     const commentInput = page.locator('input[type="text"]');
     await palletsInput.fill("3");
@@ -112,8 +130,7 @@ test.describe("Grower — daily picking input", () => {
     await page.getByRole("button", { name: "שמור" }).click();
     await expect(page.getByText("השורות נשמרו.")).toBeVisible();
 
-    // Start editing again, change values, but hit Cancel instead of Save.
-    await page.getByRole("button", { name: "ערוך", exact: true }).click();
+    // Change values again, but hit Cancel instead of Save.
     await palletsInput.fill("999");
     await commentInput.fill("this should never be saved");
     await page.getByRole("button", { name: "בטל שינויים" }).click();

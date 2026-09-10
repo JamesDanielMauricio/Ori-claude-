@@ -3,6 +3,7 @@ import { useState } from "react";
 import { inputClassName } from "@/components/reference-data/form-field";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
+import { ProductThumbnail } from "@/components/ui/product-thumbnail";
 
 export interface OrderVarietyRow {
   varietyId: string;
@@ -12,12 +13,37 @@ export interface OrderVarietyRow {
   pallets: string;
   comment: string;
   outOfStock?: boolean;
+  // This customer's own ceiling for this row (get_orderable_catalog_for_
+  // customer's max_orderable_for_customer, migration 0042) — the highest
+  // number the quantity dropdown offers. Omitted for rows with no such
+  // ceiling to offer (the read-only historical view builds its rows from
+  // already-submitted lines, which carry no live stock figure).
+  maxOrderable?: number;
 }
 
 const PACK_TYPE_LABEL: Record<"pallets" | "crates", string> = {
   pallets: "משטחים",
   crates: "ארגזים",
 };
+
+// Every whole number from 0 up to maxOrderable, plus the row's current
+// value even if it exceeds that ceiling — stock can drop out from under an
+// already-chosen quantity between page loads, and a <select> whose value
+// matches no <option> silently falls back to the first one, which would
+// quietly zero out a real order line the moment its family re-renders.
+// Surfacing the too-high figure as its own option instead leaves the
+// existing quantity visibly selected (and still change-able downward) until
+// the customer acts on it themselves.
+function dropdownOptions(maxOrderable: number, currentValue: string): number[] {
+  const safeMax = Number.isFinite(maxOrderable) ? Math.max(0, Math.floor(maxOrderable)) : 0;
+  const options = new Set<number>();
+  for (let n = 0; n <= safeMax; n++) options.add(n);
+  const current = Number(currentValue);
+  if (currentValue.trim() !== "" && Number.isInteger(current) && current > safeMax) {
+    options.add(current);
+  }
+  return [...options].sort((a, b) => a - b);
+}
 
 export interface OrderFamilyRow {
   familyId: string;
@@ -29,44 +55,30 @@ export interface OrderFamilyRow {
   varieties: OrderVarietyRow[];
 }
 
-// Round photo, or a generic produce icon while a family has no photo set
-// yet, matching the reference design's thumbnail. The ring sits *inside* the
-// element (`ring-inset`) so a photo's own edge isn't clipped by a border
-// drawn on top of it.
-function ProductThumbnail({ imageUrl }: { imageUrl?: string | null }) {
-  if (imageUrl) {
-    return (
-      <img
-        src={imageUrl}
-        alt=""
-        // `loading="lazy"` because a long catalog would otherwise fetch every
-        // family's photo before the first row is interactive.
-        loading="lazy"
-        className="h-11 w-11 shrink-0 rounded-full object-cover shadow-card ring-1 ring-inset ring-border transition-transform duration-300 ease-[cubic-bezier(0.22,0.61,0.36,1)] group-hover:scale-105"
-      />
-    );
-  }
-  return (
-    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-accent-soft to-accent-soft/50 text-accent ring-1 ring-inset ring-accent/15 transition-transform duration-300 ease-[cubic-bezier(0.22,0.61,0.36,1)] group-hover:scale-105">
-      <Icon name="leaf" className="h-5 w-5" />
-    </span>
-  );
-}
-
 // The reference design's shop screen: a collapsed row per product FAMILY
 // (photo + name + chevron), expanding to that family's individual
 // varieties — each with its own price/quantity/comment. One shared
 // presentation for both the live order screen (editable) and the
 // read-only historical order view (past, closed trading days);
 // `onChangePallets`/`onOpenComment` are omitted in the read-only case.
+//
+// quantityMode: "dropdown" on the customer's own order screen — a <select>
+// capped at each row's own maxOrderable, so a customer can never pick more
+// than they're actually allowed. "number" (the default) is a free-typed
+// number input, used for the backoffice on-behalf-of editor (staff may
+// deliberately exceed a customer's cap) and the read-only historical view.
+// This is the one place that distinction is drawn — never a second,
+// divergent quantity control.
 export function OrderProductList({
   families,
   editable,
+  quantityMode = "number",
   onChangePallets,
   onOpenComment,
 }: {
   families: OrderFamilyRow[];
   editable: boolean;
+  quantityMode?: "dropdown" | "number";
   onChangePallets?: (varietyId: string, value: string) => void;
   onOpenComment?: (varietyId: string) => void;
 }) {
@@ -182,21 +194,45 @@ export function OrderProductList({
                       {/* Quantity + pack type together, matching the reference
                           design's single pill-shaped control — pack_type is
                           fixed per product (set by backoffice, never chosen
-                          per order line), so the chevron is decorative, not a
-                          working dropdown. */}
+                          per order line), so the leading chevron is always
+                          decorative. On the customer's own order screen
+                          (quantityMode="dropdown") the quantity itself is now
+                          a real <select> capped at this row's own remaining
+                          stock — see dropdownOptions above. Every other
+                          caller (backoffice on-behalf-of, the read-only
+                          historical view) keeps the free-typed number
+                          input. */}
                       <div className="relative">
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          disabled={!editable}
-                          aria-label={`כמות ${variety.packType ? PACK_TYPE_LABEL[variety.packType] : "פלטות"} — ${variety.varietyName}`}
-                          className={`${inputClassName} w-32 ps-7 pe-14 font-semibold`}
-                          value={variety.pallets}
-                          onChange={(event) =>
-                            onChangePallets?.(variety.varietyId, event.target.value)
-                          }
-                        />
+                        {quantityMode === "dropdown" ? (
+                          <select
+                            disabled={!editable}
+                            aria-label={`כמות ${variety.packType ? PACK_TYPE_LABEL[variety.packType] : "פלטות"} — ${variety.varietyName}`}
+                            className={`${inputClassName} w-32 appearance-none ps-7 pe-14 font-semibold`}
+                            value={variety.pallets === "" ? "0" : variety.pallets}
+                            onChange={(event) =>
+                              onChangePallets?.(variety.varietyId, event.target.value)
+                            }
+                          >
+                            {dropdownOptions(variety.maxOrderable ?? 0, variety.pallets).map((n) => (
+                              <option key={n} value={n}>
+                                {n}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            disabled={!editable}
+                            aria-label={`כמות ${variety.packType ? PACK_TYPE_LABEL[variety.packType] : "פלטות"} — ${variety.varietyName}`}
+                            className={`${inputClassName} w-32 ps-7 pe-14 font-semibold`}
+                            value={variety.pallets}
+                            onChange={(event) =>
+                              onChangePallets?.(variety.varietyId, event.target.value)
+                            }
+                          />
+                        )}
                         <Icon
                           name="chevronDown"
                           className="pointer-events-none absolute inset-y-0 start-2 my-auto h-3.5 w-3.5 text-ink-subtle"

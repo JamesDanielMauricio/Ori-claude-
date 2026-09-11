@@ -70,7 +70,20 @@ export async function deleteTestProductVariety(productVarietyId: string): Promis
 // so cleanup needs to resolve the id from the unique name the test itself
 // generated and typed into the form.
 export async function findCompanyIdByName(name: string): Promise<string | null> {
-  const [row] = await db.select({ id: companies.id }).from(companies).where(eq(companies.name, name)).limit(1);
+  const [row] = await db
+    .select({ id: companies.id })
+    .from(companies)
+    .where(eq(companies.name, name))
+    .limit(1);
+  return row?.id ?? null;
+}
+
+export async function findProductFamilyIdByName(name: string): Promise<string | null> {
+  const [row] = await db
+    .select({ id: productFamilies.id })
+    .from(productFamilies)
+    .where(eq(productFamilies.name, name))
+    .limit(1);
   return row?.id ?? null;
 }
 

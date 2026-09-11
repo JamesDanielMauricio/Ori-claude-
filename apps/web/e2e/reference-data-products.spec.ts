@@ -13,6 +13,7 @@ import {
   deleteTestCompany as deleteTestCompanyById,
   deleteTestProductFamily,
   deleteTestProductVariety,
+  findProductFamilyIdByName,
   findProductVarietyIdByName,
 } from "@ori/domain/reference-data/testing";
 import { expect, test, type Page } from "@playwright/test";
@@ -23,7 +24,20 @@ import { expect, test, type Page } from "@playwright/test";
 // checkbox with each column's own name (e.g. "מחיר"), which collides with
 // that same field's input aria-label at the page level.
 function editingRow(page: Page) {
-  return page.locator("tr").filter({ has: page.getByRole("button", { name: "שמור" }) });
+  return page
+    .locator("tr")
+    .filter({ has: page.getByRole("button", { name: "שמור", exact: true }) });
+}
+
+// Signs in as a fresh backoffice admin and lands on the Products screen —
+// shared by both tests below, which each need their own throwaway account.
+async function signInToProducts(page: Page, email: string, password: string) {
+  await page.goto("/login");
+  await page.getByLabel("אימייל").fill(email);
+  await page.getByLabel("סיסמה", { exact: true }).fill(password);
+  await page.getByRole("button", { name: "התחברות" }).click();
+  await expect(page).toHaveURL(/\/backoffice\/shop$/);
+  await page.goto("/backoffice/products");
 }
 
 // Drives the Products screen through the browser — a create and an edit
@@ -50,13 +64,7 @@ test.describe("Backoffice — Products", () => {
     const admin = await createTestProfile({ companyId: company.id, role: "backoffice" });
     cleanupFns.push(() => deleteTestUser(admin.userId));
 
-    await page.goto("/login");
-    await page.getByLabel("אימייל").fill(admin.email);
-    await page.getByLabel("סיסמה", { exact: true }).fill(admin.password);
-    await page.getByRole("button", { name: "התחברות" }).click();
-    await expect(page).toHaveURL(/\/backoffice\/shop$/);
-
-    await page.goto("/backoffice/products");
+    await signInToProducts(page, admin.email, admin.password);
 
     const productName = `E2E Variety ${randomUUID()}`;
     // The table's own toolbar add button (record-table.tsx's `onAdd`)
@@ -109,5 +117,85 @@ test.describe("Backoffice — Products", () => {
     // …and the cap is readable straight off the row too, with nothing
     // expanded or opened.
     await expect(productRow).toContainText(`${capCustomer.name}: 4`);
+  });
+
+  // The family half of the screen: the catalog's grouping level is a record
+  // in its own right here, created and deleted through its own header row.
+  // The delete guard is the point of the second half — product_varieties
+  // .family_id is a NOT NULL foreign key with no cascade, so a family that
+  // still holds varieties CANNOT be deleted, and the screen has to say so
+  // rather than let the database refuse it as an opaque error.
+  test("creates a product family, refuses to delete it while it holds a variety, then deletes it", async ({
+    page,
+  }) => {
+    const company = await createTestCompany();
+    cleanupFns.push(() => deleteTestCompany(company.id));
+    const admin = await createTestProfile({ companyId: company.id, role: "backoffice" });
+    cleanupFns.push(() => deleteTestUser(admin.userId));
+
+    await signInToProducts(page, admin.email, admin.password);
+
+    // --- Create the family through its draft header row.
+    const familyName = `E2E Family ${randomUUID()}`;
+    await page.getByRole("button", { name: "משפחה חדשה" }).click();
+    await page.getByLabel("שם המשפחה").fill(familyName);
+    await page.getByLabel("קטגוריית המשפחה").fill("ירק");
+    await page.getByRole("button", { name: "שמור משפחה" }).click();
+    // Registered even though the test deletes it through the UI below: if
+    // an assertion fails first, the row must not outlive the run.
+    cleanupFns.push(async () => {
+      const id = await findProductFamilyIdByName(familyName);
+      if (id) await deleteTestProductFamily(id);
+    });
+
+    // Searching by family name matches the group on its own text, so the
+    // header row is what comes back.
+    await page.getByPlaceholder("חיפוש מוצר, זן או משפחה").fill(familyName);
+    const familyRow = page.locator("tr").filter({ hasText: familyName });
+    await expect(familyRow).toContainText("ירק", { timeout: 15000 });
+    await expect(familyRow).toContainText("אין זנים");
+
+    // --- Put a variety in it, which is what the delete has to refuse over.
+    await page.getByPlaceholder("חיפוש מוצר, זן או משפחה").fill("");
+    const varietyName = `E2E Variety ${randomUUID()}`;
+    await page.getByRole("button", { name: "מוצר חדש" }).click();
+    await editingRow(page).getByLabel("משפחה").selectOption({ label: familyName });
+    await editingRow(page).getByLabel("זן / שם").fill(varietyName);
+    await editingRow(page).getByRole("button", { name: "שמור", exact: true }).click();
+    cleanupFns.push(async () => {
+      const id = await findProductVarietyIdByName(varietyName);
+      if (id) await deleteTestProductVariety(id);
+    });
+
+    const varietyRow = page.locator("tr").filter({ hasText: varietyName });
+    await expect(varietyRow).toBeVisible({ timeout: 15000 });
+
+    // --- The guard: the dialog explains the count and offers no delete.
+    await page.getByPlaceholder("חיפוש מוצר, זן או משפחה").fill(familyName);
+    await familyRow.getByRole("button", { name: "מחק משפחה" }).click();
+    const blocked = page.getByRole("dialog", { name: "מחיקת משפחה" });
+    await expect(blocked).toContainText("לא ניתן למחוק");
+    await expect(blocked).toContainText("זן אחד");
+    await expect(blocked.getByRole("button", { name: "מחק", exact: true })).toHaveCount(0);
+    await blocked.getByRole("button", { name: "סגור", exact: true }).last().click();
+
+    // --- Empty the family, and the same button now really deletes it. The
+    // family stays expanded across the variety's save (products.tsx opens
+    // the family it just edited), so its row is reachable without a second
+    // click on the chevron.
+    await varietyRow.getByRole("button", { name: "מחק", exact: true }).click();
+    await page
+      .getByRole("dialog", { name: "מחיקת מוצר" })
+      .getByRole("button", { name: "מחק", exact: true })
+      .click();
+    await expect(varietyRow).toHaveCount(0, { timeout: 15000 });
+
+    await familyRow.getByRole("button", { name: "מחק משפחה" }).click();
+    const confirm = page.getByRole("dialog", { name: "מחיקת משפחה" });
+    await expect(confirm).toContainText("אינה הפיכה");
+    await confirm.getByRole("button", { name: "מחק", exact: true }).click();
+
+    await expect(familyRow).toHaveCount(0, { timeout: 15000 });
+    expect(await findProductFamilyIdByName(familyName)).toBeNull();
   });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, type MouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 import { Icon } from "./icon";
@@ -34,6 +34,10 @@ export function Dialog({
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  // The heading IS the dialog's accessible name — without this link the
+  // modal is announced as an unnamed dialog, and nothing on the page can
+  // address it by what it says it is (a test included).
+  const titleId = useId();
 
   useEffect(() => {
     const element = ref.current;
@@ -68,6 +72,7 @@ export function Dialog({
       onClose={onClose}
       onCancel={onClose}
       onClick={handleBackdropClick}
+      aria-labelledby={titleId}
       // `m-auto` restores the browser default a modal <dialog> relies on to
       // center itself. Tailwind preflight zeroes `margin` on every element,
       // which silently overrides the UA stylesheet rule and left every modal
@@ -101,7 +106,9 @@ export function Dialog({
           card that happens to float, without tinting the whole header. */}
       <div className="relative flex shrink-0 items-center justify-between gap-4 border-b border-border bg-surface-muted px-6 py-4">
         <span aria-hidden className="absolute inset-x-0 top-0 h-px bg-brass/70" />
-        <h2 className="font-display text-xl">{title}</h2>
+        <h2 id={titleId} className="font-display text-xl">
+          {title}
+        </h2>
         <button
           type="button"
           onClick={onClose}

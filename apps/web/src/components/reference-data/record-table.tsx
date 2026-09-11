@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { checkboxClassName, inputClassName } from "@/components/reference-data/form-field";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,26 @@ export interface RecordTableColumn<T> {
   // identity managed by Auth, a server-set timestamp) omit it and stay
   // read-only on an editing row.
   renderEdit?: (row: T) => ReactNode;
+}
+
+// One collapsible section of a grouped table — a product FAMILY on the
+// Products screen, the only screen that groups so far. The caller owns the
+// whole header row (its own expand toggle, its own edit controls, its own
+// fields when the group itself is being edited), because a group is a real
+// record on that screen and not merely a label: this component's job is
+// only to decide which groups are listed, which are open, and which rows
+// belong under which one.
+export interface RecordTableGroup {
+  id: string;
+  // What a search term matches the GROUP against, independent of its rows —
+  // so a family with no varieties yet is still findable by name.
+  searchText: string;
+  // The header row's content, spanning the full table width. Receives the
+  // expansion state the table ACTUALLY rendered with, which is not always
+  // the `expandedIds` the caller passed in (see `grouping` below) — drawing
+  // the chevron from this argument is what keeps it pointing the same way
+  // as the rows underneath it.
+  header: (expanded: boolean) => ReactNode;
 }
 
 // The pinned first column. Frozen with `position: sticky` rather than left
@@ -88,6 +108,7 @@ export function RecordTable<T>({
   onAdd,
   addLabel,
   toolbarExtra,
+  grouping,
   loading = false,
   searchPlaceholder = "חיפוש",
   emptyLabel = "אין רשומות עדיין.",
@@ -99,6 +120,12 @@ export function RecordTable<T>({
   // fields are worth finding a row by, not necessarily every visible column.
   searchText: (row: T) => string;
   // The id (via getRowId) of the row currently in inline-edit mode, or null.
+  // On a grouped table this may also be a GROUP's id while the group itself
+  // is being edited: no row matches it, so nothing renders as an editing
+  // row, but the table locks in exactly the same way (every row's
+  // edit/delete disabled, the add button disabled) — which is the point,
+  // since two concurrent edits on one screen would need two forms and two
+  // save buttons competing for the same Escape key.
   editingId: string | null;
   savingEdit?: boolean;
   // Whether the editing row's draft actually differs from the server's
@@ -117,6 +144,17 @@ export function RecordTable<T>({
   onAdd?: (() => void) | undefined;
   addLabel?: string | undefined;
   toolbarExtra?: ReactNode;
+  // Opt-in: omit it and the table is the flat list every other screen uses.
+  // All three parts are required together — a group list, the row → group
+  // mapping, and which groups the USER has opened (owned by the caller, the
+  // same way `editingId` is, so the screen can open a group in response to
+  // its own actions, e.g. keeping the family it just added a variety to
+  // open after the save).
+  grouping?: {
+    groups: RecordTableGroup[];
+    getGroupId: (row: T) => string;
+    expandedIds: ReadonlySet<string>;
+  };
   loading?: boolean;
   searchPlaceholder?: string;
   emptyLabel?: string;
@@ -143,17 +181,91 @@ export function RecordTable<T>({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [editingId, onCancelEdit]);
 
-  const filtered = useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase("he");
-    if (!needle) return rows;
-    // The row being edited never disappears out from under the user just
-    // because their draft edit no longer matches the search box — most
-    // visibly the blank "new record" draft, whose every field is empty.
-    return rows.filter(
-      (row) =>
-        getRowId(row) === editingId || searchText(row).toLocaleLowerCase("he").includes(needle),
-    );
-  }, [rows, query, searchText, editingId, getRowId]);
+  const needle = query.trim().toLocaleLowerCase("he");
+
+  // Whether one row survives the search box. The row being edited always
+  // does, so it never disappears out from under the user just because their
+  // draft no longer matches — most visibly the blank "new record" draft,
+  // whose every field is empty.
+  const rowMatches = useCallback(
+    (row: T) =>
+      needle === "" ||
+      getRowId(row) === editingId ||
+      searchText(row).toLocaleLowerCase("he").includes(needle),
+    [needle, searchText, editingId, getRowId],
+  );
+
+  const filtered = useMemo(
+    () => (needle === "" ? rows : rows.filter(rowMatches)),
+    [rows, needle, rowMatches],
+  );
+
+  // Every row bucketed into the caller's groups, in the caller's order.
+  // Null when the table isn't grouped, which is the signal further down to
+  // render one flat list exactly as before.
+  const grouped = useMemo(() => {
+    if (!grouping) return null;
+    const byGroup = new Map<string, T[]>();
+    for (const row of rows) {
+      const groupId = grouping.getGroupId(row);
+      const list = byGroup.get(groupId);
+      if (list) list.push(row);
+      else byGroup.set(groupId, [row]);
+    }
+
+    const sections = grouping.groups.flatMap((group) => {
+      const allRows = byGroup.get(group.id) ?? [];
+      // Consumed, so whatever is left in the map afterwards is genuinely
+      // orphaned rather than merely already-placed.
+      byGroup.delete(group.id);
+
+      // The group being edited is pinned in place for the same reason the
+      // row being edited is: it must not vanish because the search box no
+      // longer matches the name being typed INTO it. Most visibly a
+      // brand-new group, whose name starts empty and so matches nothing.
+      const pinned = group.id === editingId;
+
+      // Searching a tree, not a list: a group that matches ON ITS OWN TEXT
+      // keeps ALL of its rows, because the user asked for the group and a
+      // family that opens onto nothing is worse than no result at all.
+      // Otherwise only the rows that matched survive, and the group is
+      // listed only if that left any — except with an empty search box,
+      // where every group is listed including the empty ones, since a group
+      // with no rows is still a record and its header is the only way to
+      // reach it.
+      const groupMatches =
+        needle !== "" && group.searchText.toLocaleLowerCase("he").includes(needle);
+      const groupRows =
+        needle === "" || groupMatches || pinned ? allRows : allRows.filter(rowMatches);
+      if (needle !== "" && !groupMatches && !pinned && groupRows.length === 0) return [];
+
+      // Two things open a group no matter what the user last clicked:
+      //   - a search whose hits are rows INSIDE it, which would otherwise
+      //     sit behind a chevron the user has to guess at. A search that
+      //     matched the group's own name doesn't count: there the answer is
+      //     "here are the families", and force-opening each one would bury
+      //     that answer under every variety they hold.
+      //   - an edit in progress on one of its rows, most importantly a
+      //     not-yet-saved draft row, which a collapse would destroy.
+      const expanded =
+        grouping.expandedIds.has(group.id) ||
+        (needle !== "" && !groupMatches && groupRows.length > 0) ||
+        groupRows.some((row) => getRowId(row) === editingId);
+
+      return [{ group, rows: groupRows, expanded }];
+    });
+
+    // A row whose group id matches no listed group is still shown, after
+    // every group and without a header, rather than dropped: silently
+    // hiding a record because its parent is missing is the one failure mode
+    // a user cannot diagnose from the screen.
+    const orphans = [...byGroup.values()].flat().filter(rowMatches);
+    return { sections, orphans };
+  }, [grouping, rows, needle, rowMatches, editingId, getRowId]);
+
+  const isEmpty = grouped
+    ? grouped.sections.length === 0 && grouped.orphans.length === 0
+    : filtered.length === 0;
 
   function toggleColumn(key: string) {
     setHiddenColumns((current) => {
@@ -162,6 +274,61 @@ export function RecordTable<T>({
       else next.add(key);
       return next;
     });
+  }
+
+  // One record's <tr>. A function rather than inline JSX because a grouped
+  // table emits these from inside each section as well as, for orphans,
+  // outside them — and a second copy of the pinned actions cell is exactly
+  // the kind of duplication that drifts.
+  function renderRow(row: T) {
+    const id = getRowId(row);
+    const isEditing = id === editingId;
+    return (
+      <TableRow key={id}>
+        <TableCell className={PINNED_CELL}>
+          {isEditing ? (
+            <div className="flex items-center gap-1.5">
+              <RowIconButton
+                icon="checkCircle"
+                label="שמור"
+                tone="accent"
+                onClick={onSaveEdit}
+                disabled={savingEdit || !dirtyEdit}
+              />
+              <RowIconButton
+                icon="close"
+                label="ביטול"
+                tone="neutral"
+                onClick={onCancelEdit}
+                disabled={savingEdit}
+              />
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <RowIconButton
+                icon="trash"
+                label="מחק"
+                tone="danger"
+                onClick={() => onDelete(row)}
+                disabled={editingId !== null}
+              />
+              <RowIconButton
+                icon="pencil"
+                label="ערוך"
+                tone="neutral"
+                onClick={() => onEdit(row)}
+                disabled={editingId !== null}
+              />
+            </div>
+          )}
+        </TableCell>
+        {visibleColumns.map((column) => (
+          <TableCell key={column.key}>
+            {isEditing && column.renderEdit ? column.renderEdit(row) : column.render(row)}
+          </TableCell>
+        ))}
+      </TableRow>
+    );
   }
 
   return (
@@ -229,7 +396,7 @@ export function RecordTable<T>({
           <Skeleton className="h-12 w-full" />
           <Skeleton className="h-12 w-full" />
         </div>
-      ) : filtered.length === 0 ? (
+      ) : isEmpty ? (
         <div className="flex flex-col items-center gap-2 rounded-xl bg-surface px-6 py-14 text-center shadow-raised ring-1 ring-inset ring-border/70">
           <Icon name={query ? "search" : "clipboard"} className="h-6 w-6 text-ink-subtle" />
           <p className="text-sm text-ink-muted">
@@ -253,56 +420,38 @@ export function RecordTable<T>({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filtered.map((row) => {
-              const id = getRowId(row);
-              const isEditing = id === editingId;
-              return (
-                <TableRow key={id}>
-                  <TableCell className={PINNED_CELL}>
-                    {isEditing ? (
-                      <div className="flex items-center gap-1.5">
-                        <RowIconButton
-                          icon="checkCircle"
-                          label="שמור"
-                          tone="accent"
-                          onClick={onSaveEdit}
-                          disabled={savingEdit || !dirtyEdit}
-                        />
-                        <RowIconButton
-                          icon="close"
-                          label="ביטול"
-                          tone="neutral"
-                          onClick={onCancelEdit}
-                          disabled={savingEdit}
-                        />
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-1.5">
-                        <RowIconButton
-                          icon="trash"
-                          label="מחק"
-                          tone="danger"
-                          onClick={() => onDelete(row)}
-                          disabled={editingId !== null}
-                        />
-                        <RowIconButton
-                          icon="pencil"
-                          label="ערוך"
-                          tone="neutral"
-                          onClick={() => onEdit(row)}
-                          disabled={editingId !== null}
-                        />
-                      </div>
-                    )}
-                  </TableCell>
-                  {visibleColumns.map((column) => (
-                    <TableCell key={column.key}>
-                      {isEditing && column.renderEdit ? column.renderEdit(row) : column.render(row)}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              );
-            })}
+            {grouped
+              ? [
+                  ...grouped.sections.map((section) => (
+                    <Fragment key={`group:${section.group.id}`}>
+                      <tr className="bg-surface-muted/70 shadow-[inset_0_1px_0_var(--color-border)]">
+                        {/* One cell across the whole table, actions
+                            included, rather than a header that reuses the
+                            pinned actions column: that lets the caller's
+                            entire header — toggle, name, its own edit
+                            controls — ride in a single `sticky start-0`
+                            block, so a family stays labelled while the
+                            sixteen variety columns scroll horizontally
+                            underneath it. `p-0` because the header owns its
+                            own padding inside that block; the cell itself is
+                            table-wide and padding on it would push the
+                            content away from the frozen edge. */}
+                        <td colSpan={visibleColumns.length + 1} className="p-0">
+                          {section.group.header(section.expanded)}
+                        </td>
+                      </tr>
+                      {/* Collapsed groups render no rows at all. The
+                          height-animated `.accordion-panel` used elsewhere
+                          in the app can't apply here — a <tbody> can't be a
+                          CSS grid without destroying the column alignment
+                          that is the entire point of a table — so the
+                          motion budget goes on the chevron instead. */}
+                      {section.expanded && section.rows.map(renderRow)}
+                    </Fragment>
+                  )),
+                  ...grouped.orphans.map(renderRow),
+                ]
+              : filtered.map(renderRow)}
           </TableBody>
         </TableContainer>
       )}
@@ -310,7 +459,11 @@ export function RecordTable<T>({
   );
 }
 
-function RowIconButton({
+// The round action button every record row carries. Exported so a grouped
+// table's group header (products.tsx's family row) can use the identical
+// control for the group's own edit/save/cancel rather than a second,
+// nearly-matching button that drifts out of step with this one.
+export function RowIconButton({
   icon,
   label,
   tone,

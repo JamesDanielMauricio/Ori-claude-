@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 
 import { Icon, type IconName } from "./icon";
 
@@ -72,8 +72,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     }, TOAST_DURATION_MS);
   }, []);
 
+  // Memoized so a toast appearing/dismissing (which changes `toasts` state,
+  // re-rendering this provider) doesn't hand every useToast() consumer
+  // app-wide a new object reference — showToast itself never changes.
+  const value = useMemo(() => ({ showToast }), [showToast]);
+
   return (
-    <ToastContext.Provider value={{ showToast }}>
+    <ToastContext.Provider value={value}>
       {children}
       {/* `flex-col-reverse` so a second toast pushes the stack upward from the
           bottom edge — new messages appear nearest the bottom where the eye

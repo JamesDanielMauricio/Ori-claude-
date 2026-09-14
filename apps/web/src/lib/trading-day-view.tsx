@@ -1,5 +1,13 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { createContext, useContext, useEffect, useId, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 
 import { createClient } from "./supabase/client";
 
@@ -36,10 +44,12 @@ const SelectedTradingDayContext = createContext<SelectedTradingDayState | null>(
 // being possible.
 export function SelectedTradingDayProvider({ children }: { children: ReactNode }) {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  // Memoized so this provider re-rendering for any other reason doesn't hand
+  // every useSelectedTradingDay() consumer a new object reference — setSelectedDate
+  // is already stable (it's the setter from useState).
+  const value = useMemo(() => ({ selectedDate, setSelectedDate }), [selectedDate]);
   return (
-    <SelectedTradingDayContext.Provider value={{ selectedDate, setSelectedDate }}>
-      {children}
-    </SelectedTradingDayContext.Provider>
+    <SelectedTradingDayContext.Provider value={value}>{children}</SelectedTradingDayContext.Provider>
   );
 }
 

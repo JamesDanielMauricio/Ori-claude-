@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -164,9 +165,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [loadProfile]);
 
-  return (
-    <AuthContext.Provider value={{ ...state, refreshProfile }}>{children}</AuthContext.Provider>
-  );
+  // Memoized so a re-render that doesn't touch `state` or `refreshProfile`
+  // (refreshProfile is itself stable via useCallback) doesn't hand every
+  // useAuth() consumer a new object reference and force them all to
+  // re-render together.
+  const value = useMemo(() => ({ ...state, refreshProfile }), [state, refreshProfile]);
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth(): AuthState {

@@ -27,6 +27,7 @@ import { QueryError } from "@/components/ui/query-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
+import { nudgeWhatsAppDispatch } from "@/lib/nudge-whatsapp-dispatch";
 import { createClient } from "@/lib/supabase/client";
 import { useTradingDayView } from "@/lib/trading-day-view";
 
@@ -336,6 +337,11 @@ export default function DistributorAsGrowerPage() {
     onSuccess: () => {
       showToast("התזכורת נשלחה.", "success");
       void queryClient.invalidateQueries({ queryKey: picksForDayQueryKey });
+      // The RPC above already queued the WhatsApp send durably — this just
+      // asks the dispatcher to drain it right now instead of waiting for the
+      // next scheduled run. See nudge-whatsapp-dispatch.ts for why this is
+      // fire-and-forget and can never fail this mutation.
+      nudgeWhatsAppDispatch(supabase);
     },
     onError: mergeOnError(reminderOptimistic.onError, (error: { message?: string }) => {
       showToast(`שליחת התזכורת נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");

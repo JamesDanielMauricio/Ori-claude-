@@ -37,6 +37,15 @@
 // HTTP response body) so a test invocation's credential choice can be
 // confirmed without exposing the credential values themselves in the log.
 //
+// Dev env also redirects EVERY message to whatsapp_dev_override_phone
+// (notification_settings, migration 0045) instead of any real recipient —
+// not just the ones resolve_outbox_dispatch could actually reach. The point
+// is purely to verify "is WhatsApp working, does the message read right"
+// without needing real phone numbers/whatsapp_group_id on test data, so a
+// dev row is composed via resolve_outbox_preview (migration 0046) and sent
+// once, before resolve_outbox_dispatch's real recipient resolution ever
+// runs. Live env never takes this branch — see the dispatch loop below.
+//
 // Per-invocation override: an optional JSON body `{"forceEnv": "live"}`
 // lets a single, manual, explicitly-authenticated invocation use the live
 // credential pair for verification WITHOUT flipping the WHATSAPP_ENV
@@ -91,34 +100,6 @@ function getGreenApiCredentials(env: "dev" | "live"): GreenApiCredentials {
     idInstance: Deno.env.get(`${prefix}_ID_INSTANCE`) ?? "",
     apiToken: Deno.env.get(`${prefix}_API_TOKEN`) ?? "",
   };
-}
-
-// Dev-safety redirect: in "dev" env every message is delivered to this one
-// number instead of whatever resolve_outbox_dispatch actually resolved, so
-// exercising the real dispatch loop against real customer/grower data during
-// development can never reach an actual customer or grower. Sourced from
-// notification_settings.whatsapp_dev_override_phone (migration 0045), not an
-// env var — editable from the Table Editor with no redeploy. "live" always
-// uses the real resolved target, ignoring this column entirely.
-//
-// Same fail-closed shape as the credentials check in sendWhatsAppMessage:
-// dev env with no override number configured must refuse to send rather than
-// silently falling through to the real resolved target, which would defeat
-// the entire point of the guard. `target` stays the real resolved recipient
-// for bookkeeping (alreadySent/record_outbox_target_sent) either way — only
-// where the message is physically delivered changes.
-function resolveSendTarget(
-  env: "dev" | "live",
-  target: string,
-  devOverridePhone: string | null,
-): { to: string } | { error: string } {
-  if (env !== "dev") return { to: target };
-  if (!devOverridePhone) {
-    return {
-      error: "notification_settings.whatsapp_dev_override_phone is not configured — refusing to send in dev env",
-    };
-  }
-  return { to: devOverridePhone };
 }
 
 // Green API chat ids are `{phone}@c.us` for an individual and
@@ -189,12 +170,12 @@ Deno.serve(async (req) => {
   if (settingsError) {
     return Response.json({ error: settingsError.message }, { status: 500 });
   }
-  // Same server-side-only logging as above, for the dev redirect: confirms
-  // whether real sends will actually go out this run without printing the
-  // override number itself.
+  // Same server-side-only logging as above, for the dev preview: confirms
+  // whether preview sends will actually go out this run without printing
+  // the override number itself.
   if (whatsappEnv === "dev") {
     console.log(
-      `[whatsapp-dispatch] dev env — all sends redirected to notification_settings.whatsapp_dev_override_phone (configured: ${settings.whatsapp_dev_override_phone ? "yes" : "no"})`,
+      `[whatsapp-dispatch] dev env — every row sends a preview to notification_settings.whatsapp_dev_override_phone (configured: ${settings.whatsapp_dev_override_phone ? "yes" : "no"})`,
     );
   }
 
@@ -220,6 +201,62 @@ Deno.serve(async (req) => {
       continue;
     }
 
+    // Dev env: always send ONE preview message to whatsapp_dev_override_phone
+    // (migration 0045/0046), regardless of whether this row has any real
+    // contactable recipient. resolve_outbox_dispatch's whole point is "who
+    // can we actually reach" — a test company with nobody's phone number on
+    // file correctly resolves to zero targets there, which made dev testing
+    // structurally unable to verify "does WhatsApp work / does the message
+    // read right" without first fabricating real-looking contact data. This
+    // branch exits before resolve_outbox_dispatch is ever called, so live
+    // env's real recipient resolution is completely untouched below.
+    if (whatsappEnv === "dev") {
+      if (!settings.whatsapp_dev_override_phone) {
+        await recordFailure(
+          client,
+          row.id,
+          "notification_settings.whatsapp_dev_override_phone is not configured — refusing to send in dev env",
+        );
+        failed += 1;
+        continue;
+      }
+
+      const { data: previewMessage, error: previewError } = await client.rpc("resolve_outbox_preview", {
+        p_outbox_id: row.id,
+      });
+      if (previewError) {
+        await recordFailure(client, row.id, previewError.message);
+        failed += 1;
+        continue;
+      }
+
+      const result = await sendWhatsAppMessage(
+        settings.whatsapp_dev_override_phone,
+        previewMessage as string,
+        credentials,
+      );
+      if (!result.success) {
+        await recordFailure(client, row.id, result.error ?? "dev preview send failed");
+        failed += 1;
+        continue;
+      }
+
+      // Same "empty target, complete flag" close-out live uses below — a dev
+      // preview send has no per-recipient fan-out to track (see migration 0038).
+      const { error: completeError } = await client.rpc("record_outbox_target_sent", {
+        p_outbox_id: row.id,
+        p_target: "",
+        p_complete: true,
+      });
+      if (completeError) {
+        await recordFailure(client, row.id, completeError.message);
+        failed += 1;
+        continue;
+      }
+      sent += 1;
+      continue;
+    }
+
     const { data: targets, error: resolveError } = await client.rpc("resolve_outbox_dispatch", {
       p_outbox_id: row.id,
     });
@@ -242,13 +279,9 @@ Deno.serve(async (req) => {
     for (const { target, message } of resolvedTargets) {
       if (alreadySent.has(target)) continue;
 
-      const sendTarget = resolveSendTarget(whatsappEnv, target, settings.whatsapp_dev_override_phone);
-      if ("error" in sendTarget) {
-        errors.push(sendTarget.error);
-        continue;
-      }
-
-      const result = await sendWhatsAppMessage(sendTarget.to, message, credentials);
+      // Reached only in live env (dev returns above before this point), so
+      // this always sends to the real resolved recipient.
+      const result = await sendWhatsAppMessage(target, message, credentials);
       if (!result.success) {
         errors.push(result.error ?? `send to ${target} failed`);
         continue;

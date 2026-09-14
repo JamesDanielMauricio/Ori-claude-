@@ -6,6 +6,7 @@ import { useAuth } from "@/lib/auth-context";
 import { AlertsBell } from "./alerts-bell";
 import { BusinessDayPanel } from "./business-day-panel";
 import { NavLink } from "./nav-link";
+import { SettingsTogglesButton } from "./settings-toggles-button";
 import { SignOutButton } from "./sign-out-button";
 import { ThemeToggle } from "./theme-toggle";
 import { Skeleton } from "../ui/skeleton";
@@ -213,6 +214,7 @@ export function BackofficeNav() {
 
             <div className="mt-3 flex flex-col gap-3 border-t border-border pt-3">
               <ThemeToggle />
+              <SettingsTogglesButton />
               <SignOutButton variant="solid" />
             </div>
           </div>
@@ -260,6 +262,7 @@ function DesktopRail() {
           than taking you anywhere, so neither belongs among the nav rows. */}
       <div className="flex flex-col gap-3 border-t border-border px-5 py-4">
         <ThemeToggle />
+        <SettingsTogglesButton />
         <SignOutButton variant="solid" />
       </div>
     </nav>

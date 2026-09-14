@@ -1310,6 +1310,12 @@ export type Database = {
           message: string;
         }[];
       };
+      resolve_outbox_preview: {
+        Args: {
+          p_outbox_id: string;
+        };
+        Returns: string;
+      };
     };
     Enums: {
       user_role: "backoffice" | "grower" | "customer";

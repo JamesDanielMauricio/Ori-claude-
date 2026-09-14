@@ -9,7 +9,10 @@ import { createClient } from "@/lib/supabase/client";
 
 interface NotificationSettingsRow {
   whatsapp_enabled: boolean;
-  close_arrangement_whatsapp_enabled: boolean;
+  notify_growers_on_business_day_open: boolean;
+  shop_open_whatsapp_enabled: boolean;
+  close_arrangement_customer_whatsapp_enabled: boolean;
+  close_arrangement_grower_whatsapp_enabled: boolean;
 }
 
 // Shared with the Shop screen's read-only summary cards (routes/backoffice/
@@ -35,7 +38,9 @@ export function SettingsTogglesButton() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("notification_settings")
-        .select("whatsapp_enabled, close_arrangement_whatsapp_enabled")
+        .select(
+          "whatsapp_enabled, notify_growers_on_business_day_open, shop_open_whatsapp_enabled, close_arrangement_customer_whatsapp_enabled, close_arrangement_grower_whatsapp_enabled",
+        )
         .single();
       if (error) throw error;
       return data as NotificationSettingsRow;
@@ -81,18 +86,43 @@ export function SettingsTogglesButton() {
             <>
               <ToggleRow
                 label="הודעות WhatsApp"
-                description="מתג ראשי. כבוי חוסם כל שליחה, ללא תלות במתג שמתחתיו."
+                description="מתג ראשי. כבוי חוסם כל שליחה, ללא תלות במתגים שמתחתיו."
                 checked={settings?.whatsapp_enabled ?? false}
                 disabled={toggleMutation.isPending}
                 onChange={(checked) => toggleMutation.mutate({ whatsapp_enabled: checked })}
               />
               <ToggleRow
-                label="WhatsApp בסגירת סידור"
-                description="הודעה ללקוחות ולמגדלים בעת סגירת הסידור היומי. נשלחת רק אם המתג הראשי דלוק גם הוא."
-                checked={settings?.close_arrangement_whatsapp_enabled ?? false}
+                label="הודעה למגדלים בפתיחת יום עסקים"
+                description="הודעה לכל מגדל עם רשימה עונתית, ברגע שנפתח יום מסחר חדש."
+                checked={settings?.notify_growers_on_business_day_open ?? false}
                 disabled={toggleMutation.isPending}
                 onChange={(checked) =>
-                  toggleMutation.mutate({ close_arrangement_whatsapp_enabled: checked })
+                  toggleMutation.mutate({ notify_growers_on_business_day_open: checked })
+                }
+              />
+              <ToggleRow
+                label="הודעה ללקוחות בפתיחת חנות"
+                description="הודעה לכל לקוח פעיל ברגע שהחנות נפתחת להזמנות."
+                checked={settings?.shop_open_whatsapp_enabled ?? false}
+                disabled={toggleMutation.isPending}
+                onChange={(checked) => toggleMutation.mutate({ shop_open_whatsapp_enabled: checked })}
+              />
+              <ToggleRow
+                label="הודעת סגירת יום ללקוחות"
+                description="הודעה ללקוחות בעת סגירת הסידור היומי, עם סיכום מה סודר עבורם."
+                checked={settings?.close_arrangement_customer_whatsapp_enabled ?? false}
+                disabled={toggleMutation.isPending}
+                onChange={(checked) =>
+                  toggleMutation.mutate({ close_arrangement_customer_whatsapp_enabled: checked })
+                }
+              />
+              <ToggleRow
+                label="הודעת סגירת יום למגדלים"
+                description="הודעה למגדלים בעת סגירת הסידור היומי, עם סיכום מה נמכר מהסחורה שלהם."
+                checked={settings?.close_arrangement_grower_whatsapp_enabled ?? false}
+                disabled={toggleMutation.isPending}
+                onChange={(checked) =>
+                  toggleMutation.mutate({ close_arrangement_grower_whatsapp_enabled: checked })
                 }
               />
             </>

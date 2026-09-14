@@ -54,7 +54,7 @@ export default function ShopManagementPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("notification_settings")
-        .select("whatsapp_enabled, close_arrangement_whatsapp_enabled")
+        .select("whatsapp_enabled, close_arrangement_customer_whatsapp_enabled")
         .single();
       if (error) throw error;
       return data;
@@ -159,8 +159,8 @@ export default function ShopManagementPage() {
               failed={settingsQuery.isError}
             />
             <ToggleCard
-              label="WhatsApp בסגירת סידור"
-              enabled={settingsQuery.data?.close_arrangement_whatsapp_enabled ?? null}
+              label="WhatsApp בסגירת סידור ללקוחות"
+              enabled={settingsQuery.data?.close_arrangement_customer_whatsapp_enabled ?? null}
               failed={settingsQuery.isError}
             />
           </section>

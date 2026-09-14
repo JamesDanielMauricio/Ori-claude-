@@ -864,19 +864,28 @@ export type Database = {
         Row: {
           id: boolean;
           whatsapp_enabled: boolean;
-          close_arrangement_whatsapp_enabled: boolean;
+          notify_growers_on_business_day_open: boolean;
+          shop_open_whatsapp_enabled: boolean;
+          close_arrangement_customer_whatsapp_enabled: boolean;
+          close_arrangement_grower_whatsapp_enabled: boolean;
           whatsapp_dev_override_phone: string | null;
         };
         Insert: {
           id?: boolean;
           whatsapp_enabled?: boolean;
-          close_arrangement_whatsapp_enabled?: boolean;
+          notify_growers_on_business_day_open?: boolean;
+          shop_open_whatsapp_enabled?: boolean;
+          close_arrangement_customer_whatsapp_enabled?: boolean;
+          close_arrangement_grower_whatsapp_enabled?: boolean;
           whatsapp_dev_override_phone?: string | null;
         };
         Update: {
           id?: boolean;
           whatsapp_enabled?: boolean;
-          close_arrangement_whatsapp_enabled?: boolean;
+          notify_growers_on_business_day_open?: boolean;
+          shop_open_whatsapp_enabled?: boolean;
+          close_arrangement_customer_whatsapp_enabled?: boolean;
+          close_arrangement_grower_whatsapp_enabled?: boolean;
           whatsapp_dev_override_phone?: string | null;
         };
         Relationships: [];
@@ -1211,6 +1220,17 @@ export type Database = {
           p_error: string;
         };
         Returns: number;
+      };
+      // Permanently abandons a row skipped because a WhatsApp toggle was off
+      // at drain time (migration 0048) — see record_outbox_attempt above for
+      // the same security-invoker rationale.
+      record_outbox_skipped: {
+        Args: {
+          p_outbox_id: string;
+          p_max_attempts: number;
+          p_reason: string;
+        };
+        Returns: void;
       };
       check_arrangement_allocation: {
         Args: {

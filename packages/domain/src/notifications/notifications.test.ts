@@ -57,7 +57,13 @@ describe("notifications module", () => {
     await runCleanup(cleanupFns);
     await db
       .update(notificationSettings)
-      .set({ whatsappEnabled: false, closeArrangementWhatsappEnabled: false })
+      .set({
+        whatsappEnabled: false,
+        notifyGrowersOnBusinessDayOpen: false,
+        shopOpenWhatsappEnabled: false,
+        closeArrangementCustomerWhatsappEnabled: false,
+        closeArrangementGrowerWhatsappEnabled: false,
+      })
       .where(eq(notificationSettings.id, true));
   });
 
@@ -236,11 +242,11 @@ describe("notifications module", () => {
   it("drainNotificationOutbox skips rows when the global toggle is off, and skips only close_arrangement-templated rows when the flow-specific toggle is off", async () => {
     const template = await createTestNotificationTemplate({ templateKey: `test_template_${crypto.randomUUID()}` });
     cleanupFns.push(() => deleteTestNotificationTemplate(template.id));
-    // Prefixed like the real seeded 'close_arrangement_customer'/'close_arrangement_grower'
-    // keys (isEligible only checks the prefix) — using a distinct suffix
-    // avoids colliding with those real, migration-seeded rows.
+    // Prefixed like the real seeded 'close_arrangement_customer' key
+    // (isEligible only checks the prefix) — the random suffix avoids
+    // colliding with that real, migration-seeded row's unique template_key.
     const closeArrangementTemplate = await createTestNotificationTemplate({
-      templateKey: `close_arrangement_test_${crypto.randomUUID()}`,
+      templateKey: `close_arrangement_customer_test_${crypto.randomUUID()}`,
     });
     cleanupFns.push(() => deleteTestNotificationTemplate(closeArrangementTemplate.id));
 
@@ -293,7 +299,10 @@ describe("notifications module", () => {
     expect(closeArrangementAfter?.sent_at).toBeNull();
 
     // Both toggles on: the previously-held-back row now sends too.
-    await admin.client.from("notification_settings").update({ close_arrangement_whatsapp_enabled: true }).eq("id", true);
+    await admin.client
+      .from("notification_settings")
+      .update({ close_arrangement_customer_whatsapp_enabled: true })
+      .eq("id", true);
     const channel3 = new FakeNotificationChannel();
     const result3 = await drainNotificationOutbox({ client: admin.client, channel: channel3 });
     expect(result3.sent).toBe(1);
@@ -323,7 +332,7 @@ describe("notifications module", () => {
 
     await admin.client
       .from("notification_settings")
-      .update({ whatsapp_enabled: true, close_arrangement_whatsapp_enabled: true })
+      .update({ whatsapp_enabled: true, close_arrangement_customer_whatsapp_enabled: true, close_arrangement_grower_whatsapp_enabled: true })
       .eq("id", true);
 
     // First attempt: the fake channel fails every send to this group.
@@ -406,7 +415,7 @@ describe("notifications module", () => {
 
     await admin.client
       .from("notification_settings")
-      .update({ whatsapp_enabled: true, close_arrangement_whatsapp_enabled: true })
+      .update({ whatsapp_enabled: true, close_arrangement_customer_whatsapp_enabled: true, close_arrangement_grower_whatsapp_enabled: true })
       .eq("id", true);
 
     // Pass 1: one number is permanently unreachable, the other takes delivery.

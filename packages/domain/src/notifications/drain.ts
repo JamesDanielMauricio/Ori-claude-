@@ -49,7 +49,10 @@ interface PendingOutboxRow {
 
 interface NotificationSettingsRow {
   whatsapp_enabled: boolean;
-  close_arrangement_whatsapp_enabled: boolean;
+  notify_growers_on_business_day_open: boolean;
+  shop_open_whatsapp_enabled: boolean;
+  close_arrangement_customer_whatsapp_enabled: boolean;
+  close_arrangement_grower_whatsapp_enabled: boolean;
 }
 
 interface DispatchTarget {
@@ -59,9 +62,22 @@ interface DispatchTarget {
 
 const DEFAULT_MAX_ATTEMPTS = 5;
 
+// Mirrors supabase/functions/whatsapp-dispatch's own isEligible exactly —
+// see that file's header comment for why this loop is duplicated rather
+// than imported. whatsapp_enabled is the global gate every template needs
+// regardless; the four more specific toggles below (migration 0049) match
+// by prefix rather than exact key, same as the original single
+// close_arrangement toggle did — this repo's own tests rely on that (a
+// randomized-suffix test template key like
+// `close_arrangement_customer_test_<uuid>` needs to match the same toggle
+// its real `close_arrangement_customer` counterpart would, without
+// colliding with that seeded row's unique template_key).
 function isEligible(templateKey: string, settings: NotificationSettingsRow): boolean {
   if (!settings.whatsapp_enabled) return false;
-  if (templateKey.startsWith("close_arrangement") && !settings.close_arrangement_whatsapp_enabled) return false;
+  if (templateKey.startsWith("close_arrangement_customer")) return settings.close_arrangement_customer_whatsapp_enabled;
+  if (templateKey.startsWith("close_arrangement_grower")) return settings.close_arrangement_grower_whatsapp_enabled;
+  if (templateKey === "shop_open") return settings.shop_open_whatsapp_enabled;
+  if (templateKey === "business_day_open_grower") return settings.notify_growers_on_business_day_open;
   return true;
 }
 
@@ -71,7 +87,9 @@ export async function drainNotificationOutbox(deps: DrainDeps): Promise<DrainRes
 
   const { data: settingsRow, error: settingsError } = await client
     .from("notification_settings")
-    .select("whatsapp_enabled, close_arrangement_whatsapp_enabled")
+    .select(
+      "whatsapp_enabled, notify_growers_on_business_day_open, shop_open_whatsapp_enabled, close_arrangement_customer_whatsapp_enabled, close_arrangement_grower_whatsapp_enabled",
+    )
     .single();
   if (settingsError) throw settingsError;
   const settings = settingsRow as NotificationSettingsRow;

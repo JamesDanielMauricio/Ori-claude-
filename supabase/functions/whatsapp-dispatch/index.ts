@@ -87,6 +87,36 @@ interface GreenApiCredentials {
   apiToken: string;
 }
 
+interface NotificationSettingsRow {
+  whatsapp_enabled: boolean;
+  notify_growers_on_business_day_open: boolean;
+  shop_open_whatsapp_enabled: boolean;
+  close_arrangement_customer_whatsapp_enabled: boolean;
+  close_arrangement_grower_whatsapp_enabled: boolean;
+  whatsapp_dev_override_phone: string | null;
+}
+
+// Mirrors packages/domain/src/notifications/drain.ts's own isEligible
+// exactly — see this file's header comment for why the loop (and this
+// eligibility check within it) is duplicated rather than imported.
+// whatsapp_enabled is the global gate every template needs regardless; most
+// templates (order_reminder, pick_reminder, pick_updated, order_submitted,
+// the two stock-threshold alerts) have no more specific toggle than that.
+// The four below each have their own switch (migration 0049) on top of it.
+// close_arrangement_customer/grower match by PREFIX, not exact key, the same
+// way the original single close_arrangement toggle did — drain.ts's own
+// tests rely on that (a randomized-suffix test template key needs to match
+// the same toggle its real counterpart would, without colliding with that
+// seeded row's unique template_key).
+function isEligible(templateKey: string, settings: NotificationSettingsRow): boolean {
+  if (!settings.whatsapp_enabled) return false;
+  if (templateKey.startsWith("close_arrangement_customer")) return settings.close_arrangement_customer_whatsapp_enabled;
+  if (templateKey.startsWith("close_arrangement_grower")) return settings.close_arrangement_grower_whatsapp_enabled;
+  if (templateKey === "shop_open") return settings.shop_open_whatsapp_enabled;
+  if (templateKey === "business_day_open_grower") return settings.notify_growers_on_business_day_open;
+  return true;
+}
+
 // Exactly "live" opts in to live credentials; every other value (unset,
 // typo'd, empty string) falls back to "dev" — the safe direction to fail
 // in, per the task.
@@ -165,7 +195,9 @@ Deno.serve(async (req) => {
 
   const { data: settings, error: settingsError } = await client
     .from("notification_settings")
-    .select("whatsapp_enabled, close_arrangement_whatsapp_enabled, whatsapp_dev_override_phone")
+    .select(
+      "whatsapp_enabled, notify_growers_on_business_day_open, shop_open_whatsapp_enabled, close_arrangement_customer_whatsapp_enabled, close_arrangement_grower_whatsapp_enabled, whatsapp_dev_override_phone",
+    )
     .single();
   if (settingsError) {
     return Response.json({ error: settingsError.message }, { status: 500 });
@@ -193,10 +225,17 @@ Deno.serve(async (req) => {
   let skipped = 0;
 
   for (const row of (pendingRows ?? []) as PendingOutboxRow[]) {
-    const requiresCloseArrangementToggle = row.template_key.startsWith("close_arrangement");
-    const eligible =
-      settings.whatsapp_enabled && (!requiresCloseArrangementToggle || settings.close_arrangement_whatsapp_enabled);
-    if (!eligible) {
+    if (!isEligible(row.template_key, settings)) {
+      // Abandoned here and now (migration 0048), not just skipped for this
+      // pass: without this, attempt_count never moves, so the row gets
+      // re-evaluated on every future drain and fires the moment the toggle
+      // happens to be back on — even for an unrelated later click. A toggle
+      // being off must mean this specific message never goes out.
+      await client.rpc("record_outbox_skipped", {
+        p_outbox_id: row.id,
+        p_max_attempts: MAX_ATTEMPTS,
+        p_reason: `Skipped: WhatsApp was disabled for template "${row.template_key}" when dispatch ran`,
+      });
       skipped += 1;
       continue;
     }

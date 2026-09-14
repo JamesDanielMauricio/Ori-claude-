@@ -18,6 +18,8 @@ import {
 } from "@ori/domain/reference-data/testing";
 import { expect, test, type Page } from "@playwright/test";
 
+import { chooseOption } from "./choose-option";
+
 // The single <tr> currently in inline-edit mode — see the identical helper
 // in reference-data-growers.spec.ts for why field lookups need to be
 // scoped to it: record-table.tsx's column-visibility picker labels a
@@ -72,7 +74,10 @@ test.describe("Backoffice — Products", () => {
     // not the old list-button-plus-empty-pane-button pair, so no
     // `.first()` disambiguation needed.
     await page.getByRole("button", { name: "מוצר חדש" }).click();
-    await editingRow(page).getByLabel("משפחה").selectOption({ label: family.name });
+    await chooseOption(
+      editingRow(page).getByRole("combobox", { name: "משפחה", exact: true }),
+      family.name,
+    );
     await editingRow(page).getByLabel("זן / שם").fill(productName);
     await editingRow(page).getByLabel("מחיר", { exact: true }).fill("12.5");
     await editingRow(page).getByRole("button", { name: "שמור" }).click();
@@ -101,7 +106,10 @@ test.describe("Backoffice — Products", () => {
     await editingRow(page).getByRole("button", { name: "תקרות משטחים ללקוח" }).click();
     const capsPanel = page.getByRole("dialog", { name: "תקרות משטחים ללקוח" });
     await capsPanel.getByRole("button", { name: "הוסף תקרה" }).click();
-    await capsPanel.getByLabel("לקוח").selectOption({ label: capCustomer.name });
+    await chooseOption(
+      capsPanel.getByRole("combobox", { name: "לקוח", exact: true }),
+      capCustomer.name,
+    );
     await capsPanel.getByLabel("תקרת משטחים").fill("4");
     // Closes the popover only — the row keeps its other unsaved edits (see
     // the same step in reference-data-growers.spec.ts).
@@ -159,7 +167,10 @@ test.describe("Backoffice — Products", () => {
     await page.getByPlaceholder("חיפוש מוצר, זן או משפחה").fill("");
     const varietyName = `E2E Variety ${randomUUID()}`;
     await page.getByRole("button", { name: "מוצר חדש" }).click();
-    await editingRow(page).getByLabel("משפחה").selectOption({ label: familyName });
+    await chooseOption(
+      editingRow(page).getByRole("combobox", { name: "משפחה", exact: true }),
+      familyName,
+    );
     await editingRow(page).getByLabel("זן / שם").fill(varietyName);
     await editingRow(page).getByRole("button", { name: "שמור", exact: true }).click();
     cleanupFns.push(async () => {

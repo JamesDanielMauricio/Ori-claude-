@@ -17,6 +17,8 @@ import {
 } from "@ori/domain/reference-data/testing";
 import { expect, test, type Page } from "@playwright/test";
 
+import { chooseOption } from "./choose-option";
+
 // The single <tr> currently in inline-edit mode — identified by carrying
 // the row's own "שמור" button, which only ever exists on one row at a
 // time. Field lookups are scoped to it rather than done at the page level
@@ -106,7 +108,10 @@ test.describe("Backoffice — Growers", () => {
     // regressed, the save below would have nothing left to save.
     await page.keyboard.press("Escape");
 
-    await editingRow(page).getByLabel("מוביל").selectOption(transporter.id);
+    await chooseOption(
+      editingRow(page).getByRole("combobox", { name: "מוביל", exact: true }),
+      transporter.name,
+    );
     await editingRow(page).getByRole("button", { name: "שמור" }).click();
 
     const editedRow = page.locator("tr").filter({ hasText: `${growerName} (edited)` });
@@ -121,6 +126,8 @@ test.describe("Backoffice — Growers", () => {
       .filter({ hasText: `${growerName} (edited)` })
       .getByRole("button", { name: "ערוך" })
       .click();
-    await expect(editingRow(page).getByLabel("מוביל")).toHaveValue(transporter.id);
+    await expect(
+      editingRow(page).getByRole("combobox", { name: "מוביל", exact: true }),
+    ).toHaveText(transporter.name);
   });
 });

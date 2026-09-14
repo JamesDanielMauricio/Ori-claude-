@@ -10,6 +10,8 @@ import {
 import { createTestGrowerCompany, deleteTestCompany as deleteTestCompanyById } from "@ori/domain/reference-data/testing";
 import { expect, test, type Page } from "@playwright/test";
 
+import { chooseOption } from "./choose-option";
+
 // A row created on a *different* page (the import flow below) has been
 // observed taking a few seconds to appear in this list after navigating
 // straight here — reproduced against the real hosted Supabase project,
@@ -81,7 +83,7 @@ test.describe("Backoffice — Users", () => {
     const newUserDisplayName = `E2E User ${randomUUID()}`;
     await page.getByLabel("אימייל").fill(newUserEmail);
     await page.getByLabel("שם תצוגה").fill(newUserDisplayName);
-    await page.getByLabel("תפקיד").selectOption("grower");
+    await chooseOption(page.getByRole("combobox", { name: "תפקיד", exact: true }), "מגדל");
     await page.getByLabel("מזהה חברה").fill(targetCompany.id);
     await page.getByRole("button", { name: "צור משתמשים" }).click();
 
@@ -100,7 +102,10 @@ test.describe("Backoffice — Users", () => {
       .getByRole("button", { name: "ערוך" })
       .click();
     await editingRow(page).getByLabel("שם תצוגה").fill(`${newUserDisplayName} (edited)`);
-    await editingRow(page).getByLabel("תפקיד").selectOption("customer");
+    await chooseOption(
+      editingRow(page).getByRole("combobox", { name: "תפקיד", exact: true }),
+      "לקוח",
+    );
     await editingRow(page).getByRole("button", { name: "שמור" }).click();
 
     const editedRow = page.locator("tr").filter({ hasText: `${newUserDisplayName} (edited)` });

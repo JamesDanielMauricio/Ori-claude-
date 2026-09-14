@@ -12,6 +12,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
+import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { hasChanges } from "@/lib/has-changes";
@@ -341,20 +342,16 @@ export default function UsersPage() {
       renderEdit: () => {
         if (!form) return null;
         return (
-          <select
+          <Select
             aria-label="תפקיד"
-            className={`${inputClassName} w-32`}
+            className="w-32"
             value={form.role}
-            onChange={(event) =>
-              setForm((current) => current && { ...current, role: event.target.value as UserRole })
-            }
-          >
-            {(Object.keys(ROLE_LABEL) as UserRole[]).map((role) => (
-              <option key={role} value={role}>
-                {ROLE_LABEL[role]}
-              </option>
-            ))}
-          </select>
+            onChange={(next) => setForm((current) => current && { ...current, role: next as UserRole })}
+            options={(Object.keys(ROLE_LABEL) as UserRole[]).map((role) => ({
+              value: role,
+              label: ROLE_LABEL[role],
+            }))}
+          />
         );
       },
     },
@@ -365,20 +362,17 @@ export default function UsersPage() {
       renderEdit: () => {
         if (!form) return null;
         return (
-          <select
+          <Select
             aria-label="חברה"
-            className={`${inputClassName} w-full min-w-[9rem]`}
+            className="w-full min-w-[9rem]"
             value={form.companyId}
-            onChange={(event) =>
-              setForm((current) => current && { ...current, companyId: event.target.value })
+            onChange={(next) =>
+              setForm((current) => current && { ...current, companyId: next })
             }
-          >
-            {companiesQuery.data?.map((company) => (
-              <option key={company.id} value={company.id}>
-                {company.name}
-              </option>
-            ))}
-          </select>
+            options={
+              companiesQuery.data?.map((company) => ({ value: company.id, label: company.name })) ?? []
+            }
+          />
         );
       },
     },

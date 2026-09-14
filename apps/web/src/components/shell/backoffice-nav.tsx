@@ -8,7 +8,6 @@ import { BusinessDayPanel } from "./business-day-panel";
 import { NavLink } from "./nav-link";
 import { SettingsTogglesButton } from "./settings-toggles-button";
 import { SignOutButton } from "./sign-out-button";
-import { ThemeToggle } from "./theme-toggle";
 import { Skeleton } from "../ui/skeleton";
 
 // The `side_bar_v2` equivalent — rebuilt, not ported. The source mounted
@@ -213,7 +212,6 @@ export function BackofficeNav() {
             </nav>
 
             <div className="mt-3 flex flex-col gap-3 border-t border-border pt-3">
-              <ThemeToggle />
               <SettingsTogglesButton />
               <SignOutButton variant="solid" />
             </div>
@@ -258,10 +256,10 @@ function DesktopRail() {
         <NavGroups />
       </div>
 
-      {/* Theme and sign-out share the footer: both act on this browser rather
-          than taking you anywhere, so neither belongs among the nav rows. */}
+      {/* Settings and sign-out share the footer: both act on this browser/
+          account rather than taking you anywhere, so neither belongs among
+          the nav rows. */}
       <div className="flex flex-col gap-3 border-t border-border px-5 py-4">
-        <ThemeToggle />
         <SettingsTogglesButton />
         <SignOutButton variant="solid" />
       </div>

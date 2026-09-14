@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/card";
 import { Icon } from "@/components/ui/icon";
 import { PageHeader } from "@/components/ui/page-header";
+import { Select } from "@/components/ui/select";
 import {
   TableBody,
   TableCell,
@@ -96,20 +97,15 @@ export default function BulkImportUsersPage() {
                   />
                 </TableCell>
                 <TableCell>
-                  <select
+                  <Select
                     aria-label="תפקיד"
-                    className={inputClassName}
                     value={row.role}
-                    onChange={(event) =>
-                      updateRow(index, { role: event.target.value as DraftRow["role"] })
-                    }
-                  >
-                    {(Object.keys(ROLE_LABEL) as Array<DraftRow["role"]>).map((role) => (
-                      <option key={role} value={role}>
-                        {ROLE_LABEL[role]}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(next) => updateRow(index, { role: next as DraftRow["role"] })}
+                    options={(Object.keys(ROLE_LABEL) as Array<DraftRow["role"]>).map((role) => ({
+                      value: role,
+                      label: ROLE_LABEL[role],
+                    }))}
+                  />
                 </TableCell>
                 <TableCell>
                   <input

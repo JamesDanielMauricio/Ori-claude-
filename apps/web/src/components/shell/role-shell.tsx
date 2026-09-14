@@ -5,8 +5,8 @@ import { useAuth } from "@/lib/auth-context";
 
 import { AlertsBell } from "./alerts-bell";
 import { NavLink } from "./nav-link";
+import { SettingsTogglesButton } from "./settings-toggles-button";
 import { SignOutButton } from "./sign-out-button";
-import { ThemeToggle } from "./theme-toggle";
 import { Skeleton } from "../ui/skeleton";
 
 export interface RoleShellNavItem {
@@ -133,11 +133,11 @@ export function RoleShell({ navItems, children }: RoleShellProps) {
             text link this used to be. It was easy to miss sitting under a
             wall of nav rows, and on mobile it was missing outright (see
             HamburgerMenuContents below), so the desktop and mobile versions
-            now match. It shares the bottom with the theme toggle: both act
-            on this browser rather than taking you anywhere, so neither
-            belongs among the nav rows. */}
+            now match. It shares the bottom with system settings: both act
+            on this browser/account rather than taking you anywhere, so
+            neither belongs among the nav rows. */}
         <div className="mt-auto flex flex-col gap-3">
-          <ThemeToggle />
+          <SettingsTogglesButton />
           <SignOutButton variant="solid" />
         </div>
       </aside>
@@ -201,10 +201,10 @@ function HamburgerMenuContents({
           outside the `onNavigate` click handler above: signing out already
           navigates to /login itself, so closing the menu first is redundant
           and would fire a state update on a component about to unmount.
-          The theme toggle sits outside it too, so picking a theme doesn't
-          close the menu the choice was made in. */}
+          System settings sits outside it too, so picking a theme inside its
+          dialog doesn't close the menu the choice was made in. */}
       <div className="mt-1 flex flex-col gap-2 border-t border-border pt-2">
-        <ThemeToggle />
+        <SettingsTogglesButton />
         <SignOutButton variant="solid" />
       </div>
     </div>

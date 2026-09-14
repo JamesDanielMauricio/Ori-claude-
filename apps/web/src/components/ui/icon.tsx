@@ -180,6 +180,9 @@ const PATHS: Record<string, ReactNode> = {
       <path d="M8.5 20.5h7M12 16.5v4" />
     </>
   ),
+  // A bare checkmark — the custom Select's "this is the chosen option"
+  // marker, as opposed to checkCircle's status-confirmation use.
+  check: <path d="m5 12.5 4.5 4.5L19 7" />,
 };
 
 export type IconName = keyof typeof PATHS;

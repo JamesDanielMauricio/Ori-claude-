@@ -20,6 +20,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { Icon } from "@/components/ui/icon";
 import { ProductThumbnail } from "@/components/ui/product-thumbnail";
 import { StatusPill } from "@/components/ui/card";
+import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { hasChanges } from "@/lib/has-changes";
@@ -706,21 +707,16 @@ export default function ProductsPage() {
       // would drop into a collapsed group and vanish mid-edit.
       render: (row) => familyById.get(row.family_id)?.name ?? "—",
       renderEdit: () => (
-        <select
+        <Select
           aria-label="משפחה"
-          className={`${inputClassName} w-full min-w-[8rem]`}
+          className="w-full min-w-[8rem]"
           value={form.familyId}
-          onChange={(event) => {
-            openFamily(event.target.value);
-            setForm((current) => ({ ...current, familyId: event.target.value }));
+          onChange={(next) => {
+            openFamily(next);
+            setForm((current) => ({ ...current, familyId: next }));
           }}
-        >
-          {familiesQuery.data?.map((family) => (
-            <option key={family.id} value={family.id}>
-              {family.name}
-            </option>
-          ))}
-        </select>
+          options={familiesQuery.data?.map((family) => ({ value: family.id, label: family.name })) ?? []}
+        />
       ),
     },
     {
@@ -741,18 +737,19 @@ export default function ProductsPage() {
       label: "סוג אריזה",
       render: (row) => (row.pack_type ? PACK_TYPE_LABEL[row.pack_type] : "—"),
       renderEdit: () => (
-        <select
+        <Select
           aria-label="סוג אריזה"
-          className={`${inputClassName} w-28`}
+          className="w-28"
           value={form.packType}
-          onChange={(event) =>
-            setForm((current) => ({ ...current, packType: event.target.value as PackType | "" }))
+          onChange={(next) =>
+            setForm((current) => ({ ...current, packType: next as PackType | "" }))
           }
-        >
-          <option value="">—</option>
-          <option value="pallets">משטחים</option>
-          <option value="crates">ארגזים</option>
-        </select>
+          options={[
+            { value: "", label: "—" },
+            { value: "pallets", label: "משטחים" },
+            { value: "crates", label: "ארגזים" },
+          ]}
+        />
       ),
     },
     {
@@ -883,18 +880,18 @@ export default function ProductsPage() {
           <div className="flex flex-col gap-2">
             {form.customerPalletCaps.map((cap, index) => (
               <div key={index} className="flex flex-wrap items-center gap-2">
-                <select
+                <Select
                   aria-label="לקוח"
-                  className={`${inputClassName} min-w-0 flex-1`}
+                  className="min-w-0 flex-1"
                   value={cap.customerCompanyId}
-                  onChange={(event) => updateCap(index, { customerCompanyId: event.target.value })}
-                >
-                  {customersQuery.data?.map((customer) => (
-                    <option key={customer.id} value={customer.id}>
-                      {customer.name}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(next) => updateCap(index, { customerCompanyId: next })}
+                  options={
+                    customersQuery.data?.map((customer) => ({
+                      value: customer.id,
+                      label: customer.name,
+                    })) ?? []
+                  }
+                />
                 <input
                   type="number"
                   min={0}

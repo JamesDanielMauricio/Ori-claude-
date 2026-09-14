@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/card";
 import { Icon } from "@/components/ui/icon";
 import { ProductThumbnail } from "@/components/ui/product-thumbnail";
+import { Select } from "@/components/ui/select";
 
 export interface OrderVarietyRow {
   varietyId: string;
@@ -63,9 +64,9 @@ export interface OrderFamilyRow {
 // read-only historical order view (past, closed trading days);
 // `onChangePallets`/`onOpenComment` are omitted in the read-only case.
 //
-// quantityMode: "dropdown" on the customer's own order screen — a <select>
-// capped at each row's own maxOrderable, so a customer can never pick more
-// than they're actually allowed. "number" (the default) is a free-typed
+// quantityMode: "dropdown" on the customer's own order screen — the shared
+// Select capped at each row's own maxOrderable, so a customer can never pick
+// more than they're actually allowed. "number" (the default) is a free-typed
 // number input, used for the backoffice on-behalf-of editor (staff may
 // deliberately exceed a customer's cap) and the read-only historical view.
 // This is the one place that distinction is drawn — never a second,
@@ -199,28 +200,26 @@ export function OrderProductList({
                           per order line), so the leading chevron is always
                           decorative. On the customer's own order screen
                           (quantityMode="dropdown") the quantity itself is now
-                          a real <select> capped at this row's own remaining
-                          stock — see dropdownOptions above. Every other
-                          caller (backoffice on-behalf-of, the read-only
-                          historical view) keeps the free-typed number
-                          input. */}
+                          the shared Select (ui/select.tsx), capped at this
+                          row's own remaining stock — see dropdownOptions
+                          above, and `showChevron={false}` since its own
+                          affordance would sit on top of the decorative one
+                          this pill already draws. Every other caller
+                          (backoffice on-behalf-of, the read-only historical
+                          view) keeps the free-typed number input. */}
                       <div className="relative">
                         {quantityMode === "dropdown" ? (
-                          <select
+                          <Select
                             disabled={!editable}
+                            showChevron={false}
                             aria-label={`כמות ${variety.packType ? PACK_TYPE_LABEL[variety.packType] : "פלטות"} — ${variety.varietyName}`}
-                            className={`${inputClassName} w-32 appearance-none ps-7 pe-14 font-semibold`}
+                            className="w-32 ps-7 pe-14 font-semibold"
                             value={variety.pallets === "" ? "0" : variety.pallets}
-                            onChange={(event) =>
-                              onChangePallets?.(variety.varietyId, event.target.value)
-                            }
-                          >
-                            {dropdownOptions(variety.maxOrderable ?? 0, variety.pallets).map((n) => (
-                              <option key={n} value={n}>
-                                {n}
-                              </option>
-                            ))}
-                          </select>
+                            onChange={(next) => onChangePallets?.(variety.varietyId, next)}
+                            options={dropdownOptions(variety.maxOrderable ?? 0, variety.pallets).map(
+                              (n) => ({ value: String(n), label: String(n) }),
+                            )}
+                          />
                         ) : (
                           <input
                             type="number"

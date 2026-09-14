@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusPill } from "@/components/ui/card";
+import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { hasChanges } from "@/lib/has-changes";
@@ -360,17 +361,18 @@ export default function GrowersPage() {
         </StatusPill>
       ),
       renderEdit: () => (
-        <select
+        <Select
           aria-label="סטטוס"
-          className={`${inputClassName} w-28`}
+          className="w-28"
           value={form.status}
-          onChange={(event) =>
-            setForm((current) => ({ ...current, status: event.target.value as "active" | "inactive" }))
+          onChange={(next) =>
+            setForm((current) => ({ ...current, status: next as "active" | "inactive" }))
           }
-        >
-          <option value="active">פעיל</option>
-          <option value="inactive">לא פעיל</option>
-        </select>
+          options={[
+            { value: "active", label: "פעיל" },
+            { value: "inactive", label: "לא פעיל" },
+          ]}
+        />
       ),
     },
     {
@@ -397,21 +399,21 @@ export default function GrowersPage() {
           ? (transporterNameById.get(row.transporter_company_id) ?? "—")
           : "—",
       renderEdit: () => (
-        <select
+        <Select
           aria-label="מוביל"
-          className={`${inputClassName} w-full min-w-[9rem]`}
+          className="w-full min-w-[9rem]"
           value={form.transporterCompanyId}
-          onChange={(event) =>
-            setForm((current) => ({ ...current, transporterCompanyId: event.target.value }))
+          onChange={(next) =>
+            setForm((current) => ({ ...current, transporterCompanyId: next }))
           }
-        >
-          <option value="">— ללא —</option>
-          {transportersQuery.data?.map((transporter) => (
-            <option key={transporter.id} value={transporter.id}>
-              {transporter.name}
-            </option>
-          ))}
-        </select>
+          options={[
+            { value: "", label: "— ללא —" },
+            ...(transportersQuery.data?.map((transporter) => ({
+              value: transporter.id,
+              label: transporter.name,
+            })) ?? []),
+          ]}
+        />
       ),
     },
     {

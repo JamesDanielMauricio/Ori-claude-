@@ -98,6 +98,10 @@ export function CellPopover({
             ref={panelRef}
             role="dialog"
             aria-label={label}
+            // Dropdowns inside this panel (ui/select.tsx) mount their option
+            // list in here rather than in <body>, so picking an option isn't a
+            // click "outside" this panel that closes it.
+            data-portal-root=""
             style={{ position: "fixed", top: position.top, right: position.right }}
             className={`z-50 max-h-[60dvh] overflow-y-auto rounded-xl border border-border bg-surface p-3 text-ink shadow-overlay ${panelClassName}`}
           >

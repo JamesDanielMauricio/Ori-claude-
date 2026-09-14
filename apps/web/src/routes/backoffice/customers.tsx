@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { StatusPill } from "@/components/ui/card";
+import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { hasChanges } from "@/lib/has-changes";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
@@ -224,17 +225,18 @@ export default function CustomersPage() {
         </StatusPill>
       ),
       renderEdit: () => (
-        <select
+        <Select
           aria-label="סטטוס"
-          className={`${inputClassName} w-28`}
+          className="w-28"
           value={form.status}
-          onChange={(event) =>
-            setForm((current) => ({ ...current, status: event.target.value as "active" | "inactive" }))
+          onChange={(next) =>
+            setForm((current) => ({ ...current, status: next as "active" | "inactive" }))
           }
-        >
-          <option value="active">פעיל</option>
-          <option value="inactive">לא פעיל</option>
-        </select>
+          options={[
+            { value: "active", label: "פעיל" },
+            { value: "inactive", label: "לא פעיל" },
+          ]}
+        />
       ),
     },
     {

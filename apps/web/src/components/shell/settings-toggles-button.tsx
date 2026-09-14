@@ -5,7 +5,10 @@ import { Dialog } from "@/components/ui/dialog";
 import { Icon } from "@/components/ui/icon";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
+import { useAuth } from "@/lib/auth-context";
 import { createClient } from "@/lib/supabase/client";
+
+import { ThemeToggle } from "./theme-toggle";
 
 interface NotificationSettingsRow {
   whatsapp_enabled: boolean;
@@ -21,17 +24,25 @@ interface NotificationSettingsRow {
 // mutation or knowing this button exists.
 const SETTINGS_QUERY_KEY = ["shop-panel", "notification-settings"] as const;
 
-// The system-wide on/off switches, reachable from every backoffice screen —
-// previously notification_settings had no write surface in the app at all
+// The one settings entry point in every shell's sidebar footer — reachable
+// from backoffice, grower, and customer alike, since appearance (below) is
+// every signed-in user's to change. The WhatsApp switches underneath are
+// still backoffice-only: notification_settings' RLS (migration 0023) scopes
+// both select and update to that role, so the query is gated on the same
+// role check that decides whether to render the section at all, rather than
+// firing a request grower/customer accounts can't answer.
+//
+// Previously notification_settings had no write surface in the app at all
 // (only a Table Editor/SQL update), even though the two read-only ToggleCards
-// on the Shop screen have shown their state since that screen existed. Same
-// placement pattern as ThemeToggle: sits in the sidebar footer because it
-// acts on the whole app's configuration rather than navigating anywhere.
+// on the Shop screen have shown their state since that screen existed.
 export function SettingsTogglesButton() {
   const supabase = createClient();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
+  const { profile } = useAuth();
   const [open, setOpen] = useState(false);
+
+  const isBackoffice = profile?.role === "backoffice";
 
   const settingsQuery = useQuery({
     queryKey: SETTINGS_QUERY_KEY,
@@ -45,6 +56,7 @@ export function SettingsTogglesButton() {
       if (error) throw error;
       return data as NotificationSettingsRow;
     },
+    enabled: isBackoffice,
   });
 
   // One mutation, keyed by which column it patches — RLS already restricts
@@ -77,55 +89,69 @@ export function SettingsTogglesButton() {
       </button>
 
       <Dialog open={open} onClose={() => setOpen(false)} title="הגדרות מערכת">
-        <div className="flex flex-col gap-4">
-          {settingsQuery.isLoading ? (
-            <Skeleton className="h-24 w-full" />
-          ) : settingsQuery.isError ? (
-            <p className="text-sm text-ink-muted">טעינת ההגדרות נכשלה.</p>
-          ) : (
-            <>
-              <ToggleRow
-                label="הודעות WhatsApp"
-                description="מתג ראשי. כבוי חוסם כל שליחה, ללא תלות במתגים שמתחתיו."
-                checked={settings?.whatsapp_enabled ?? false}
-                disabled={toggleMutation.isPending}
-                onChange={(checked) => toggleMutation.mutate({ whatsapp_enabled: checked })}
-              />
-              <ToggleRow
-                label="הודעה למגדלים בפתיחת יום עסקים"
-                description="הודעה לכל מגדל עם רשימה עונתית, ברגע שנפתח יום מסחר חדש."
-                checked={settings?.notify_growers_on_business_day_open ?? false}
-                disabled={toggleMutation.isPending}
-                onChange={(checked) =>
-                  toggleMutation.mutate({ notify_growers_on_business_day_open: checked })
-                }
-              />
-              <ToggleRow
-                label="הודעה ללקוחות בפתיחת חנות"
-                description="הודעה לכל לקוח פעיל ברגע שהחנות נפתחת להזמנות."
-                checked={settings?.shop_open_whatsapp_enabled ?? false}
-                disabled={toggleMutation.isPending}
-                onChange={(checked) => toggleMutation.mutate({ shop_open_whatsapp_enabled: checked })}
-              />
-              <ToggleRow
-                label="הודעת סגירת יום ללקוחות"
-                description="הודעה ללקוחות בעת סגירת הסידור היומי, עם סיכום מה סודר עבורם."
-                checked={settings?.close_arrangement_customer_whatsapp_enabled ?? false}
-                disabled={toggleMutation.isPending}
-                onChange={(checked) =>
-                  toggleMutation.mutate({ close_arrangement_customer_whatsapp_enabled: checked })
-                }
-              />
-              <ToggleRow
-                label="הודעת סגירת יום למגדלים"
-                description="הודעה למגדלים בעת סגירת הסידור היומי, עם סיכום מה נמכר מהסחורה שלהם."
-                checked={settings?.close_arrangement_grower_whatsapp_enabled ?? false}
-                disabled={toggleMutation.isPending}
-                onChange={(checked) =>
-                  toggleMutation.mutate({ close_arrangement_grower_whatsapp_enabled: checked })
-                }
-              />
-            </>
+        <div className="flex flex-col gap-5">
+          <section className="flex flex-col gap-2">
+            <h3 className="text-xs font-semibold tracking-[0.08em] text-ink-subtle">מראה</h3>
+            <ThemeToggle />
+          </section>
+
+          {isBackoffice && (
+            <section className="flex flex-col gap-3">
+              <h3 className="text-xs font-semibold tracking-[0.08em] text-ink-subtle">
+                הודעות WhatsApp
+              </h3>
+              {settingsQuery.isLoading ? (
+                <Skeleton className="h-24 w-full" />
+              ) : settingsQuery.isError ? (
+                <p className="text-sm text-ink-muted">טעינת ההגדרות נכשלה.</p>
+              ) : (
+                <>
+                  <ToggleRow
+                    label="הודעות WhatsApp"
+                    description="מתג ראשי. כבוי חוסם כל שליחה, ללא תלות במתגים שמתחתיו."
+                    checked={settings?.whatsapp_enabled ?? false}
+                    disabled={toggleMutation.isPending}
+                    onChange={(checked) => toggleMutation.mutate({ whatsapp_enabled: checked })}
+                  />
+                  <ToggleRow
+                    label="הודעה למגדלים בפתיחת יום עסקים"
+                    description="הודעה לכל מגדל עם רשימה עונתית, ברגע שנפתח יום מסחר חדש."
+                    checked={settings?.notify_growers_on_business_day_open ?? false}
+                    disabled={toggleMutation.isPending}
+                    onChange={(checked) =>
+                      toggleMutation.mutate({ notify_growers_on_business_day_open: checked })
+                    }
+                  />
+                  <ToggleRow
+                    label="הודעה ללקוחות בפתיחת חנות"
+                    description="הודעה לכל לקוח פעיל ברגע שהחנות נפתחת להזמנות."
+                    checked={settings?.shop_open_whatsapp_enabled ?? false}
+                    disabled={toggleMutation.isPending}
+                    onChange={(checked) =>
+                      toggleMutation.mutate({ shop_open_whatsapp_enabled: checked })
+                    }
+                  />
+                  <ToggleRow
+                    label="הודעת סגירת יום ללקוחות"
+                    description="הודעה ללקוחות בעת סגירת הסידור היומי, עם סיכום מה סודר עבורם."
+                    checked={settings?.close_arrangement_customer_whatsapp_enabled ?? false}
+                    disabled={toggleMutation.isPending}
+                    onChange={(checked) =>
+                      toggleMutation.mutate({ close_arrangement_customer_whatsapp_enabled: checked })
+                    }
+                  />
+                  <ToggleRow
+                    label="הודעת סגירת יום למגדלים"
+                    description="הודעה למגדלים בעת סגירת הסידור היומי, עם סיכום מה נמכר מהסחורה שלהם."
+                    checked={settings?.close_arrangement_grower_whatsapp_enabled ?? false}
+                    disabled={toggleMutation.isPending}
+                    onChange={(checked) =>
+                      toggleMutation.mutate({ close_arrangement_grower_whatsapp_enabled: checked })
+                    }
+                  />
+                </>
+              )}
+            </section>
           )}
         </div>
       </Dialog>

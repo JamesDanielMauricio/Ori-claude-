@@ -57,7 +57,7 @@ function FamilyBlock({ family }: { family: FamilyGroupedRow }) {
     <div className="overflow-hidden rounded-lg bg-surface shadow-card ring-1 ring-inset ring-border/70">
       <div className="flex items-center gap-2.5 px-3 py-2.5">
         <ProductThumbnail imageUrl={family.imageUrl} size="sm" />
-        <p className="font-display truncate text-base text-ink">{family.familyName}</p>
+        <p className="truncate text-sm font-semibold text-ink">{family.familyName}</p>
       </div>
 
       <ul className="border-t border-border/70">
@@ -73,7 +73,7 @@ function FamilyBlock({ family }: { family: FamilyGroupedRow }) {
               </span>
               <span className="flex shrink-0 items-baseline gap-2">
                 <span
-                  className={`text-[11px] font-semibold tabular-nums ${
+                  className={`text-xs font-semibold tabular-nums ${
                     line.hasQuantity ? "text-accent" : "text-ink-subtle"
                   }`}
                   dir="ltr"
@@ -84,7 +84,7 @@ function FamilyBlock({ family }: { family: FamilyGroupedRow }) {
             </span>
             {line.comment && (
               <span
-                className="mt-0.5 block truncate text-[11px] italic text-ink-muted"
+                className="mt-0.5 block truncate text-xs italic text-ink-muted"
                 title={line.comment}
               >
                 {line.comment}

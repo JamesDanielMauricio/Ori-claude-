@@ -54,7 +54,7 @@ export function GrowerSupplyColumn({
   return (
     <section className="animate-rise-in overflow-hidden rounded-xl bg-surface shadow-raised ring-1 ring-inset ring-border/70">
       <header className="flex items-center justify-between gap-3 border-b border-border bg-surface-muted/60 px-5 py-3.5">
-        <h2 className="font-display text-lg text-ink">מגדלים</h2>
+        <h2 className="text-sm font-semibold text-ink">מגדלים</h2>
         <span className="text-xs text-ink-muted">{growers.length}</span>
       </header>
 
@@ -144,13 +144,13 @@ function GrowerRow({
             {/* Left in RTL flow: "51 נקטף" is a Hebrew phrase, and forcing
                 it LTR put the numeral on the far side of the word it
                 counts. */}
-            <span className="mt-0.5 block text-[11px] text-ink-subtle">
+            <span className="mt-0.5 block text-xs text-ink-subtle">
               {formatPallets(grower.picked)} נקטף
               {free > 0 && ` · ${formatPallets(free)} פנוי`}
             </span>
           </span>
           {holdsSelection && (
-            <span className="animate-pop-in shrink-0 rounded-full bg-accent px-2 py-0.5 text-[10px] font-bold text-accent-ink">
+            <span className="animate-pop-in shrink-0 rounded-full bg-accent px-2 py-0.5 text-xs font-bold text-accent-ink">
               נבחר
             </span>
           )}
@@ -243,7 +243,7 @@ function GrowerFamilyBlock({
     <div className="mb-3 overflow-hidden rounded-lg bg-surface shadow-card ring-1 ring-inset ring-border/70 last:mb-0">
       <div className="flex items-center gap-2.5 px-3 py-2.5">
         <ProductThumbnail imageUrl={family.imageUrl} size="sm" />
-        <p className="font-display truncate text-base text-ink">{family.familyName}</p>
+        <p className="truncate text-sm font-semibold text-ink">{family.familyName}</p>
       </div>
 
       <ul className="border-t border-border/70">
@@ -285,7 +285,7 @@ function GrowerFamilyBlock({
                       familiar "4 of 10", matching the identical fraction in
                       the customer card headers; a numeric fraction with no
                       Hebrew in it, so it stays LTR. */}
-                  <span className="shrink-0 text-[11px] tabular-nums" dir="ltr">
+                  <span className="shrink-0 text-xs tabular-nums" dir="ltr">
                     <span className={line.allocated > 0 ? "text-accent" : "text-ink-subtle"}>
                       {formatPallets(line.allocated)}
                     </span>
@@ -295,7 +295,7 @@ function GrowerFamilyBlock({
                 </span>
                 {line.comment && (
                   <span
-                    className="mt-1 block truncate text-[11px] italic text-ink-muted"
+                    className="mt-1 block truncate text-xs italic text-ink-muted"
                     title={line.comment}
                   >
                     {line.comment}

@@ -300,7 +300,7 @@ function ClosedOrderView({ order }: { order: SpecificOrder }) {
 
       <div className="overflow-hidden rounded-xl bg-surface shadow-raised ring-1 ring-inset ring-border/70">
         <div className="flex items-center justify-between gap-3 border-b border-border bg-surface-muted/60 px-5 py-4">
-          <h2 className="font-display text-xl">הזמנת תוצרת</h2>
+          <h2 className="text-sm font-semibold">הזמנת תוצרת</h2>
           <span className="inline-flex items-center gap-1.5 rounded-full bg-surface px-3 py-1.5 text-xs font-medium text-ink-muted ring-1 ring-inset ring-border-strong">
             <Icon name="calendar" className="h-3.5 w-3.5" />
             {weekdayDateLabel(tradeDate)}

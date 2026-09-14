@@ -44,10 +44,10 @@ function buildMonthGrid(viewDate: Date): Date[] {
 
 // The sidebar's trigger + its calendar popover, portaled to <body> the same
 // way the shared Dialog is (see that component's own comment): the popover
-// floats over the main content, not inside the rail's dark subtree, so it
-// renders on the app's normal light "paper" tokens rather than needing its
-// own dark-mode styling for a control that only ever appears away from the
-// rail's own background.
+// floats over the main content, not inside the sidebar's subtree, so it
+// renders on the page's own tokens for the current theme rather than the
+// sidebar's palette — the wrong one for a panel that only ever appears away
+// from the sidebar's own background.
 //
 // A native <input type="date"> used to sit here. It could highlight nothing
 // — every day option looked identical whether or not a trading day existed
@@ -181,7 +181,7 @@ export function TradingDayCalendarPicker({
               <button
                 type="button"
                 onClick={() => setViewDate(parseIsoDate(liveDate ?? todayDate))}
-                className="font-display text-sm text-ink hover:text-accent"
+                className="text-sm font-semibold text-ink hover:text-accent"
               >
                 {MONTH_YEAR_FORMAT.format(viewDate)}
               </button>
@@ -197,7 +197,7 @@ export function TradingDayCalendarPicker({
 
             <div className="grid grid-cols-7 gap-y-1 text-center">
               {WEEKDAY_LABELS.map((label, i) => (
-                <span key={i} aria-hidden className="text-[11px] font-semibold text-ink-subtle">
+                <span key={i} aria-hidden className="text-xs font-semibold text-ink-subtle">
                   {label}
                 </span>
               ))}
@@ -258,7 +258,7 @@ export function TradingDayCalendarPicker({
                       <span
                         aria-hidden
                         className={`absolute bottom-0.5 h-1 w-1 rounded-full ${
-                          isLiveDay ? "bg-accent" : "bg-brass"
+                          isLiveDay ? "bg-accent" : "bg-ink-subtle"
                         }`}
                       />
                     )}

@@ -166,6 +166,20 @@ const PATHS: Record<string, ReactNode> = {
       <path d="m14.2 6.6 3.2 3.2" />
     </>
   ),
+  // The theme toggle's three options: light, dark, and "follow the device".
+  sun: (
+    <>
+      <circle cx="12" cy="12" r="3.8" />
+      <path d="M12 2.8v1.9M12 19.3v1.9M2.8 12h1.9M19.3 12h1.9M5.5 5.5l1.35 1.35M17.15 17.15l1.35 1.35M5.5 18.5l1.35-1.35M17.15 6.85l1.35-1.35" />
+    </>
+  ),
+  moon: <path d="M20.5 13.2A8.5 8.5 0 1 1 10.8 3.5a7 7 0 0 0 9.7 9.7Z" />,
+  monitor: (
+    <>
+      <rect x="3" y="4" width="18" height="12.5" rx="2.2" />
+      <path d="M8.5 20.5h7M12 16.5v4" />
+    </>
+  ),
 };
 
 export type IconName = keyof typeof PATHS;

@@ -12,10 +12,11 @@ import { Link } from "react-router-dom";
 export default function NotFound() {
   return (
     <main className="relative flex min-h-dvh flex-col items-center justify-center overflow-hidden bg-canvas px-4 text-center">
-      {/* The numeral is set in the display serif at a size where it reads as
-          a graphic rather than as text, in the faintest ink on the page —
-          present enough to explain what happened, quiet enough that the
-          sentence under it is what you actually read. */}
+      {/* The numeral is set so large it reads as a graphic rather than as
+          text — which is also why it sits outside the app's three-size type
+          scale: it illustrates what happened rather than being a line anyone
+          reads. It uses the faintest ink on the page, so the sentence under
+          it is what you actually read. */}
       <p
         aria-hidden
         className="font-display pointer-events-none select-none text-[5.5rem] leading-none text-border-strong/70 sm:text-[9rem] md:text-[12rem]"

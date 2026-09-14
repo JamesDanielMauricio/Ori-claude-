@@ -485,9 +485,9 @@ export function RowIconButton({
       title={label}
       className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ring-1 ring-inset transition-colors duration-150 disabled:pointer-events-none disabled:opacity-40 ${
         tone === "danger"
-          ? "bg-danger-soft text-danger ring-danger/25 hover:bg-danger hover:text-white"
+          ? "bg-danger-soft text-danger ring-danger/25 hover:bg-danger hover:text-danger-ink"
           : tone === "accent"
-            ? "bg-accent-soft text-accent ring-accent/25 hover:bg-accent hover:text-white"
+            ? "bg-accent-soft text-accent ring-accent/25 hover:bg-accent hover:text-accent-ink"
             : "bg-surface-muted text-ink-muted ring-border hover:bg-accent-soft hover:text-accent"
       }`}
     >

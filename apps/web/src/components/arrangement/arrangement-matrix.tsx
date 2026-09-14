@@ -65,9 +65,9 @@ export interface MatrixWrite {
 // make both the offsets and the scroll maths wrong.
 const ROW_H = 64;
 // Sized to the header's own worst case, not picked round: a customer name
-// wraps at most 4 lines (`line-clamp-4` below) at text-[11px] leading-[1.25],
-// i.e. 4 × 13.75px = 55px, plus the cells' pb-3 (12px) = 67px, plus a small
-// buffer against font-metric rounding. It used to be 112 — measured against
+// wraps at most 4 lines (`line-clamp-4` below) at 12px (`text-xs`) with
+// leading-[1.25], i.e. 4 × 15px = 60px, plus the cells' pb-3 (12px) = 72px,
+// plus a small buffer against font-metric rounding. It used to be 112 — measured against
 // the actual rendered header, that left 86px of blank space above a
 // one-line name like "Customer 01" (76% of the row), which is what made the
 // header look broken and made the already-thin scrollbar thumb (necessarily
@@ -622,21 +622,21 @@ export function ArrangementMatrix({
               <th
                 scope="col"
                 style={{ right: 0 }}
-                className={`sticky top-0 ${Z_CORNER} ${CELL_BORDER} bg-surface-muted px-3 text-start align-bottom pb-3 text-[11px] font-semibold tracking-[0.06em] text-ink-subtle`}
+                className={`sticky top-0 ${Z_CORNER} ${CELL_BORDER} bg-surface-muted px-3 text-start align-bottom pb-3 text-xs font-semibold tracking-[0.06em] text-ink-subtle`}
               >
                 מוצרים
               </th>
               <th
                 scope="col"
                 style={{ right: W_PRODUCT }}
-                className={`sticky top-0 ${Z_CORNER} ${CELL_BORDER} bg-surface-muted px-2 align-bottom pb-3 text-[11px] font-semibold leading-tight text-ink-subtle`}
+                className={`sticky top-0 ${Z_CORNER} ${CELL_BORDER} bg-surface-muted px-2 align-bottom pb-3 text-xs font-semibold leading-tight text-ink-subtle`}
               >
                 סה״כ במלאי
               </th>
               <th
                 scope="col"
                 style={{ right: W_PRODUCT + W_STOCK }}
-                className={`sticky top-0 ${Z_CORNER} ${CELL_BORDER} bg-surface-muted px-2 align-bottom pb-3 text-[11px] font-semibold leading-tight text-ink-subtle`}
+                className={`sticky top-0 ${Z_CORNER} ${CELL_BORDER} bg-surface-muted px-2 align-bottom pb-3 text-xs font-semibold leading-tight text-ink-subtle`}
               >
                 זמין
               </th>
@@ -645,7 +645,7 @@ export function ArrangementMatrix({
                 <th
                   key={column.customerId}
                   scope="col"
-                  className={`sticky top-0 ${Z_HEADER} ${CELL_BORDER} bg-surface-muted px-1.5 align-bottom pb-3 text-[11px] font-semibold leading-[1.25] text-ink-muted`}
+                  className={`sticky top-0 ${Z_HEADER} ${CELL_BORDER} bg-surface-muted px-1.5 align-bottom pb-3 text-xs font-semibold leading-[1.25] text-ink-muted`}
                 >
                   {/* Customer names here are full company names ("אחים כבביה
                     שיווק פירות וירקות בע״מ"). Clamped to four lines so one
@@ -660,14 +660,14 @@ export function ArrangementMatrix({
               <th
                 scope="col"
                 style={{ left: W_ALLOCATED }}
-                className={`sticky top-0 ${Z_CORNER} ${CELL_BORDER} bg-surface-muted px-2 align-bottom pb-3 text-[11px] font-semibold leading-tight text-ink-subtle`}
+                className={`sticky top-0 ${Z_CORNER} ${CELL_BORDER} bg-surface-muted px-2 align-bottom pb-3 text-xs font-semibold leading-tight text-ink-subtle`}
               >
                 סה״כ הוזמן
               </th>
               <th
                 scope="col"
                 style={{ left: 0 }}
-                className={`sticky top-0 ${Z_CORNER} ${CELL_BORDER} bg-surface-muted px-2 align-bottom pb-3 text-[11px] font-semibold leading-tight text-ink-subtle`}
+                className={`sticky top-0 ${Z_CORNER} ${CELL_BORDER} bg-surface-muted px-2 align-bottom pb-3 text-xs font-semibold leading-tight text-ink-subtle`}
               >
                 סה״כ חולק
               </th>
@@ -849,13 +849,13 @@ function MatrixRowCells({
           )}
           <span className="min-w-0">
             <span
-              className={`line-clamp-2 break-words text-[13px] leading-[1.2] ${isProduct ? "font-semibold text-ink" : "text-ink-muted"}`}
+              className={`line-clamp-2 break-words text-sm leading-[1.2] ${isProduct ? "font-semibold text-ink" : "text-ink-muted"}`}
               title={label}
             >
               {label}
             </span>
             {isProduct && row.familyName && (
-              <span className="mt-0.5 block truncate text-[10.5px] leading-none text-ink-subtle">
+              <span className="mt-0.5 block truncate text-xs leading-none text-ink-subtle">
                 {row.familyName}
               </span>
             )}
@@ -907,7 +907,7 @@ function MatrixRowCells({
                   per-grower request that nobody made. The non-breaking space
                   holds the box on one line either way. */}
               <span
-                className={`block text-center text-[11px] leading-none ${wanted ? "font-bold text-marked-ink" : "text-ink-subtle"}`}
+                className={`block text-center text-xs leading-none ${wanted ? "font-bold text-marked-ink" : "text-ink-subtle"}`}
               >
                 {isProduct ? formatPallets(cell.ordered) : " "}
               </span>
@@ -931,7 +931,7 @@ function MatrixRowCells({
                     scrollMarginInlineStart: LEAD_PANE + 8,
                     scrollMarginInlineEnd: TRAIL_PANE + 8,
                   }}
-                  className="h-7 w-full rounded-sm border border-border-strong bg-surface px-1 text-center text-[13px] font-semibold text-ink outline-none transition-colors duration-150 focus:border-accent focus:bg-surface focus:ring-2 focus:ring-accent/30"
+                  className="h-7 w-full rounded-sm border border-border-strong bg-surface px-1 text-center text-sm font-semibold text-ink outline-none transition-colors duration-150 focus:border-accent focus:bg-surface focus:ring-2 focus:ring-accent/30"
                   onFocus={(event) => {
                     onFocusCell({ row: rowIndex, col: colIndex, key: row.key });
                     // Type-to-replace, the way stepping onto a spreadsheet
@@ -954,7 +954,7 @@ function MatrixRowCells({
                 // the growers below, which cannot be written as one number)
                 // or a day that is closed or being viewed in the past. The
                 // dashed edge says "this is a total", not "this is disabled".
-                <span className="flex h-7 w-full items-center justify-center rounded-sm border border-dashed border-border-strong bg-surface-muted/70 text-center text-[13px] font-semibold text-ink-muted">
+                <span className="flex h-7 w-full items-center justify-center rounded-sm border border-dashed border-border-strong bg-surface-muted/70 text-center text-sm font-semibold text-ink-muted">
                   {palletsOrBlank(cell.allocated)}
                 </span>
               )}
@@ -1005,7 +1005,7 @@ function TotalCell({
   return (
     <td
       style={offset}
-      className={`sticky ${Z_STICKY_COL} ${CELL_BORDER} ${tint} px-2 text-center text-[13px] font-semibold ${TONE_CLASS[tone]}`}
+      className={`sticky ${Z_STICKY_COL} ${CELL_BORDER} ${tint} px-2 text-center text-sm font-semibold ${TONE_CLASS[tone]}`}
     >
       {value}
     </td>

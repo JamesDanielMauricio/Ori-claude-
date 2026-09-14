@@ -94,15 +94,17 @@ export default function ShopManagementPage() {
       ) : (
         // The day's state is the whole point of this screen, so it gets a
         // hero panel rather than a line of text in a bordered box: the date
-        // as a kicker, the phase as display type, and a live dot when the
-        // shop is actually taking orders.
+        // as a kicker, the phase as the panel's heading, and a live dot when
+        // the shop is actually taking orders. The heading is 14px semibold,
+        // not a second 24px title: at the page title's size the two competed
+        // for "what is this screen", and the panel already leads by position.
         <section className="animate-rise-in overflow-hidden rounded-xl bg-surface shadow-raised ring-1 ring-inset ring-border/70">
           <div className="flex flex-wrap items-start justify-between gap-4 p-6">
             <div className="min-w-0">
-              <p className="text-[11px] font-semibold tracking-[0.08em] text-ink-subtle">
+              <p className="text-xs font-semibold tracking-[0.08em] text-ink-subtle">
                 {tradeDateLabel ?? (dayView.isLive ? "אין יום פעיל" : "לא נמצא יום מסחר בתאריך זה")}
               </p>
-              <h2 className="font-display mt-2 text-2xl text-ink">{PHASE_LABEL[phase]}</h2>
+              <h2 className="mt-1 text-sm font-semibold text-ink">{PHASE_LABEL[phase]}</h2>
             </div>
             {phase === "shop_open" && dayView.isLive ? (
               <span className="inline-flex shrink-0 items-center gap-2 rounded-full bg-accent-soft px-3 py-1.5 text-xs font-semibold text-accent ring-1 ring-inset ring-accent/25">
@@ -116,7 +118,7 @@ export default function ShopManagementPage() {
               </span>
             ) : (
               <StatusPill
-                tone={phase === "none" ? "neutral" : phase === "closed" ? "neutral" : "brass"}
+                tone={phase === "none" ? "neutral" : phase === "closed" ? "neutral" : "warning"}
               >
                 {phase === "none" ? "לא פעיל" : phase === "closed" ? "הסתיים" : "בתהליך"}
               </StatusPill>
@@ -130,7 +132,7 @@ export default function ShopManagementPage() {
 
       {day && (
         <div className="flex flex-col gap-3">
-          <h2 className="text-[11px] font-semibold tracking-[0.08em] text-ink-subtle">מצב היום</h2>
+          <h2 className="text-xs font-semibold tracking-[0.08em] text-ink-subtle">מצב היום</h2>
           <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
             {/* `failed` exists because these cards read "still loading" from a
                 null value, and a failed query leaves the value null forever —
@@ -200,7 +202,7 @@ function PhaseStepper({ phase }: { phase: TradingDayPhase | "none" }) {
             <div className="flex min-w-0 items-center gap-2">
               <span
                 aria-hidden
-                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold transition-colors ${
+                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold transition-colors ${
                   done
                     ? "bg-accent text-accent-ink"
                     : active
@@ -270,7 +272,7 @@ function MetricCard({
         <>
           <p className="mt-2.5 flex items-baseline gap-1" dir="ltr">
             <span
-              className={`font-display text-3xl leading-none ${complete ? "text-accent" : "text-ink"}`}
+              className={`font-display text-2xl leading-none ${complete ? "text-accent" : "text-ink"}`}
             >
               {value}
             </span>
@@ -280,8 +282,10 @@ function MetricCard({
             <div
               // `scaleX` on a full-width bar rather than a percentage width,
               // so the fill is a compositor transform and never triggers
-              // layout when the number updates on refetch.
-              className={`h-full origin-right rounded-full transition-transform duration-500 ease-[cubic-bezier(0.22,0.61,0.36,1)] ${complete ? "bg-accent" : "bg-brass"}`}
+              // layout when the number updates on refetch. Gray while it
+              // fills, emerald only once complete: the accent is saved for
+              // the finished state, so reaching it is the thing that stands out.
+              className={`h-full origin-right rounded-full transition-transform duration-500 ease-[cubic-bezier(0.22,0.61,0.36,1)] ${complete ? "bg-accent" : "bg-ink-subtle"}`}
               style={{ transform: `scaleX(${pct / 100})` }}
             />
           </div>

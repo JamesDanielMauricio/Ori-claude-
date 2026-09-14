@@ -167,7 +167,7 @@ function ProductCard({
         <span className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1">
           <Stat label="במלאי" value={row.inStock} />
           <Stat label="זמין" value={row.available} tone={row.available < 0 ? "danger" : "normal"} />
-          {hasDemand && <StatusPill tone="brass">הוזמן {formatPallets(row.ordered)}</StatusPill>}
+          {hasDemand && <StatusPill tone="marked">הוזמן {formatPallets(row.ordered)}</StatusPill>}
         </span>
 
         <Icon
@@ -296,7 +296,7 @@ function CustomerCellList({
                 {column.customerName}
               </span>
               {wanted && (
-                <span className="block text-[11px] text-marked-ink/80">
+                <span className="block text-xs text-marked-ink/80">
                   הזמין {formatPallets(cell.ordered)}
                 </span>
               )}
@@ -403,7 +403,7 @@ function Stat({
   tone?: "danger" | "normal";
 }) {
   return (
-    <span className="whitespace-nowrap text-[11px]">
+    <span className="whitespace-nowrap text-xs">
       <span className="text-ink-subtle">{label} </span>
       <span
         className={`font-semibold tabular-nums ${tone === "danger" ? "text-danger" : "text-ink-muted"}`}

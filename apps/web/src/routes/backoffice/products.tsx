@@ -1099,7 +1099,7 @@ export default function ProductsPage() {
               size="sm"
             />
             {!isEditing && (
-              <span className="font-display truncate text-base text-ink">{family.name}</span>
+              <span className="truncate text-sm font-semibold text-ink">{family.name}</span>
             )}
           </button>
         )}
@@ -1141,7 +1141,7 @@ export default function ProductsPage() {
         ) : (
           <>
             {family.category && <StatusPill tone="neutral">{family.category}</StatusPill>}
-            <span className="shrink-0 text-[11px] font-semibold text-ink-subtle">
+            <span className="shrink-0 text-xs font-semibold text-ink-subtle">
               {varietyCountLabel(varietyCount)}
             </span>
           </>

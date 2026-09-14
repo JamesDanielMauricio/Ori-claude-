@@ -43,7 +43,7 @@ export function QueryError({
         <Icon name="alertCircle" className="h-5 w-5" />
       </span>
       <div>
-        <h2 className="font-display text-xl text-ink">טעינת {what} נכשלה</h2>
+        <h2 className="text-sm font-semibold text-ink">טעינת {what} נכשלה</h2>
         <p className="mt-2 max-w-xs text-sm leading-relaxed text-ink-muted">
           לא הצלחנו לקבל את הנתונים מהשרת. ייתכן שיש בעיית חיבור — הנתונים המוצגים אינם בהכרח מלאים.
         </p>

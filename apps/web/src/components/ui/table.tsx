@@ -81,7 +81,7 @@ export function TableHead({
       // that competes with the data underneath it is the most common way a
       // dense table starts to feel cheap; its job is to be findable when
       // looked for, not to be read on every pass.
-      className={`px-5 py-3.5 text-start text-[11px] font-semibold tracking-[0.08em] text-ink-subtle ${className}`}
+      className={`px-5 py-3.5 text-start text-xs font-semibold tracking-[0.08em] text-ink-subtle ${className}`}
       scope="col"
     >
       {children}

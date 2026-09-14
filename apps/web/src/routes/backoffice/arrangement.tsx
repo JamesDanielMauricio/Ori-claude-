@@ -629,15 +629,15 @@ export default function ArrangementPage() {
           under the title. */}
       <div className="animate-rise-in flex flex-wrap items-center gap-x-6 gap-y-3 rounded-xl bg-surface px-5 py-4 shadow-card ring-1 ring-inset ring-border/70">
         <div className="flex items-center gap-2.5">
-          <span className="text-[11px] font-semibold tracking-[0.08em] text-ink-subtle">
+          <span className="text-xs font-semibold tracking-[0.08em] text-ink-subtle">
             שלב יום
           </span>
-          <StatusPill tone={boardDay.phase === "shop_closed" ? "brass" : "accent"} dot>
+          <StatusPill tone={boardDay.phase === "shop_closed" ? "warning" : "accent"} dot>
             {PHASE_LABEL[boardDay.phase]}
           </StatusPill>
         </div>
         <div className="flex items-center gap-2.5">
-          <span className="text-[11px] font-semibold tracking-[0.08em] text-ink-subtle">
+          <span className="text-xs font-semibold tracking-[0.08em] text-ink-subtle">
             סטטוס סידור
           </span>
           <StatusPill tone={editable ? "accent" : "neutral"} dot>

@@ -10,54 +10,77 @@
  *
  * The app has two surface worlds, and that split is the whole design:
  *
- *   PAPER — the content area. A warm ivory field with near-white cards.
- *           Warm, not gray: this is a produce business, and a cool neutral
- *           made the food photography on the customer screens look dead.
+ *   PAPER — the content area. A near-neutral off-white field with white
+ *           cards. Neutral rather than ivory: the one accent is a cool,
+ *           slightly blue emerald, and on a yellow-tinted ground it read as
+ *           a clash instead of as the one bright thing on the page. The grays
+ *           keep a whisper of warmth (never blue-gray), so produce photos
+ *           still don't look refrigerated.
  *
- *   RAIL  — the navigation chrome. Deep forest, almost black. It frames the
- *           paper rather than sitting beside it as another light panel, which
- *           is what the previous all-light version did: with the nav and the
- *           content the same value, the app had no edges and read as one
- *           undifferentiated sheet.
+ *   RAIL  — the navigation chrome: the sidebar, and the header strip that
+ *           replaces it on phones. It has its own palette for each theme —
+ *           white in light mode, near-black in dark mode — with a hairline
+ *           edge against the page in both. Neutral either way, so the emerald
+ *           on the active nav row stays the only colour in the sidebar, which
+ *           is what makes that row findable.
  *
- * The RAIL block further down does NOT introduce a second set of utility
- * classes. It re-points the same token names at dark values for its own
- * subtree, so a `Button variant="secondary"` or a `text-ink-muted` label
- * inside the rail becomes the dark-surface version of itself automatically.
- * That is why the sidebar's day-lifecycle panel, alerts bell and sign-out
- * button needed no dark-mode branches of their own.
+ * Both worlds come in a LIGHT and a DARK theme, picked by the user (see
+ * lib/theme.ts). The light page values are the @theme block right below;
+ * every other palette is its own block further down.
+ *
+ * One accent colour — emerald — in two steps (see the brand block for why).
+ * There is no second decorative colour. Warning, danger and the arrangement
+ * grid's "marked" yellow remain, because they carry meaning, not decoration.
+ *
+ * None of those blocks introduces a second set of utility classes. Each one
+ * re-points the same token names at other values for its own subtree, so a
+ * `Button variant="secondary"` or a `text-ink-muted` label inside the sidebar
+ * becomes that palette's version of itself automatically. That is why the
+ * sidebar's day-lifecycle panel, alerts bell and sign-out button — and
+ * nearly every component, for dark mode — needed no theme branches of their
+ * own.
  */
 @theme {
   /* ---- Paper: neutrals ---------------------------------------------- */
-  /* Warm ivory. Everything here is on the yellow side of neutral; the
-     previous revision's sage-gray canvas is what made the app read as
-     generic dashboard rather than as something with a material. */
-  --color-canvas: #f4f1e9;
-  --color-surface: #fffdf8;
+  /* Every contrast ratio quoted in this block was measured with the WCAG
+     relative-luminance formula, not eyeballed. AA asks 4.5:1 for normal
+     text and 3:1 for non-text marks (rings, icons, control edges). */
+  --color-canvas: #f5f5f3;
+  --color-surface: #ffffff;
   /* Second surface step: table headers, inert fills, recessed inputs. */
-  --color-surface-muted: #f0ece1;
+  --color-surface-muted: #f3f3f1;
   /* Hairlines. Deliberately faint — structure is carried by shadow and
      spacing, and a card outlined in a visible line reads as a wireframe. */
-  --color-border: #e7e1d3;
+  --color-border: #e6e6e3;
   /* For edges that carry meaning on their own (input outlines, dividers). */
-  --color-border-strong: #d3cab6;
-  --color-ink: #1b1915;
-  --color-ink-muted: #6a6358;
-  /* Tertiary only — placeholders, decorative glyphs, table headers. Below AA
-     for body text, so never use it for content a user must read. */
-  --color-ink-subtle: #9b9284;
+  --color-border-strong: #d3d3cf;
+  --color-ink: #1c1c1a;
+  /* 6.5:1 on surface, 5.9:1 on surface-muted — safe for secondary text. */
+  --color-ink-muted: #5e5e59;
+  /* Tertiary only — placeholders, decorative glyphs, table headers. 3.1:1 on
+     surface-muted and 3.5:1 on surface: clears the 3:1 bar for non-text
+     marks (it also fills in-progress bars), but is below AA for body text,
+     so never use it for content a user must read. */
+  --color-ink-subtle: #8a8a85;
 
   /* ---- Paper: brand ------------------------------------------------- */
-  --color-accent: #1d6b45;
-  --color-accent-hover: #155334;
-  --color-accent-soft: #e3eee5;
+  /* Emerald, in two steps. The brand value #059669 measures only 3.77:1
+     against white — under AA's 4.5:1 for normal text — so it can't be the
+     fill behind a button label or the colour of a word. It CAN be a
+     non-text mark, where AA asks 3:1: a focus ring, a dot, an indicator
+     bar, a checkbox fill.
+
+     So plain `accent` — the name every existing `bg-accent`/`text-accent`
+     already uses — is the deeper #047857 (5.48:1 with white), and the brand
+     value lives in `accent-bright`, for marks only. The split is fail-safe:
+     anything reaching for `accent` gets the compliant green by default, and
+     the worst a missed swap can do is draw a ring one shade darker. */
+  --color-accent: #047857;
+  --color-accent-hover: #065f46;
+  --color-accent-bright: #059669;
+  /* Accent text on this tint (pills, active rows) holds 4.9:1. */
+  --color-accent-soft: #e9f6ef;
   --color-accent-ink: #ffffff;
-  /* Brass, not "citrus". A muted antique gold is the one color that reads as
-     expensive next to a deep green, and it gives highlights (the brand mark,
-     a live-day indicator, an editorial rule) somewhere to go that isn't a
-     second shade of the accent. */
-  --color-brass: #a97e23;
-  --color-brass-soft: #f4ebd5;
 
   /* Marked — a data cell the user is meant to act on. Currently just the
      arrangement grid, where a tinted cell means "this customer ordered this
@@ -80,89 +103,296 @@
   --color-danger: #a8261e;
   --color-danger-hover: #851c16;
   --color-danger-soft: #fae9e7;
+  /* Labels and glyphs ON a solid danger fill — 7.1:1 here. The same idea as
+     `accent-ink`: white on paper's deep red, but on the dark palettes (the
+     dark theme and the dark sidebar) the red turns light and its label has to
+     turn dark (white on the dark sidebar's earlier #e5675c measured 3.27:1). */
+  --color-danger-ink: #ffffff;
+
+  /* ---- Overlays ----------------------------------------------------- */
+  /* The dim layer behind a modal. Its own token rather than a faded `ink`,
+     because in the dark theme `ink` is near-white and would fog the page
+     instead of dimming it. This is the colour `bg-ink/50` produced before. */
+  --color-scrim: rgb(28 28 26 / 0.5);
+  /* The moving highlight in a loading skeleton. Strong on paper; on a dark
+     surface this much white reads as a glaring stripe, so the dark sets turn
+     it right down. */
+  --color-shimmer: rgb(255 255 255 / 0.75);
 
   /* ---- Elevation ---------------------------------------------------- */
-  /* Warm-tinted and wide. On an ivory field a tight gray shadow looks like
-     dirt; a broad, very low-opacity warm one reads as light falling across
-     paper. Each step pairs a contact shadow with an ambient one — that
-     pairing is what reads as depth; a single blur just looks smudged. */
-  --shadow-card: 0 1px 2px rgb(60 48 26 / 0.04), 0 2px 8px -2px rgb(60 48 26 / 0.06);
-  --shadow-raised: 0 1px 2px rgb(60 48 26 / 0.04), 0 8px 24px -6px rgb(60 48 26 / 0.10);
-  --shadow-float: 0 2px 4px rgb(60 48 26 / 0.05), 0 16px 40px -12px rgb(60 48 26 / 0.16);
-  --shadow-overlay: 0 8px 20px rgb(28 24 14 / 0.10), 0 40px 80px -24px rgb(28 24 14 / 0.34);
-  --shadow-accent: 0 1px 2px rgb(21 83 52 / 0.22), 0 8px 20px -8px rgb(21 83 52 / 0.42);
+  /* Neutral and soft. Each step pairs a tight contact shadow with a wide
+     ambient one — that pairing is what reads as depth; a single blur just
+     looks smudged. Opacities stay low on purpose: on a near-white field a
+     dark shadow reads as dirt, and the goal is to notice that a card is
+     lifted, not to notice its shadow. */
+  --shadow-card: 0 1px 2px rgb(20 20 18 / 0.04), 0 1px 3px rgb(20 20 18 / 0.03);
+  --shadow-raised: 0 1px 2px rgb(20 20 18 / 0.04), 0 4px 16px -4px rgb(20 20 18 / 0.08);
+  --shadow-float: 0 2px 4px rgb(20 20 18 / 0.04), 0 12px 32px -8px rgb(20 20 18 / 0.14);
+  --shadow-overlay: 0 8px 16px rgb(20 20 18 / 0.08), 0 32px 64px -16px rgb(20 20 18 / 0.28);
+  --shadow-accent: 0 1px 2px rgb(4 120 87 / 0.2), 0 6px 16px -6px rgb(4 120 87 / 0.4);
 
   /* ---- Radii -------------------------------------------------------- */
-  /* These override Tailwind's built-ins, so every existing `rounded-md` /
-     `rounded-lg` in the app inherits the new curvature without a single
-     class changing. */
+  /* One scale. These override Tailwind's built-ins, so every existing
+     `rounded-md` / `rounded-lg` in the app inherits the new curvature
+     without a single class changing.
+       sm   6px — small inner parts: checkboxes, chip internals
+       md   8px — controls: buttons, inputs, menu rows
+       lg  12px — floating panels: popovers, dropdowns, toasts
+       xl  16px — containers: cards, tables, dialogs */
   --radius-sm: 0.375rem;
-  --radius-md: 0.5625rem;
-  --radius-lg: 0.875rem;
-  --radius-xl: 1.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
 
   /* ---- Type --------------------------------------------------------- */
-  /* Body: Assistant, self-hosted via @fontsource-variable/assistant. */
+  /* One family: Assistant, self-hosted via @fontsource-variable/assistant.
+     Hierarchy comes from size and weight, never from switching faces.
+
+     Three sizes, and a single view uses no more than these three:
+       text-xs   12px — meta: labels, table headers, chips, hints
+       text-sm   14px — body: everything a user reads or types
+       text-2xl  24px — title: the page heading
+     A card or section heading is 14px semibold, not a fourth size — weight
+     alone separates a heading from the body text under it. */
   --font-sans:
     "Assistant Variable", "Assistant", "Segoe UI", system-ui, -apple-system, "Helvetica Neue",
     Arial, sans-serif;
 
-  /* Display: Frank Ruhl Libre — a Hebrew serif, self-hosted the same way.
-     This is the single largest reason the app no longer reads as a template.
-     Every generic admin panel is set entirely in one grotesque; pairing a
-     serif for page titles with a sans for everything else is the oldest
-     editorial move there is, and Hebrew has few serifs that work on screen —
-     Frank Ruhl is the one that does. Titles only: it is a display face and
-     gets illegible below ~20px, so body copy, labels and table data all stay
-     on Assistant. */
-  --font-display: "Frank Ruhl Libre Variable", "Frank Ruhl Libre", Georgia, "Times New Roman",
-    serif;
+  /* Titles share the body family. The token (and the `font-display` class
+     titles carry) stays so the title treatment — weight and tracking, in
+     `.font-display` below — keeps a single home. */
+  --font-display: var(--font-sans);
 
   /* ---- Motion ------------------------------------------------------- */
-  /* One easing curve for the whole app. A fast-out, long-tail settle is what
-     makes a 200ms transition feel considered rather than abrupt; using the
-     same curve everywhere is most of what makes separate animations feel
-     like one system. */
+  /* One curve per direction, mirrored in src/lib/motion.ts for components
+     animated with the Motion library — change one, change the other.
+
+     Entering: ease-OUT (`settle`) — fast start, long settle. The element is
+     already moving as it appears, so it reads as responsive, not sluggish.
+     Leaving:  ease-IN (`exit`) — slow start, fast finish. It lingers just
+     long enough to be seen going, then gets out of the way.
+
+     `spring` overshoots slightly, for small things that pop in (chips,
+     counters), where a plain fade at that size is invisible. */
   --ease-settle: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
   --ease-spring: cubic-bezier(0.34, 1.36, 0.64, 1);
 }
 
 /*
  * ---------------------------------------------------------------------------
- * RAIL — the dark navigation chrome
+ * Theme-dependent values that aren't Tailwind colours
  * ---------------------------------------------------------------------------
- * Re-points the token names above at dark values for this subtree only.
- * Unlayered, so it beats Tailwind's theme layer without !important.
+ * `color-scheme` tells the browser which way round to draw the things it
+ * paints itself — native date/time pickers, autofill, form-control insides.
  *
- * Applied via `data-surface="rail"` on the sidebar/header elements. Anything
- * rendered inside them — including shared components that know nothing about
- * the rail — picks these up automatically.
+ * The two glyphs are SVG images used from CSS. A `var()` can't reach inside a
+ * data URI, so the stroke colour has to be written into the image itself —
+ * which makes the whole image the variable, re-pointed by the dark palettes
+ * below exactly like a colour token.
+ */
+:root {
+  color-scheme: light;
+  /* The <select> chevron. Stroke = ink-subtle #8a8a85, 3.12:1 on the field's
+     surface-muted fill. (It was a leftover brass-era #9b9284 at 2.76:1 —
+     under the 3:1 bar for a non-text mark.) */
+  --glyph-select-chevron: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238a8a85' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 9 7 7 7-7'/%3E%3C/svg%3E");
+  /* The checkbox tick, in accent-ink: white on accent-bright, 3.77:1. */
+  --glyph-check: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5.5 12.5 4.5 4.5 8.5-9'/%3E%3C/svg%3E");
+}
+
+/*
+ * ---------------------------------------------------------------------------
+ * DARK theme
+ * ---------------------------------------------------------------------------
+ * On while <html data-theme="dark">. lib/theme.ts owns that attribute — it
+ * resolves the user's light / dark / system choice — and index.html applies
+ * the saved choice before first paint, so a dark-mode page never flashes
+ * light on load.
+ *
+ * It works exactly like the sidebar (RAIL) blocks below: the same token
+ * names pointed at other values, this time for the whole page. That is why
+ * almost no component needed changing for dark mode. Don't reach for
+ * Tailwind's `dark:` variant — it follows the OS setting, not this toggle, so
+ * it would ignore someone who picked "light" on a dark-mode laptop. Re-point
+ * a token here.
+ *
+ * The thinking behind the values:
+ *
+ *   Warm charcoal, not blue-black — the same whisper of warmth as the paper,
+ *   for the same reason (produce photos).
+ *
+ *   Elevation goes LIGHTER. Shadows don't register on a dark field, so a card
+ *   is lifted by being a step lighter than the canvas (plus its ring), and
+ *   the sidebar is the darkest thing on screen, one step below the canvas.
+ *
+ *   Ink is off-white, never #fff. Pure white on near-black glows at its
+ *   edges and tires the eye down a long table.
+ *
+ *   The emerald steps UP to #10b981, the brighter end of the same family,
+ *   exactly as in the dark sidebar (see that block for why) — so it serves as
+ *   both `accent` and `accent-bright`, with near-black labels on its fills.
+ *
+ *   Warning, danger and marked keep their meaning and flip to light-on-dark:
+ *   a light colour for the text, a dark tint of it behind, and danger gains a
+ *   dark `danger-ink` for the same reason the accent has one.
+ *
+ * `:root[...]` rather than a bare attribute selector, so this outranks the
+ * plain `:root` block above regardless of which comes first in the file.
+ */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Neutrals. Canvas → surface is one step lighter, 1.09:1 — the same step
+     the light theme has between its canvas and white cards. */
+  --color-canvas: #131312;
+  --color-surface: #1c1c1a;
+  /* Darker than surface, so a field still reads as recessed into its card
+     and the shift to `surface` on focus still reads as lifting. */
+  --color-surface-muted: #171716;
+  --color-border: #2c2c29;
+  --color-border-strong: #3e3e3a;
+  /* 14.6:1 on surface. */
+  --color-ink: #ededea;
+  /* 7.1:1 on surface, 7.5:1 on surface-muted. */
+  --color-ink-muted: #a8a8a2;
+  /* 4.2:1 on surface, 4.4:1 on surface-muted — still tertiary-only. */
+  --color-ink-subtle: #7e7e78;
+
+  /* Brand. 6.7:1 as text on surface, 6.0:1 on its own tint; the near-black
+     label on a filled button holds 7.5:1 (8.8:1 on hover). */
+  --color-accent: #10b981;
+  --color-accent-hover: #34c794;
+  --color-accent-bright: #10b981;
+  --color-accent-soft: #112a20;
+  --color-accent-ink: #04130c;
+
+  /* Marked: a dark olive wash with light ink on it (8.9:1). It sits 1.41:1
+     from a card — further than paper's 1.20:1, because colour reads weaker
+     on a dark ground, and at paper's step the wash disappears across a
+     600-row grid. */
+  --color-marked: #3f3514;
+  --color-marked-edge: #806c2a;
+  --color-marked-ink: #f2dc8c;
+
+  /* 8.0:1 on surface, 7.2:1 on its tint. */
+  --color-warning: #e3a640;
+  --color-warning-soft: #2c2311;
+  /* 6.3:1 on surface, 5.8:1 on its tint; the dark label on the fill 7.1:1. */
+  --color-danger: #f07a70;
+  --color-danger-hover: #f5938a;
+  --color-danger-soft: #351b18;
+  --color-danger-ink: #1c0806;
+
+  --color-scrim: rgb(0 0 0 / 0.6);
+  --color-shimmer: rgb(255 255 255 / 0.06);
+
+  /* Chevron stroke = this theme's ink-subtle (4.4:1 on surface-muted); the
+     tick = accent-ink on the bright green (7.5:1). */
+  --glyph-select-chevron: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%237e7e78' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 9 7 7 7-7'/%3E%3C/svg%3E");
+  --glyph-check: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2304130c' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5.5 12.5 4.5 4.5 8.5-9'/%3E%3C/svg%3E");
+
+  /* Deeper than paper's shadows only so a dialog or popover doesn't look
+     pasted on; the real separation is the lighter surface and the rings. */
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.35);
+  --shadow-raised: 0 1px 2px rgb(0 0 0 / 0.35), 0 4px 16px -4px rgb(0 0 0 / 0.45);
+  --shadow-float: 0 2px 4px rgb(0 0 0 / 0.35), 0 12px 32px -8px rgb(0 0 0 / 0.55);
+  --shadow-overlay: 0 8px 16px rgb(0 0 0 / 0.4), 0 32px 64px -16px rgb(0 0 0 / 0.65);
+  --shadow-accent: 0 1px 2px rgb(16 185 129 / 0.15), 0 6px 16px -6px rgb(16 185 129 / 0.35);
+}
+
+/*
+ * ---------------------------------------------------------------------------
+ * RAIL — the sidebar's palettes, one per theme
+ * ---------------------------------------------------------------------------
+ * The sidebar, and the header strip that replaces it on phones, carry
+ * `data-surface="rail"`. The two blocks below re-point the token names for
+ * that subtree only — unlayered, so they beat Tailwind's theme layer without
+ * !important. Anything rendered inside, including shared components that know
+ * nothing about the sidebar, picks the values up automatically.
+ *
+ * Both palettes are neutral, so the emerald on the active nav row stays the
+ * only colour in the sidebar. Both sit a single step from the page in
+ * lightness (1.09:1 white beside off-white, 1.05:1 near-black beside
+ * charcoal), so the `border-e` hairline on the sidebar elements is what
+ * divides them.
+ */
+
+/* LIGHT sidebar — white chrome beside the off-white page.
+ *
+ * White rather than a gray that recedes, for two reasons. Every component in
+ * here is built on paper's logic — the background is the lightest layer, and
+ * inset boxes and resting fields sit a step darker — and a gray sidebar turns
+ * that inside out. It also measured worse: a warm gray (#efeeea) dropped the
+ * emerald to 4.35:1 on its hover step, under AA, and sat just 1.06:1 from the
+ * page, so the sidebar melted into it.
+ *
+ * Only surfaces are listed. Text, brand and status colours are the light
+ * page's own, and their ratios on white are already measured in @theme.
+ *
+ * Scoped with `:not([data-theme="dark"])` so it can never reach the dark
+ * theme — which means the dark block doesn't have to redeclare everything
+ * this one sets.
+ */
+:root:not([data-theme="dark"]) [data-surface="rail"] {
+  --color-surface: #ffffff;
+  /* The inset areas: identity box, the day panel's band, the toggle track. */
+  --color-surface-muted: #f3f3f1;
+  /* The hover fill (the alerts bell). Deeper than the page canvas, which sits
+     only 1.09:1 from white — too faint for a hover. This is 1.14:1, and
+     ink-subtle still holds 3.04:1 on it, the emerald 4.8:1. */
+  --color-canvas: #f0f0ec;
+  /* Hairlines, including the edge that faces the page: 1.25:1 on white. */
+  --color-border: #e6e6e3;
+  --color-border-strong: #d3d3cf;
+}
+
+/* DARK sidebar.
+ *
+ * Near-black, the darkest step on screen, one below the dark canvas. Warm,
+ * the same neutral family as the paper: it was a cool zinc once, and beside
+ * dark-theme paper the difference in hue showed.
  *
  * Note `--color-accent-ink` flips to near-black: on dark chrome the call to
  * action is a BRIGHT green chip with dark text, which is legible and looks
  * deliberate, where white-on-mid-green goes muddy against a dark field.
+ *
+ * The accent steps UP here instead of down, because on a dark field the
+ * contrast problem inverts: the brand #059669 is 5.2:1 as text on this
+ * surface but only 4.2:1 on its own green tint (the active nav row) — under
+ * AA. #10b981, the lighter end of the same emerald family, holds 6.3:1 there
+ * and carries dark labels at 7.5:1, so here it serves as both steps.
  */
-[data-surface="rail"] {
-  --color-canvas: #1a3927;
-  --color-surface: #112419;
-  --color-surface-muted: #17301f;
-  --color-border: #22412d;
-  --color-border-strong: #2f5740;
-  --color-ink: #f1f5ef;
-  --color-ink-muted: #9cb0a2;
-  --color-ink-subtle: #6d8477;
+:root[data-theme="dark"] [data-surface="rail"] {
+  color-scheme: dark;
 
-  --color-accent: #43ad6e;
-  --color-accent-hover: #55c081;
-  --color-accent-soft: #1c4029;
-  --color-accent-ink: #06170e;
+  --color-canvas: #1f1f1d;
+  --color-surface: #0c0c0b;
+  --color-surface-muted: #171716;
+  --color-border: #282826;
+  --color-border-strong: #383835;
+  /* On surface: ink 17.6:1, ink-muted 8.0:1, ink-subtle 4.5:1. */
+  --color-ink: #f3f3f0;
+  --color-ink-muted: #a6a6a0;
+  --color-ink-subtle: #7a7a74;
 
-  --color-brass: #d9ac4e;
-  --color-brass-soft: #33290f;
+  --color-accent: #10b981;
+  --color-accent-hover: #34c794;
+  --color-accent-bright: #10b981;
+  --color-accent-soft: #10261d;
+  --color-accent-ink: #04130c;
 
-  --color-danger: #e5675c;
+  /* 6.2:1 on surface, 4.9:1 on its tint; the dark label on the fill 6.1:1. */
+  --color-danger: #e8695e;
   --color-danger-hover: #f07d72;
   --color-danger-soft: #3a1c19;
+  --color-danger-ink: #1c0806;
+
+  --color-shimmer: rgb(255 255 255 / 0.06);
+
+  /* Chevron = the rail's ink-subtle (4.2:1 on surface-muted); tick 7.5:1. */
+  --glyph-select-chevron: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%237a7a74' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 9 7 7 7-7'/%3E%3C/svg%3E");
+  --glyph-check: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2304130c' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5.5 12.5 4.5 4.5 8.5-9'/%3E%3C/svg%3E");
 
   /* Shadows do not read on a near-black field — depth there comes from the
      border tokens above. Kept as near-nothing rather than removed so any
@@ -170,7 +400,18 @@
      black smear. */
   --shadow-card: 0 1px 2px rgb(0 0 0 / 0.20);
   --shadow-raised: 0 2px 10px rgb(0 0 0 / 0.26);
-  --shadow-accent: 0 2px 12px -4px rgb(67 173 110 / 0.5);
+  --shadow-accent: 0 2px 12px -4px rgb(16 185 129 / 0.45);
+}
+
+/* For the single frame in which lib/theme.ts swaps the theme: no transitions.
+   Otherwise every control with a colour transition fades to the new theme at
+   its own speed while everything else snaps, and the page visibly ripples.
+   `!important` because a few rules in this file set their own transitions at
+   a higher specificity (the checkbox, for one). */
+[data-theme-switching] *,
+[data-theme-switching] *::before,
+[data-theme-switching] *::after {
+  transition: none !important;
 }
 
 html,
@@ -185,28 +426,22 @@ body {
      renders noticeably chunkier on Windows than the type scale assumes. */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  /* A single very wide warm wash rather than the previous two competing
-     radial tints. Painted once on a fixed layer, never animated, never
-     repainted on scroll — it just stops a full-bleed screen from reading as
-     a flat slab. */
+  /* A flat field. The warm radial wash that used to sit here belonged to the
+     ivory look; on a neutral canvas the cards' own shadows are depth enough,
+     and a flat ground is what lets them read as lifted. */
   background-color: var(--color-canvas);
-  background-image: radial-gradient(70rem 40rem at 82% -12%, rgb(169 126 35 / 0.07), transparent 62%);
-  background-attachment: fixed;
 }
 
 /*
- * Display type. Applied through the `font-display` utility on page titles.
- * Hebrew serifs need slightly tighter tracking than their Latin counterparts
- * at display sizes, and Frank Ruhl's default line-height is generous enough
- * that headings need it pulled in or they float away from their subtitles.
+ * Title treatment, applied through the `font-display` class. Same family as
+ * the body, so a title separates by weight plus slightly negative tracking:
+ * large sans type at default tracking looks loose, and pulling it in by 1% is
+ * what makes a heading read as set rather than typed.
  */
 .font-display {
-  letter-spacing: -0.02em;
-  line-height: 1.15;
-  /* The variable axis goes to 900; 500 is the weight that reads as
-     "confident" rather than "bold" at 30px+, which is the difference between
-     editorial and shouty. */
-  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  font-weight: 600;
 }
 
 /* Headings wrap at a sensible point instead of leaving one orphaned word on
@@ -232,7 +467,7 @@ input,
    reference-data screens look like they belong to this app. */
 input[type="checkbox"],
 input[type="radio"] {
-  accent-color: var(--color-accent);
+  accent-color: var(--color-accent-bright);
   /* The default ~13px control is undersized next to 14px text. */
   width: 1rem;
   height: 1rem;
@@ -244,18 +479,42 @@ input[type="radio"] {
 }
 
 ::selection {
-  background-color: var(--color-brass-soft);
+  background-color: var(--color-accent-soft);
   color: var(--color-ink);
 }
 
 /* One consistent keyboard-focus treatment everywhere, instead of each
    browser's default (or nothing, where a reset removed it). Kept as a real
    `outline` rather than a box-shadow ring so it still renders in
-   forced-colors / high-contrast mode, where box-shadows are dropped. */
-:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-  border-radius: var(--radius-sm);
+   forced-colors / high-contrast mode, where box-shadows are dropped.
+
+   It sits in `@layer base` on purpose. Tailwind's utilities live in a later
+   layer, and a later layer beats an earlier one regardless of selector
+   specificity — so a component's own classes override this default, which is
+   what a default is for. Left unlayered it outranked every utility in the
+   app: every focused element lost its own corners (a round icon button went
+   square, an 8px input snapped to 6px), and every field that swaps the
+   outline for its own ring (`focus:outline-none focus:ring-2`) drew both
+   rings at once. The radius below now only reaches elements that don't set
+   one themselves, such as a plain text link. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--color-accent-bright);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+}
+
+/* The one case that still has to beat the utilities. Forced-colors mode
+   (Windows High Contrast) throws box-shadows away, so a field that replaced
+   its outline with a ring would show no focus indicator at all. Unlayered, so
+   it wins over `outline-none` — but only while the OS is in that mode, where
+   the browser repaints everything in system colours anyway. */
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
 }
 
 /* Slim, low-contrast scrollbars for the app's many internal scroll areas
@@ -401,25 +660,26 @@ input[type="number"] {
   animation-delay: calc(var(--stagger-index, 0) * 40ms);
 }
 
-/* An editorial touch for page titles: the heading resolves from slightly
-   heavier and tighter, which reads as type settling into place rather than
-   as an element flying in. Weight is animated via the variable axis, which
-   costs a repaint of one short line of text — bounded and one-shot. */
+/* Page titles settle into place: a short rise and fade, a touch longer than a
+   card's `rise-in` so the heading lands last and the eye ends on it.
+
+   This used to tween letter-spacing too. Dropped for two reasons: tracking
+   changes re-run text layout every frame (the exact cost the rule at the top
+   of this section bans), and with `both` fill the keyframe's final tracking
+   kept overriding `.font-display` after the animation had finished. */
 @keyframes title-settle {
   from {
     opacity: 0;
     transform: translateY(0.25rem);
-    letter-spacing: 0.01em;
   }
   to {
     opacity: 1;
     transform: translateY(0);
-    letter-spacing: -0.02em;
   }
 }
 
 .animate-title-settle {
-  animation: title-settle 0.5s var(--ease-settle) both;
+  animation: title-settle 0.4s var(--ease-settle) both;
 }
 
 /* Chips, badges and counters that appear in response to an action. The spring
@@ -527,21 +787,17 @@ input[type="number"] {
    cell matches the chevrons everywhere else in the app.
    `background-position` has no logical form, so the inline end is spelled
    `left` — correct here because the document is RTL at the root and only
-   ever RTL (see index.html's own note). The stroke colour is baked into the
-   data URI because `currentColor` resolves against the SVG document, not the
-   host element; the rail override below is what keeps it visible when a
-   subtree flips to the dark token set. */
+   ever RTL (see index.html's own note). The image comes from the
+   `--glyph-select-chevron` token because its stroke can't be `currentColor`
+   (that resolves against the SVG document, not this element) — so each dark
+   palette swaps in a copy drawn in its own ink-subtle. */
 select.field-control {
   appearance: none;
   padding-inline-end: 2.25rem;
-  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239b9284' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 9 7 7 7-7'/%3E%3C/svg%3E");
+  background-image: var(--glyph-select-chevron);
   background-repeat: no-repeat;
   background-position: left 0.8rem center;
   background-size: 0.7rem;
-}
-
-[data-surface="rail"] select.field-control {
-  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236d8477' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 9 7 7 7-7'/%3E%3C/svg%3E");
 }
 
 /* Spin buttons, removed. Every numeric field in this app is a price, a
@@ -613,20 +869,17 @@ input.field-check:hover:not(:disabled) {
 }
 
 input.field-check:checked {
-  background-color: var(--color-accent);
-  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5.5 12.5 4.5 4.5 8.5-9'/%3E%3C/svg%3E");
+  /* The bright brand emerald: a checked box is a non-text mark (3:1 is the
+     AA bar). The tick is the `--glyph-check` token, drawn in accent-ink:
+     white on paper and the light sidebar (3.77:1); near-black on the dark
+     palettes (7.5:1), where the green is bright and a white tick goes muddy
+     the same way white text does. */
+  background-color: var(--color-accent-bright);
+  background-image: var(--glyph-check);
   background-repeat: no-repeat;
   background-position: center;
   background-size: 0.8rem;
-  box-shadow: inset 0 0 0 1px var(--color-accent);
-}
-
-/* On the dark rail the accent is a BRIGHT green carrying dark ink (see the
-   `--color-accent-ink` note in the token block) — a white checkmark there
-   goes muddy the same way white text does, so it flips with everything
-   else. */
-[data-surface="rail"] input.field-check:checked {
-  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2306170e' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5.5 12.5 4.5 4.5 8.5-9'/%3E%3C/svg%3E");
+  box-shadow: inset 0 0 0 1px var(--color-accent-bright);
 }
 
 input.field-check:disabled {
@@ -676,6 +929,11 @@ dialog[open]::backdrop {
  * response is to drop them rather than merely shorten them. Nothing loses
  * meaning: the shimmer keeps its static placeholder color, and the accordion
  * still opens and closes, just instantly.
+ *
+ * This rule reaches CSS animations and transitions only. Components animated
+ * with the Motion library are driven from JavaScript, which
+ * `animation-duration` can't touch — those are governed instead by the
+ * <MotionConfig reducedMotion="user"> in lib/providers.tsx.
  */
 @media (prefers-reduced-motion: reduce) {
   *,

@@ -22,7 +22,10 @@ const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   secondary:
     "bg-surface text-ink shadow-card ring-1 ring-inset ring-border-strong hover:bg-surface-muted hover:ring-accent/40 hover:text-accent",
   ghost: "text-ink-muted hover:bg-accent-soft/70 hover:text-accent",
-  danger: "bg-danger text-white shadow-card hover:bg-danger-hover",
+  // `danger-ink`, not white: on the dark palettes (the dark theme and the
+  // dark sidebar) the red is a light coral, and white text on it drops to
+  // ~3:1.
+  danger: "bg-danger text-danger-ink shadow-card hover:bg-danger-hover",
 };
 
 // Fixed heights rather than padding-derived ones, so a row of buttons lines
@@ -65,7 +68,7 @@ export function Button({
       // to 55% over an ivory page produced a pale mint blob with near-invisible
       // white text — it read as a rendering glitch rather than as a control
       // that is off. A flat recessed fill with muted text is unambiguous, and
-      // it stays legible on both the paper content area and the dark rail
+      // it stays legible on the page and in the sidebar, in either theme
       // (the tokens flip with the surface). The `disabled:` utilities come
       // last in the string but win regardless of order, because none of the
       // variant classes above are themselves `disabled:`-scoped.

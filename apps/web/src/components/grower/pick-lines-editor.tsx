@@ -343,7 +343,7 @@ export function PickLinesEditor({
           >
             <div className="flex items-center gap-2.5 border-b border-border/70 bg-surface-muted/50 px-4 py-3">
               <ProductThumbnail imageUrl={family.imageUrl} size="sm" />
-              <p className="font-display truncate text-base text-ink">{family.familyName}</p>
+              <p className="truncate text-sm font-semibold text-ink">{family.familyName}</p>
             </div>
             <ul>
               {family.varieties.map((variety) => (

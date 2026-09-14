@@ -58,11 +58,12 @@ export function Dialog({
   // Rendered into <body> rather than wherever it was declared. A modal is
   // conceptually a sibling of the app, not a child of the panel that opened
   // it — and here that is load-bearing, not tidiness: the alerts bell and the
-  // day-lifecycle panel both live inside the dark rail, which re-points the
-  // color tokens for its whole subtree (see globals.css). A dialog left in
-  // that subtree would inherit the dark palette and render as a black modal
-  // over a paper page. Portalling to <body> puts it back on the default
-  // paper tokens with no per-component override.
+  // day-lifecycle panel both live inside the sidebar, which re-points the
+  // color tokens to its own palette for its whole subtree (see globals.css).
+  // A dialog left in that subtree would inherit the sidebar's palette instead
+  // of the page's — in dark mode, a near-black modal over a charcoal page.
+  // Portalling to <body> puts it back on the page's tokens for the current
+  // theme, with no per-component override.
   //
   // React still routes events through the React tree, so callbacks passed in
   // by the opening component keep working exactly as before.
@@ -98,15 +99,13 @@ export function Dialog({
       // mounted-but-closed dialog into the page. This screen mounts two of
       // them at all times, and both appeared as stray form fragments below
       // the board until the variant was added.
-      className={`m-auto max-h-[85dvh] w-[calc(100%-2rem)] flex-col overflow-hidden rounded-xl border border-border bg-surface p-0 text-ink shadow-overlay backdrop:bg-ink/50 open:flex ${SIZE_CLASSES[size]}`}
+      //
+      // `backdrop:bg-scrim`, not a faded `ink`: in the dark theme `ink` is
+      // near-white, and the page behind a modal would turn pale instead of dim.
+      className={`m-auto max-h-[85dvh] w-[calc(100%-2rem)] flex-col overflow-hidden rounded-xl border border-border bg-surface p-0 text-ink shadow-overlay backdrop:bg-scrim open:flex ${SIZE_CLASSES[size]}`}
     >
-      {/* A brass hairline along the very top edge — the one place the second
-          brand color appears in the chrome. It gives the modal a "front", so
-          it reads as a distinct object over the page rather than as another
-          card that happens to float, without tinting the whole header. */}
-      <div className="relative flex shrink-0 items-center justify-between gap-4 border-b border-border bg-surface-muted px-6 py-4">
-        <span aria-hidden className="absolute inset-x-0 top-0 h-px bg-brass/70" />
-        <h2 id={titleId} className="font-display text-xl">
+      <div className="flex shrink-0 items-center justify-between gap-4 border-b border-border bg-surface-muted px-6 py-4">
+        <h2 id={titleId} className="text-sm font-semibold">
           {title}
         </h2>
         <button

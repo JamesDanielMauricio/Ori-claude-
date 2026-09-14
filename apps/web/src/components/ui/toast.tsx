@@ -30,23 +30,26 @@ const VARIANT_CLASSES: Record<ToastVariant, string> = {
   default: "border-border-strong bg-surface text-ink",
   success:
     "border-accent-hover bg-accent text-accent-ink shadow-[inset_0_1px_0_0_rgb(255_255_255/0.18)]",
-  error: "border-danger-hover bg-danger text-white shadow-[inset_0_1px_0_0_rgb(255_255_255/0.18)]",
+  error:
+    "border-danger-hover bg-danger text-danger-ink shadow-[inset_0_1px_0_0_rgb(255_255_255/0.18)]",
 };
 
 // The countdown bar's own color, per variant — it has to sit on top of the
-// toast's fill, so it can't just reuse the border token.
+// toast's fill, so it can't just reuse the border token. On the filled
+// variants it is the label's own ink, faded: white on the light theme's deep
+// fills, near-black on the dark theme's bright ones.
 const VARIANT_BAR_CLASSES: Record<ToastVariant, string> = {
   default: "bg-accent/55",
-  success: "bg-white/45",
-  error: "bg-white/45",
+  success: "bg-accent-ink/45",
+  error: "bg-danger-ink/45",
 };
 
 // A tinted disc behind the icon, so the glyph reads as a deliberate status
 // mark rather than as punctuation floating next to the sentence.
 const VARIANT_ICON_WRAP_CLASSES: Record<ToastVariant, string> = {
   default: "bg-accent-soft text-accent",
-  success: "bg-white/20 text-accent-ink",
-  error: "bg-white/20 text-white",
+  success: "bg-accent-ink/20 text-accent-ink",
+  error: "bg-danger-ink/20 text-danger-ink",
 };
 
 // An icon alongside the text so the outcome is legible before the sentence

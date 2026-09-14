@@ -6,6 +6,7 @@ import { useAuth } from "@/lib/auth-context";
 import { AlertsBell } from "./alerts-bell";
 import { NavLink } from "./nav-link";
 import { SignOutButton } from "./sign-out-button";
+import { ThemeToggle } from "./theme-toggle";
 import { Skeleton } from "../ui/skeleton";
 
 export interface RoleShellNavItem {
@@ -84,19 +85,23 @@ export function RoleShell({ navItems, children }: RoleShellProps) {
           viewports, per the PRD. Pinned to the viewport so it stays put
           while a long list scrolls beside it. */}
       <aside
-        // Same dark-rail token switch as BackofficeNav — see globals.css.
+        // Same sidebar palette switch as BackofficeNav — see globals.css.
         data-surface="rail"
-        className="hidden w-64 shrink-0 bg-surface p-5 text-ink md:sticky md:top-0 md:flex md:h-dvh md:flex-col md:gap-5"
+        // `border-e`: a hairline on the edge that faces the content. In both
+        // themes the sidebar and the page are only one step apart in lightness
+        // (white beside off-white, near-black beside charcoal), so this line
+        // is what divides them.
+        className="hidden w-64 shrink-0 border-e border-border bg-surface p-5 text-ink md:sticky md:top-0 md:flex md:h-dvh md:flex-col md:gap-5"
       >
         <div className="flex items-center gap-2.5">
           {/* Letter mark rather than an icon-set glyph — see BackofficeNav. */}
           <span
             aria-hidden
-            className="font-display flex h-9 w-9 select-none items-center justify-center rounded-lg text-lg text-brass ring-1 ring-inset ring-brass/40"
+            className="flex h-9 w-9 select-none items-center justify-center rounded-lg text-sm font-semibold text-accent ring-1 ring-inset ring-accent/40"
           >
             א
           </span>
-          <p className="font-display text-lg text-ink">אורי והבננות</p>
+          <p className="text-sm font-semibold text-ink">אורי והבננות</p>
         </div>
 
         <div className="flex items-center justify-between gap-2 rounded-lg bg-surface-muted px-3 py-2.5 ring-1 ring-inset ring-border">
@@ -128,8 +133,13 @@ export function RoleShell({ navItems, children }: RoleShellProps) {
             text link this used to be. It was easy to miss sitting under a
             wall of nav rows, and on mobile it was missing outright (see
             HamburgerMenuContents below), so the desktop and mobile versions
-            now match. */}
-        <SignOutButton variant="solid" className="mt-auto" />
+            now match. It shares the bottom with the theme toggle: both act
+            on this browser rather than taking you anywhere, so neither
+            belongs among the nav rows. */}
+        <div className="mt-auto flex flex-col gap-3">
+          <ThemeToggle />
+          <SignOutButton variant="solid" />
+        </div>
       </aside>
 
       {/* More generous than the previous p-6. Space is most of what separates
@@ -156,7 +166,7 @@ function IdentityStrip({
     <div className="flex min-w-0 items-center gap-2.5">
       <div
         aria-hidden
-        className="font-display flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent-soft text-base text-accent ring-1 ring-inset ring-accent/25"
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent-soft text-sm font-semibold text-accent ring-1 ring-inset ring-accent/25"
       >
         {initial}
       </div>
@@ -190,8 +200,11 @@ function HamburgerMenuContents({
           copy of this button is hidden below the `md` breakpoint. Kept
           outside the `onNavigate` click handler above: signing out already
           navigates to /login itself, so closing the menu first is redundant
-          and would fire a state update on a component about to unmount. */}
-      <div className="mt-1 border-t border-border pt-2">
+          and would fire a state update on a component about to unmount.
+          The theme toggle sits outside it too, so picking a theme doesn't
+          close the menu the choice was made in. */}
+      <div className="mt-1 flex flex-col gap-2 border-t border-border pt-2">
+        <ThemeToggle />
         <SignOutButton variant="solid" />
       </div>
     </div>

@@ -13,8 +13,8 @@ export function FormField({
     <div className="flex flex-col gap-1.5">
       {/* Full-ink label rather than muted: the label is the field's name, not
           secondary commentary, and muting it made every form read as
-          disabled. Secondary weight comes from size (13px), not from color. */}
-      <label htmlFor={htmlFor} className="text-[13px] font-semibold text-ink">
+          disabled. Secondary weight comes from size (12px), not from color. */}
+      <label htmlFor={htmlFor} className="text-xs font-semibold text-ink">
         {label}
       </label>
       {children}
@@ -45,8 +45,10 @@ export function FormField({
 //   - a focus state of two parts: the crisp 2px inset accent ring, plus a
 //     soft outer halo mixed from the accent token itself. One says "this is
 //     the field"; the halo says "and the app is listening". Mixed with
-//     `color-mix` from `--color-accent` rather than hardcoded, so it follows
-//     the token when a subtree re-points it (the dark auth card does).
+//     `color-mix` from `--color-accent-bright` rather than hardcoded, so it
+//     follows the token when a subtree re-points it (the sidebar
+//     does). The bright step, not plain `accent`: a ring is a non-text mark,
+//     so it can carry the brand emerald itself (see globals.css).
 //   - `caret-accent`, so even the text cursor belongs to the palette.
 //
 // `field-control` is a marker for globals.css, which handles the parts
@@ -59,7 +61,7 @@ export function FormField({
 // Tailwind emits both classes at equal specificity and the winner depends on
 // their order in the generated sheet rather than on the order written here.)
 export const inputClassName =
-  "field-control h-10 rounded-lg bg-surface-muted px-3.5 text-sm text-ink caret-accent ring-1 ring-inset ring-border-strong shadow-[inset_0_1px_2px_rgba(0,0,0,0.05)] transition-[background-color,box-shadow,color] duration-200 ease-[cubic-bezier(0.22,0.61,0.36,1)] hover:bg-surface hover:ring-ink-subtle focus:bg-surface focus:outline-none focus:ring-2 focus:ring-accent focus:shadow-[0_0_0_3px_color-mix(in_oklab,var(--color-accent)_18%,transparent)] disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-muted disabled:shadow-none disabled:ring-border";
+  "field-control h-10 rounded-md bg-surface-muted px-3.5 text-sm text-ink caret-accent ring-1 ring-inset ring-border-strong shadow-[inset_0_1px_2px_rgba(0,0,0,0.05)] transition-[background-color,box-shadow,color] duration-200 ease-[cubic-bezier(0.22,0.61,0.36,1)] hover:bg-surface hover:ring-ink-subtle focus:bg-surface focus:outline-none focus:ring-2 focus:ring-accent-bright focus:shadow-[0_0_0_3px_color-mix(in_oklab,var(--color-accent-bright)_18%,transparent)] disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-muted disabled:shadow-none disabled:ring-border";
 
 // The checkbox, which is the one control the skin above can't help: a native
 // checkbox ignores every property that matters (fill, radius, ring) and

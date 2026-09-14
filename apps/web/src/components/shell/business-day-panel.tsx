@@ -295,7 +295,7 @@ export function BusinessDayPanel() {
         <button
           type="button"
           onClick={() => setSelectedDate(null)}
-          className="flex items-center gap-1 self-start px-1 text-[11px] font-semibold text-accent transition-colors hover:text-accent-hover"
+          className="flex items-center gap-1 self-start px-1 text-xs font-semibold text-accent transition-colors hover:text-accent-hover"
         >
           <Icon name="chevronStart" className="h-3 w-3" />
           חזרה ליום הפעיל

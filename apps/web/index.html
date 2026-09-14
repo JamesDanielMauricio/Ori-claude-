@@ -17,6 +17,32 @@
     <!-- The source titles its pages "אורי והבננות" — the product's real name. -->
     <title>אורי והבננות</title>
     <meta name="description" content="ניהול הזמנות ומלאי לשיווק תוצרת חקלאית" />
+    <!--
+      Applies the saved colour theme before the first paint. It has to be a
+      small inline script here in <head>: the React bundle only runs after the
+      page has been drawn once, so leaving this to React would flash the light
+      theme at every dark-mode user on every load.
+
+      Mirrors parseThemePreference + resolveTheme in src/lib/theme.ts (same
+      storage key, same fallback to "system") — change one, change the other.
+
+      If a Content-Security-Policy is ever added, it has to allow this block
+      by its sha256 hash (not with 'unsafe-inline', which would also allow any
+      injected script to run) — otherwise the browser blocks it and the flash
+      comes back.
+    -->
+    <script>
+      (function () {
+        var preference = null;
+        try {
+          preference = localStorage.getItem("ori-theme");
+        } catch (error) {}
+        var dark =
+          preference === "dark" ||
+          (preference !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

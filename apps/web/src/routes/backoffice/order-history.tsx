@@ -186,7 +186,7 @@ export default function ArrangedOrderHistoryPage() {
               <div className="flex flex-col gap-5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <h2 className="font-display text-2xl text-ink">
+                    <h2 className="text-sm font-semibold text-ink">
                       {selected.companies?.name ?? "—"}
                     </h2>
                     {selected.submitted_at && (

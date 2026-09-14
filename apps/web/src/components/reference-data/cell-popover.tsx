@@ -102,7 +102,7 @@ export function CellPopover({
             className={`z-50 max-h-[60dvh] overflow-y-auto rounded-xl border border-border bg-surface p-3 text-ink shadow-overlay ${panelClassName}`}
           >
             <div className="mb-2 flex items-center justify-between gap-2">
-              <span className="text-[11px] font-semibold tracking-[0.08em] text-ink-subtle">
+              <span className="text-xs font-semibold tracking-[0.08em] text-ink-subtle">
                 {label}
               </span>
               <button

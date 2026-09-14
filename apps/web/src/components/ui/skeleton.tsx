@@ -13,6 +13,9 @@
 // (`-skew-x-12`, and wider than the box it crosses) rather than a straight
 // vertical band — a diagonal highlight reads as light moving across a
 // surface, where a hard vertical edge reads as a rendering artifact.
+//
+// The highlight is its own `shimmer` token rather than white: a sweep that
+// reads as light on paper is a glaring stripe on a dark surface.
 export function Skeleton({ className = "" }: { className?: string }) {
   return (
     <div
@@ -21,7 +24,7 @@ export function Skeleton({ className = "" }: { className?: string }) {
       // a run of empty boxes between the heading and the real data.
       aria-hidden
     >
-      <div className="animate-shimmer-sweep absolute inset-y-0 -inset-x-1/4 -skew-x-12 bg-gradient-to-r from-transparent via-white/75 to-transparent" />
+      <div className="animate-shimmer-sweep absolute inset-y-0 -inset-x-1/4 -skew-x-12 bg-gradient-to-r from-transparent via-shimmer to-transparent" />
     </div>
   );
 }

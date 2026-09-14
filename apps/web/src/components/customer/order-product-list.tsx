@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { inputClassName } from "@/components/reference-data/form-field";
 import { Button } from "@/components/ui/button";
+import { StatusPill } from "@/components/ui/card";
 import { Icon } from "@/components/ui/icon";
 import { ProductThumbnail } from "@/components/ui/product-thumbnail";
 
@@ -137,7 +138,7 @@ export function OrderProductList({
               </span>
 
               {filledCount > 0 && (
-                <span className="animate-pop-in shrink-0 rounded-full bg-accent px-2 py-0.5 text-[11px] font-bold text-accent-ink">
+                <span className="animate-pop-in shrink-0 rounded-full bg-accent px-2 py-0.5 text-xs font-bold text-accent-ink">
                   {filledCount}
                 </span>
               )}
@@ -161,13 +162,14 @@ export function OrderProductList({
                       className="flex flex-wrap items-center gap-3 border-b border-border/70 px-4 py-3 transition-colors duration-150 last:border-b-0 hover:bg-surface"
                     >
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium">
-                          {variety.varietyName}
-                          {variety.outOfStock && (
-                            <span className="ms-2 rounded-full bg-danger-soft px-2 py-0.5 text-[11px] font-semibold text-danger">
-                              אזל מהמלאי
-                            </span>
-                          )}
+                        {/* A wrapping flex row, not an inline badge after the
+                            name. Inline, a narrow row broke the badge's two
+                            words across lines and turned the pill into a
+                            two-line blob; as its own flex item it stays whole
+                            and drops under the name instead. */}
+                        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium">
+                          <span>{variety.varietyName}</span>
+                          {variety.outOfStock && <StatusPill tone="danger">אזל מהמלאי</StatusPill>}
                         </p>
                         {variety.priceLabel && (
                           <p className="mt-0.5 text-xs font-medium text-ink-muted">

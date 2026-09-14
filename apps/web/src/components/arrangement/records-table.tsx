@@ -94,7 +94,7 @@ export function ArrangementRecordsSection({
               open ? "rotate-180 text-accent" : "text-ink-muted group-hover:text-accent"
             }`}
           />
-          <h2 className="font-display text-xl text-ink">רשומות סידור</h2>
+          <h2 className="text-sm font-semibold text-ink">רשומות סידור</h2>
           <span className="rounded-full bg-surface-muted px-2.5 py-0.5 text-xs font-semibold tabular-nums text-ink-muted ring-1 ring-inset ring-border">
             {records.length}
           </span>

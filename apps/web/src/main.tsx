@@ -5,16 +5,12 @@ import { BrowserRouter } from "react-router-dom";
 import { AppRoutes } from "./app-routes";
 import { AuthProvider } from "./lib/auth-context";
 import { Providers } from "./lib/providers";
+import { initTheme } from "./lib/theme";
 
 // Self-hosted Assistant (hebrew + latin subsets) — globals.css names the
 // family in --font-sans; this is what actually loads the woff2 files.
 // Imported before globals.css so the @font-face rules are registered first.
 import "@fontsource-variable/assistant";
-// Frank Ruhl Libre — the Hebrew serif used for page titles only
-// (--font-display). Each fontsource package declares its subsets as separate
-// @font-face rules with `unicode-range`, so a Hebrew page downloads only the
-// Hebrew file; importing the package root costs nothing extra at runtime.
-import "@fontsource-variable/frank-ruhl-libre";
 import "./globals.css";
 
 // The browser entry point. Provider order matches what app/layout.tsx had:
@@ -23,6 +19,11 @@ import "./globals.css";
 //
 // BrowserRouter sits outermost so that anything inside a provider can still
 // call useNavigate — the role guard in lib/require-role.tsx depends on this.
+// Before the first render, so the theme store already holds the saved choice
+// when a toggle mounts. index.html painted that theme already; from here on
+// lib/theme.ts owns it, including following the OS while set to "system".
+initTheme();
+
 const container = document.getElementById("root");
 if (!container) {
   throw new Error("Root container #root is missing from index.html");

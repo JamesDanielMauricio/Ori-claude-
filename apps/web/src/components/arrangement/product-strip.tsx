@@ -50,10 +50,10 @@ export function ProductStrip({
                   as the headline and the variety as a smaller line under it,
                   which is the right way round: "רימון" is what the
                   distributor is thinking about, "4 וונדרפול" is which one. */}
-              <p className="font-display truncate text-xl leading-tight text-ink">
+              <p className="truncate text-sm font-semibold leading-tight text-ink">
                 {product.familyName || product.varietyName}
               </p>
-              <p className="mt-0.5 truncate text-xs font-semibold text-brass">
+              <p className="mt-0.5 truncate text-xs font-semibold text-ink-muted">
                 {product.varietyName}
               </p>
             </div>
@@ -86,7 +86,7 @@ export function ProductStrip({
               >
                 <p
                   aria-hidden
-                  className="text-[11px] font-semibold tracking-[0.08em] text-ink-subtle"
+                  className="text-xs font-semibold tracking-[0.08em] text-ink-subtle"
                 >
                   {stat.label}
                 </p>

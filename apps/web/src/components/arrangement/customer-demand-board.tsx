@@ -51,7 +51,7 @@ export interface ArrangeRequest {
 const ORDER_STATUS: Record<string, { label: string; tone: StatusTone }> = {
   open: { label: "פתוחה", tone: "neutral" },
   submitted: { label: "נשלחה", tone: "accent" },
-  closed: { label: "סגורה", tone: "brass" },
+  closed: { label: "סגורה", tone: "neutral" },
 };
 
 export function CustomerDemandBoard({
@@ -100,7 +100,7 @@ export function CustomerDemandBoard({
   return (
     <section className="animate-rise-in overflow-hidden rounded-xl bg-surface shadow-raised ring-1 ring-inset ring-border/70">
       <header className="flex items-center justify-between gap-3 border-b border-border bg-surface-muted/60 px-5 py-3.5">
-        <h2 className="font-display text-lg text-ink">לקוחות</h2>
+        <h2 className="text-sm font-semibold text-ink">לקוחות</h2>
         {/* Counts what is on screen, not what came back from the query — the
             two differ while nothing is selected, because customers who
             ordered nothing are held back until there is a product to offer
@@ -148,7 +148,7 @@ export function CustomerDemandBoard({
                   aria-hidden
                   className="h-0 flex-1 border-t-2 border-dashed border-border-strong"
                 />
-                <span className="shrink-0 text-[11px] font-semibold tracking-[0.08em] text-ink-subtle">
+                <span className="shrink-0 text-xs font-semibold tracking-[0.08em] text-ink-subtle">
                   לא הזמינו את המוצר הנבחר
                 </span>
                 <span
@@ -264,7 +264,7 @@ function CustomerCard({
           {/* Only the fraction is forced LTR — the unit stays in the page's
               RTL flow, so this reads "0/11 משטחים" right-to-left rather than
               stranding the Hebrew word on the wrong side of the numbers. */}
-          <p className="mt-0.5 text-[11px] text-ink-subtle">
+          <p className="mt-0.5 text-xs text-ink-subtle">
             <span dir="ltr">
               {formatPallets(customer.allocated)} / {formatPallets(customer.ordered)}
             </span>{" "}
@@ -328,7 +328,7 @@ function CustomerCard({
           />
         ))}
         {lines.length === 0 && (
-          <li className="px-3 py-3 text-[11px] text-ink-muted">אין שורות בהזמנה.</li>
+          <li className="px-3 py-3 text-xs text-ink-muted">אין שורות בהזמנה.</li>
         )}
       </ul>
     </article>
@@ -405,7 +405,7 @@ function OrderLineRow({
             <span className="font-medium">{line.varietyName}</span>
           </span>
           {line.comment && (
-            <span className="mt-0.5 block truncate text-[11px] italic text-ink-subtle">
+            <span className="mt-0.5 block truncate text-xs italic text-ink-subtle">
               {line.comment}
             </span>
           )}
@@ -655,7 +655,7 @@ function AllocationRow({
   return (
     <li className="flex items-center gap-2 rounded-md bg-surface px-2 py-1.5 ring-1 ring-inset ring-border/70">
       <span
-        className="min-w-0 flex-1 truncate text-[11px] text-ink-muted"
+        className="min-w-0 flex-1 truncate text-xs text-ink-muted"
         title={allocation.growerName}
       >
         {allocation.growerName}

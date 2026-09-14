@@ -78,7 +78,7 @@ export function ExpandableEntityRow({
         </button>
 
         {/* Remind — send_pick_reminder / send_order_reminder, the same
-            write both screens already made before this redesign. A warm
+            write both screens already made before this redesign. A tinted
             fill distinguishes it from the neutral edit button: this is the
             "nudge someone else" action, not "change what's on screen." */}
         <button
@@ -87,7 +87,7 @@ export function ExpandableEntityRow({
           disabled={remindDisabled}
           aria-label={remindLabel}
           title={remindLabel}
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brass-soft text-brass ring-1 ring-inset ring-brass/25 transition-colors duration-150 enabled:hover:bg-brass enabled:hover:text-accent-ink disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent ring-1 ring-inset ring-accent/25 transition-colors duration-150 enabled:hover:bg-accent enabled:hover:text-accent-ink disabled:cursor-not-allowed disabled:opacity-40"
         >
           {reminding ? (
             <span
@@ -113,7 +113,7 @@ export function ExpandableEntityRow({
               {name}
             </span>
             {caption && (
-              <span className="block truncate text-[11px] text-ink-subtle">{caption}</span>
+              <span className="block truncate text-xs text-ink-subtle">{caption}</span>
             )}
           </span>
           <Icon

@@ -166,7 +166,7 @@ export function AlertsBell() {
       >
         <Icon name="bell" />
         {unreadCount > 0 && (
-          <span className="absolute end-0.5 top-0.5 flex h-4 min-w-4 ring-2 ring-surface items-center justify-center rounded-full bg-danger px-1 text-[10px] font-semibold text-white">
+          <span className="absolute end-0.5 top-0.5 flex h-4 min-w-4 ring-2 ring-surface items-center justify-center rounded-full bg-danger px-1 text-xs font-semibold text-danger-ink">
             {unreadCount > 9 ? "9+" : unreadCount}
           </span>
         )}

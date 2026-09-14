@@ -20,12 +20,12 @@ export function PageHeader({
   return (
     // No rule under the header any more, and no accent bar beside the title.
     // Both were doing the job that space and type contrast should do: with a
-    // 30px serif title over a 14px sans subtitle, the hierarchy is already
+    // 24px semibold title over a 14px muted subtitle, the hierarchy is already
     // unmistakable, and a divider on top of that just adds a line to look at.
     // The generous bottom margin is the separator.
     <header className="mb-8 flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
       <div className="min-w-0">
-        <h1 className="animate-title-settle font-display text-[1.75rem] text-ink sm:text-[2.125rem]">
+        <h1 className="animate-title-settle font-display text-2xl text-ink">
           {title}
         </h1>
         {subtitle && (

@@ -7,6 +7,7 @@ import { AlertsBell } from "./alerts-bell";
 import { BusinessDayPanel } from "./business-day-panel";
 import { NavLink } from "./nav-link";
 import { SignOutButton } from "./sign-out-button";
+import { ThemeToggle } from "./theme-toggle";
 import { Skeleton } from "../ui/skeleton";
 
 // The `side_bar_v2` equivalent — rebuilt, not ported. The source mounted
@@ -71,20 +72,19 @@ function BackofficeNavLink({ href, label, icon }: { href: string; label: string;
 
 // The brand lockup. A letter mark, not a glyph from the icon set: every
 // icon in that set is spoken for by a nav row, and reusing one for the brand
-// made the logo read as a twelfth destination. Set in the display serif and
-// outlined in brass rather than filled in accent green — on the dark rail a
-// solid green chip competed with the active nav row, which is the one thing
-// here that should be green.
+// made the logo read as a twelfth destination. Outlined rather than filled —
+// a solid green chip competed with the active nav row, which is the one
+// thing here that should be a solid block of green.
 function BrandMark() {
   return (
     <div className="flex items-center gap-2.5">
       <span
         aria-hidden
-        className="font-display flex h-9 w-9 shrink-0 select-none items-center justify-center rounded-lg text-lg text-brass ring-1 ring-inset ring-brass/40"
+        className="flex h-9 w-9 shrink-0 select-none items-center justify-center rounded-lg text-sm font-semibold text-accent ring-1 ring-inset ring-accent/40"
       >
         א
       </span>
-      <p className="font-display truncate text-lg text-ink">אורי והבננות</p>
+      <p className="truncate text-sm font-semibold text-ink">אורי והבננות</p>
     </div>
   );
 }
@@ -133,7 +133,7 @@ function NavGroups() {
         {/* The group label gets a hairline rule trailing off to the inline
             end, so it separates the two nav groups on its own instead of
             needing a full divider row above it. */}
-        <p className="mb-2 flex items-center gap-2.5 px-3 text-[11px] font-semibold tracking-[0.08em] text-ink-subtle">
+        <p className="mb-2 flex items-center gap-2.5 px-3 text-xs font-semibold tracking-[0.08em] text-ink-subtle">
           <span className="shrink-0">ניהול מערכת</span>
           <span aria-hidden className="h-px flex-1 bg-border" />
         </p>
@@ -211,7 +211,8 @@ export function BackofficeNav() {
               <NavGroups />
             </nav>
 
-            <div className="mt-3 border-t border-border pt-3">
+            <div className="mt-3 flex flex-col gap-3 border-t border-border pt-3">
+              <ThemeToggle />
               <SignOutButton variant="solid" />
             </div>
           </div>
@@ -232,12 +233,15 @@ function DesktopRail() {
     // height and its own middle section is what scrolls.
     <nav
       aria-label="ניווט מערכת"
-      // `data-surface="rail"` re-points the color tokens to the dark palette
-      // for this whole subtree (see globals.css). Everything below — the day
-      // panel's buttons, the alerts bell, sign-out, the nav rows — picks that
-      // up without knowing anything about it.
+      // `data-surface="rail"` re-points the color tokens to the sidebar's
+      // palette — light or dark, following the theme — for this whole subtree
+      // (see globals.css). Everything below — the day panel's buttons, the
+      // alerts bell, sign-out, the nav rows — picks that up without knowing
+      // anything about it.
       data-surface="rail"
-      className="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col bg-surface text-ink md:flex"
+      // `border-e`: a hairline on the edge that faces the content — see the
+      // same note in RoleShell.
+      className="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col border-e border-border bg-surface text-ink md:flex"
     >
       <div className="px-5 pb-4 pt-5">
         <div className="mb-4">
@@ -252,7 +256,10 @@ function DesktopRail() {
         <NavGroups />
       </div>
 
-      <div className="border-t border-border px-5 py-4">
+      {/* Theme and sign-out share the footer: both act on this browser rather
+          than taking you anywhere, so neither belongs among the nav rows. */}
+      <div className="flex flex-col gap-3 border-t border-border px-5 py-4">
+        <ThemeToggle />
         <SignOutButton variant="solid" />
       </div>
     </nav>

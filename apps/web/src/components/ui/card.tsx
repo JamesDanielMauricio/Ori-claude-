@@ -32,7 +32,7 @@ export function Card({
     >
       {title && (
         <header className="flex items-center justify-between gap-3 border-b border-border bg-surface-muted/60 px-5 py-3.5">
-          <h2 className="font-display text-lg text-ink">{title}</h2>
+          <h2 className="text-sm font-semibold text-ink">{title}</h2>
           {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
         </header>
       )}
@@ -62,7 +62,7 @@ export function FormSection({
   return (
     <section className="border-b border-border pb-6 last:border-b-0 last:pb-0">
       <div className="mb-4">
-        <h3 className="text-[11px] font-semibold tracking-[0.08em] text-ink-subtle">{title}</h3>
+        <h3 className="text-xs font-semibold tracking-[0.08em] text-ink-subtle">{title}</h3>
         {hint && <p className="mt-1 text-xs leading-relaxed text-ink-muted">{hint}</p>}
       </div>
       <div className={columns === 2 ? "grid gap-4 sm:grid-cols-2" : "flex flex-col gap-4"}>
@@ -80,7 +80,10 @@ const TONE_CLASSES = {
   accent: "bg-accent-soft text-accent ring-accent/25",
   warning: "bg-warning-soft text-warning ring-warning/25",
   danger: "bg-danger-soft text-danger ring-danger/25",
-  brass: "bg-brass-soft text-brass ring-brass/30",
+  // The arrangement grid's "a customer ordered this" yellow, for a chip that
+  // means the same thing outside the grid (the mobile matrix's "הוזמן" count).
+  // It brings its own ink because `ink-muted` on this fill fails AA.
+  marked: "bg-marked text-marked-ink ring-marked-edge/60",
 } as const;
 
 export type StatusTone = keyof typeof TONE_CLASSES;

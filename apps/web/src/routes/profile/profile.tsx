@@ -146,7 +146,7 @@ export default function UserProfilePage() {
             {displayName.trim().charAt(0)}
           </span>
           <div className="min-w-0">
-            <p className="font-display truncate text-xl text-ink">{displayName || "—"}</p>
+            <p className="truncate text-sm font-semibold text-ink">{displayName || "—"}</p>
             <p className="mt-0.5 truncate text-sm text-ink-muted">{phoneNumber || "ללא טלפון"}</p>
           </div>
         </div>

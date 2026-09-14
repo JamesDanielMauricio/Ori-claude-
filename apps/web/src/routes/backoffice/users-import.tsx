@@ -167,7 +167,7 @@ export default function BulkImportUsersPage() {
         // obvious at a glance which one was input and which was outcome.
         <section className="animate-rise-in mt-2 flex flex-col gap-3">
           <div>
-            <h2 className="font-display text-xl text-ink">תוצאות הייבוא</h2>
+            <h2 className="text-sm font-semibold text-ink">תוצאות הייבוא</h2>
             <p className="mt-1 text-sm text-ink-muted">
               כל קישור חד-פעמי מוצג כאן פעם אחת בלבד — העתק אותו ושלח למשתמש לפני שתעזוב את הדף.
             </p>

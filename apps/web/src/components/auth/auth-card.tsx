@@ -18,53 +18,58 @@ export function AuthCard({
     // otherwise empty viewport, so they are the one place the background has
     // to do real work — everywhere else, content fills the page.
     //
-    // The whole field is dark here, not paper: it's the same forest as the
-    // app's rail, so signing in hands you straight into the product's own
-    // color world instead of a white page that looks like a different app.
-    // `data-surface="rail"` gives this subtree the dark token set, so the
-    // shared inputs and Button inside `children` come out dark without any
-    // auth-specific styling (see globals.css).
-    <main
-      data-surface="rail"
-      className="relative flex min-h-dvh flex-col items-center justify-center overflow-hidden bg-surface px-4 py-10 text-ink"
-    >
-      {/* Two static washes — a green bloom above, a brass one low and to the
-          inline-start. Nothing here animates, so the compositor paints it
-          once and never again. */}
+    // They follow the light/dark theme like every other page: the field is
+    // the page's own `canvas` and the card a `surface` lifted off it, so
+    // signing in looks like the app you land in afterwards. The theme is the
+    // choice saved in this browser, or the device setting — and index.html
+    // applies it before first paint on these screens too, so there's no flash.
+    //
+    // No `data-surface`. These screens used to borrow the sidebar's dark
+    // palette to stay dark in both themes; following the theme, the plain
+    // page tokens are exactly right, and the shared inputs and Button inside
+    // `children` match every other form in the app.
+    <main className="relative flex min-h-dvh flex-col items-center justify-center overflow-hidden bg-canvas px-4 py-10 text-ink">
+      {/* One static emerald bloom above the card. Nothing here animates, so
+          the compositor paints it once and never again. Mixed from the
+          accent token rather than written as a fixed colour, so it follows
+          the theme: the brand green on paper, the brighter green in dark
+          mode. */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-[34rem] bg-[radial-gradient(60rem_30rem_at_50%_-22%,rgb(67_173_110/0.18),transparent_70%)]"
-      />
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -bottom-40 -start-40 h-[32rem] w-[32rem] rounded-full bg-[radial-gradient(circle,rgb(217_172_78/0.10),transparent_66%)]"
+        className="pointer-events-none absolute inset-x-0 top-0 h-[34rem] bg-[radial-gradient(60rem_30rem_at_50%_-22%,color-mix(in_oklab,var(--color-accent-bright)_14%,transparent),transparent_70%)]"
       />
       {/* A faint dot grid, masked to fade out at the edges, so the empty
-          space has a texture to sit on rather than being flat black. */}
+          space has a texture to sit on rather than being flat. Drawn in
+          `ink` at 7%, so the dots come out dark on paper and light on dark. */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 opacity-60 [background-image:radial-gradient(rgb(255_255_255/0.07)_1px,transparent_1px)] [background-size:26px_26px] [mask-image:radial-gradient(44rem_30rem_at_50%_45%,#000,transparent_78%)]"
+        className="pointer-events-none absolute inset-0 opacity-60 [background-image:radial-gradient(color-mix(in_oklab,var(--color-ink)_7%,transparent)_1px,transparent_1px)] [background-size:26px_26px] [mask-image:radial-gradient(44rem_30rem_at_50%_45%,#000,transparent_78%)]"
       />
 
       <div className="animate-rise-in relative flex w-full max-w-sm flex-col items-center">
-        <div className="mb-8 flex items-center gap-3">
-          {/* Brass outline, display serif — the same mark the rail carries, at
-              a size where it can lead. No gradient fill: a metallic hairline
-              on dark is what reads as considered, where a glowing green chip
-              reads as a startup logo placeholder. */}
+        <div className="mb-8 flex items-center gap-2.5">
+          {/* The same mark and wordmark the sidebar carries, at the same size,
+              so signing in and the app share one lockup. It deliberately
+              doesn't lead: the form's title below is this screen's one 24px
+              line, and a brand name above it at the same size (or, as it was,
+              larger) split attention between two headings. Outlined, not
+              filled: a hairline reads as considered, where a solid chip
+              reads as a logo placeholder. */}
           <span
             aria-hidden
-            className="font-display flex h-12 w-12 select-none items-center justify-center rounded-xl text-2xl text-brass ring-1 ring-inset ring-brass/45"
+            className="flex h-9 w-9 select-none items-center justify-center rounded-lg text-sm font-semibold text-accent ring-1 ring-inset ring-accent/40"
           >
             א
           </span>
-          <p className="font-display text-3xl text-ink">אורי והבננות</p>
+          <p className="text-sm font-semibold text-ink">אורי והבננות</p>
         </div>
 
-        {/* The card is a lifted panel of the same family as the field, not a
-            white sheet dropped on it — separated by a hairline and a large
-            soft shadow rather than by inverting the value. */}
-        <div className="w-full rounded-xl bg-surface-muted/80 p-8 shadow-overlay ring-1 ring-inset ring-border backdrop-blur-sm">
+        {/* The card is a panel lifted off the field — one step lighter (white
+            on paper, a charcoal step up in dark mode), with a hairline and a
+            large soft shadow, exactly as cards sit on every other page.
+            Slightly translucent and blurred, so the dot grid softens into it
+            instead of stopping at a hard edge. */}
+        <div className="w-full rounded-xl bg-surface/85 p-8 shadow-overlay ring-1 ring-inset ring-border backdrop-blur-sm">
           <h1 className="font-display text-2xl text-ink">{title}</h1>
           {subtitle && <p className="mt-2 text-sm leading-relaxed text-ink-muted">{subtitle}</p>}
           <div className="mt-7">{children}</div>

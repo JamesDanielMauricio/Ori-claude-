@@ -78,7 +78,7 @@ export function RecordList({
           />
         </div>
         {!loading && (
-          <span className="shrink-0 rounded-full bg-surface px-2 py-0.5 text-[11px] font-semibold tabular-nums text-ink-muted ring-1 ring-inset ring-border">
+          <span className="shrink-0 rounded-full bg-surface px-2 py-0.5 text-xs font-semibold tabular-nums text-ink-muted ring-1 ring-inset ring-border">
             {filtered.length}
           </span>
         )}
@@ -140,7 +140,7 @@ export function RecordList({
                       )}
                     </span>
                     {item.badge && (
-                      <span className="shrink-0 rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium text-ink-muted ring-1 ring-inset ring-border">
+                      <span className="shrink-0 rounded-full bg-surface-muted px-2 py-0.5 text-xs font-medium text-ink-muted ring-1 ring-inset ring-border">
                         {item.badge}
                       </span>
                     )}
@@ -167,7 +167,7 @@ function Avatar({ label, icon, active }: { label: string; icon: IconName; active
   return (
     <span
       aria-hidden
-      className={`font-display flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm ring-1 ring-inset transition-colors ${
+      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold ring-1 ring-inset transition-colors ${
         active
           ? "bg-accent text-accent-ink ring-accent"
           : "bg-surface-muted text-ink-muted ring-border"

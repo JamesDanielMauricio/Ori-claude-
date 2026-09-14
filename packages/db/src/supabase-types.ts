@@ -865,16 +865,19 @@ export type Database = {
           id: boolean;
           whatsapp_enabled: boolean;
           close_arrangement_whatsapp_enabled: boolean;
+          whatsapp_dev_override_phone: string | null;
         };
         Insert: {
           id?: boolean;
           whatsapp_enabled?: boolean;
           close_arrangement_whatsapp_enabled?: boolean;
+          whatsapp_dev_override_phone?: string | null;
         };
         Update: {
           id?: boolean;
           whatsapp_enabled?: boolean;
           close_arrangement_whatsapp_enabled?: boolean;
+          whatsapp_dev_override_phone?: string | null;
         };
         Relationships: [];
       };

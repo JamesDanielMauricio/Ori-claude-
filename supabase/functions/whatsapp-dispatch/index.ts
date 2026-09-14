@@ -93,6 +93,34 @@ function getGreenApiCredentials(env: "dev" | "live"): GreenApiCredentials {
   };
 }
 
+// Dev-safety redirect: in "dev" env every message is delivered to this one
+// number instead of whatever resolve_outbox_dispatch actually resolved, so
+// exercising the real dispatch loop against real customer/grower data during
+// development can never reach an actual customer or grower. Sourced from
+// notification_settings.whatsapp_dev_override_phone (migration 0045), not an
+// env var — editable from the Table Editor with no redeploy. "live" always
+// uses the real resolved target, ignoring this column entirely.
+//
+// Same fail-closed shape as the credentials check in sendWhatsAppMessage:
+// dev env with no override number configured must refuse to send rather than
+// silently falling through to the real resolved target, which would defeat
+// the entire point of the guard. `target` stays the real resolved recipient
+// for bookkeeping (alreadySent/record_outbox_target_sent) either way — only
+// where the message is physically delivered changes.
+function resolveSendTarget(
+  env: "dev" | "live",
+  target: string,
+  devOverridePhone: string | null,
+): { to: string } | { error: string } {
+  if (env !== "dev") return { to: target };
+  if (!devOverridePhone) {
+    return {
+      error: "notification_settings.whatsapp_dev_override_phone is not configured — refusing to send in dev env",
+    };
+  }
+  return { to: devOverridePhone };
+}
+
 // Green API chat ids are `{phone}@c.us` for an individual and
 // `{id}@g.us` for a group. resolve_outbox_dispatch's `target` is either a
 // raw phone number (the 972-prefixed individual-dispatch batch) or
@@ -156,10 +184,18 @@ Deno.serve(async (req) => {
 
   const { data: settings, error: settingsError } = await client
     .from("notification_settings")
-    .select("whatsapp_enabled, close_arrangement_whatsapp_enabled")
+    .select("whatsapp_enabled, close_arrangement_whatsapp_enabled, whatsapp_dev_override_phone")
     .single();
   if (settingsError) {
     return Response.json({ error: settingsError.message }, { status: 500 });
+  }
+  // Same server-side-only logging as above, for the dev redirect: confirms
+  // whether real sends will actually go out this run without printing the
+  // override number itself.
+  if (whatsappEnv === "dev") {
+    console.log(
+      `[whatsapp-dispatch] dev env — all sends redirected to notification_settings.whatsapp_dev_override_phone (configured: ${settings.whatsapp_dev_override_phone ? "yes" : "no"})`,
+    );
   }
 
   const { data: pendingRows, error: pendingError } = await client
@@ -206,7 +242,13 @@ Deno.serve(async (req) => {
     for (const { target, message } of resolvedTargets) {
       if (alreadySent.has(target)) continue;
 
-      const result = await sendWhatsAppMessage(target, message, credentials);
+      const sendTarget = resolveSendTarget(whatsappEnv, target, settings.whatsapp_dev_override_phone);
+      if ("error" in sendTarget) {
+        errors.push(sendTarget.error);
+        continue;
+      }
+
+      const result = await sendWhatsAppMessage(sendTarget.to, message, credentials);
       if (!result.success) {
         errors.push(result.error ?? `send to ${target} failed`);
         continue;

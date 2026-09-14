@@ -1,4 +1,4 @@
-import { boolean, pgTable } from "drizzle-orm/pg-core";
+import { boolean, pgTable, text } from "drizzle-orm/pg-core";
 
 // A genuine singleton — the platform's two WhatsApp on/off toggles
 // (whatsapp-messaging.md: `whatsapp_toggle` and
@@ -18,4 +18,8 @@ export const notificationSettings = pgTable("notification_settings", {
   id: boolean("id").primaryKey().default(true),
   whatsappEnabled: boolean("whatsapp_enabled").notNull().default(false),
   closeArrangementWhatsappEnabled: boolean("close_arrangement_whatsapp_enabled").notNull().default(false),
+  // Dev-env-only redirect target (migration 0045) — see that migration's
+  // column comment for the full rationale. Nullable: unset means "refuse to
+  // send" while in dev, not "fall back to the real recipient".
+  whatsappDevOverridePhone: text("whatsapp_dev_override_phone"),
 });

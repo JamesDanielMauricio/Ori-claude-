@@ -17,8 +17,10 @@ const env = loadEnv(
 // under real traffic. Capping at 1 keeps that bounded — pair with
 // DATABASE_URL pointing at Supabase's connection pooler (port 6543,
 // transaction mode), which is built for exactly this many-short-lived-
-// clients pattern.
-const queryClient = postgres(env.DATABASE_URL, { max: 1 });
+// clients pattern. Transaction mode can hand each query a different server
+// connection, so prepared statements (postgres.js's default) aren't
+// supported there and are turned off.
+const queryClient = postgres(env.DATABASE_URL, { max: 1, prepare: false });
 
 export const db = drizzle(queryClient, { schema });
 

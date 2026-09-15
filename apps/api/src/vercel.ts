@@ -3,9 +3,10 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { buildServer } from "./server";
 
 // Vercel runs this once per request instead of a long-lived `.listen()`
-// server (bundled by scripts/build-vercel.mjs), so the Fastify app is built
-// once per cold start and reused by warm invocations. A failed build isn't
-// cached, so the next request retries instead of the instance staying broken.
+// server (bundled by scripts/bundle-vercel-function.mjs), so the Fastify app
+// is built once per cold start and reused by warm invocations. A failed build
+// isn't cached, so the next request retries instead of the instance staying
+// broken.
 let appReady: ReturnType<typeof buildServer> | undefined;
 
 function getApp() {

@@ -69,6 +69,21 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const MAX_ATTEMPTS = 5;
 
+// SECURITY (CORS): allows browser JavaScript on any origin to call this
+// function and read its response. The backoffice app's instant nudge
+// (apps/web/src/lib/nudge-whatsapp-dispatch.ts) is a cross-origin call, and
+// the browser blocks it without these headers. CORS is not what protects
+// this function: it only limits what a browser lets a page read, and curl,
+// pg_net or any server ignore it. Who may invoke is decided by the Supabase
+// gateway's JWT check (verify_jwt), which still runs on every POST, so
+// narrowing the origin would add no real protection. The allowed headers are
+// the ones supabase-js's functions.invoke sends.
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
 interface PendingOutboxRow {
   id: string;
   template_key: string;
@@ -168,6 +183,15 @@ async function sendWhatsAppMessage(
 }
 
 Deno.serve(async (req) => {
+  // SECURITY: answers the browser's CORS preflight without doing any work.
+  // Allows the browser to go on and send the real POST. Protects against a
+  // preflight triggering a full drain: a preflight carries no Authorization
+  // header, so the gateway passes it through unauthenticated, and before this
+  // branch it ran every step below, sends included.
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: CORS_HEADERS });
+  }
+
   let forcedEnv: "live" | undefined;
   try {
     const body = await req.json();
@@ -200,7 +224,7 @@ Deno.serve(async (req) => {
     )
     .single();
   if (settingsError) {
-    return Response.json({ error: settingsError.message }, { status: 500 });
+    return Response.json({ error: settingsError.message }, { status: 500, headers: CORS_HEADERS });
   }
   // Same server-side-only logging as above, for the dev preview: confirms
   // whether preview sends will actually go out this run without printing
@@ -217,7 +241,7 @@ Deno.serve(async (req) => {
     .is("sent_at", null)
     .lt("attempt_count", MAX_ATTEMPTS);
   if (pendingError) {
-    return Response.json({ error: pendingError.message }, { status: 500 });
+    return Response.json({ error: pendingError.message }, { status: 500, headers: CORS_HEADERS });
   }
 
   let sent = 0;
@@ -361,7 +385,7 @@ Deno.serve(async (req) => {
     }
   }
 
-  return Response.json({ processed: (pendingRows ?? []).length, sent, failed, skipped });
+  return Response.json({ processed: (pendingRows ?? []).length, sent, failed, skipped }, { headers: CORS_HEADERS });
 });
 
 async function recordFailure(

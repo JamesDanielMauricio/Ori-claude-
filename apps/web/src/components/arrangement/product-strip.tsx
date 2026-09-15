@@ -20,14 +20,19 @@ import { formatPallets, type BoardProduct, type SelectedPickLine } from "./board
 // it could not answer "from whom" anyway.
 
 const STATS: Array<{
-  key: "picked" | "ordered" | "allocated" | "remaining";
+  key: "picked" | "leftover" | "ordered" | "allocated" | "remaining";
   label: string;
   hint: string;
 }> = [
-  { key: "picked", label: "נקטף", hint: "סך המשטחים שהמגדלים קטפו" },
+  { key: "picked", label: "נקטף", hint: "סך המשטחים שהמגדלים קטפו היום" },
+  { key: "leftover", label: "עודף", hint: "סך המשטחים שנותרו מימים קודמים ולא סודרו" },
   { key: "ordered", label: "הוזמן", hint: "סך המשטחים שהלקוחות הזמינו" },
   { key: "allocated", label: "חולק", hint: "משטחים שכבר שויכו ברשומות סידור" },
-  { key: "remaining", label: "נותר", hint: "נקטף פחות חולק — מה שעוד פנוי לסידור" },
+  {
+    key: "remaining",
+    label: "נותר",
+    hint: "נקטף ועודף פחות חולק — מה שעוד פנוי לסידור",
+  },
 ];
 
 export function ProductStrip({
@@ -127,6 +132,15 @@ export function ProductStrip({
           <p className="text-xs text-ink-muted">
             נקטף{" "}
             <span className="font-semibold text-ink">{formatPallets(selected.line.picked)}</span>
+            {selected.line.leftover > 0 && (
+              <>
+                {" · "}
+                עודף{" "}
+                <span className="font-semibold text-ink">
+                  {formatPallets(selected.line.leftover)}
+                </span>
+              </>
+            )}
             {" · "}
             חולק{" "}
             <span className="font-semibold text-ink">{formatPallets(selected.line.allocated)}</span>

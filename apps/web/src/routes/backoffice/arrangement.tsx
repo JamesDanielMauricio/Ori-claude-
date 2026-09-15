@@ -184,7 +184,7 @@ export default function ArrangementPage() {
         .select(
           `id, trade_date, phase,
            daily_arrangements(id, status, arrangement_records(id, daily_pick_product_id, daily_order_product_id, customer_company_id, quantity_pallets, price, price_type)),
-           daily_picks(id, grower_company_id, status, pickup_time, daily_pick_products(id, daily_pick_id, product_variety_id, pallets_picked, comment, product_varieties(id, name, family_id, product_families(name, image_url)))),
+           daily_picks(id, grower_company_id, status, pickup_time, daily_pick_products(id, daily_pick_id, product_variety_id, pallets_picked, leftover_pallets, comment, product_varieties(id, name, family_id, product_families(name, image_url)))),
            daily_orders(id, customer_company_id, status, daily_order_products(id, daily_order_id, product_variety_id, pallets_ordered, comment, product_varieties(id, name, family_id, product_families(name, image_url))), order_submission_logs(id, snapshot, created_at))`,
         )
         .eq("id", day!.id)

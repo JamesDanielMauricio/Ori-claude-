@@ -318,6 +318,87 @@ describe("grower picking module", () => {
     expect(afterClose).toMatchObject({ leftoverPallets: "8.00" });
   }, 30000);
 
+  it("bootstrap_grower_pick carries leftover_pallets forward from the grower's most recent prior line for the same variety (migration 0050)", async () => {
+    const { client: backoffice, userId: adminId } = await signedInBackoffice();
+    const grower = await createTestGrowerWithProduct();
+    cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
+
+    // Day 1: picked 10, 5 arranged to a customer, day closes — leaves
+    // leftover_pallets = 5 on day 1's own line.
+    const day1 = await createTestTradingDay({
+      initiatedByUserId: adminId,
+      tradeDate: "2020-01-01",
+      phase: "closed",
+    });
+    const [arrangement1] = await db
+      .insert(dailyArrangements)
+      .values({ tradingDayId: day1.id, status: "open" })
+      .returning();
+    if (!arrangement1) throw new Error("failed to create test daily arrangement");
+
+    const bootstrap1 = await backoffice.rpc(
+      "bootstrap_grower_pick",
+      toBootstrapGrowerPickRpcArgs({ tradingDayId: day1.id, growerCompanyId: grower.companyId }),
+    );
+    const pick1Id = bootstrap1.data!.id;
+    const line1 = await getPickProductLine(pick1Id, grower.varietyId);
+
+    const growerClient = await signedInGrowerFor(grower.companyId);
+    await growerClient.rpc(
+      "update_pick_product_pallets",
+      toUpdatePickProductPalletsRpcArgs({ dailyPickProductId: line1!.id, palletsPicked: 10 }),
+    );
+
+    const customer = await createTestCompany("Test Customer", "customer");
+    cleanupFns.push(() => deleteTestCompany(customer.id));
+
+    const orderLine = await createTestOrderProductLine(day1.id, customer.id, grower.varietyId, 5);
+    await createTestArrangementRecord({
+      dailyArrangementId: arrangement1.id,
+      dailyPickProductId: line1!.id,
+      dailyOrderProductId: orderLine.id,
+      customerCompanyId: customer.id,
+      quantityPallets: 5,
+    });
+
+    const closeOut = await backoffice.rpc(
+      "close_out_pick_leftovers",
+      toCloseOutPickLeftoversRpcArgs({ tradingDayId: day1.id }),
+    );
+    expect(closeOut.error).toBeNull();
+    expect(await getPickProductLine(pick1Id, grower.varietyId)).toMatchObject({
+      leftoverPallets: "5.00",
+    });
+
+    // Day 2, a later trading day for the same grower — pushed after the
+    // customer fixture, matching createClosedTestDay's own LIFO-ordering
+    // comment (a day's cascade must clear before fixtures created alongside
+    // it can be deleted). Day 1 is pushed after day 2 so it tears down
+    // second, once day 2's own cascade (which references nothing of day 1's)
+    // is already gone.
+    cleanupFns.push(() => deleteTestTradingDay(day1.id));
+    const day2 = await createTestTradingDay({
+      initiatedByUserId: adminId,
+      tradeDate: "2020-01-02",
+      phase: "closed",
+    });
+    cleanupFns.push(() => deleteTestTradingDay(day2.id));
+
+    const bootstrap2 = await backoffice.rpc(
+      "bootstrap_grower_pick",
+      toBootstrapGrowerPickRpcArgs({ tradingDayId: day2.id, growerCompanyId: grower.companyId }),
+    );
+    expect(bootstrap2.error).toBeNull();
+    const pick2Id = bootstrap2.data!.id;
+
+    // The new day's line starts with today's picking at 0 (nothing picked
+    // yet) but leftover already carried in from day 1's close.
+    expect(await getPickProductLine(pick2Id, grower.varietyId)).toMatchObject({
+      palletsPicked: "0.00",
+      leftoverPallets: "5.00",
+    });
+  }, 30000);
+
   it("update_pick_product_details lets the owning grower (or backoffice) set the comment, rejects other growers, and rejects edits once the pick is closed", async () => {
     const { client: backoffice, userId: adminId } = await signedInBackoffice();
     const grower = await createTestGrowerWithProduct();
@@ -452,8 +533,8 @@ describe("grower picking module", () => {
       toSavePickLinesRpcArgs({
         dailyPickId: pickId,
         lines: [
-          { dailyPickProductId: lineA!.id, palletsPicked: 10, comment: null },
-          { dailyPickProductId: lineB!.id, palletsPicked: 10, comment: null },
+          { dailyPickProductId: lineA!.id, palletsPicked: 10, leftoverPallets: 0, comment: null },
+          { dailyPickProductId: lineB!.id, palletsPicked: 10, leftoverPallets: 0, comment: null },
         ],
       }),
     );
@@ -475,8 +556,13 @@ describe("grower picking module", () => {
       toSavePickLinesRpcArgs({
         dailyPickId: pickId,
         lines: [
-          { dailyPickProductId: lineA!.id, palletsPicked: 99, comment: "changed" },
-          { dailyPickProductId: lineB!.id, palletsPicked: 1, comment: null },
+          {
+            dailyPickProductId: lineA!.id,
+            palletsPicked: 99,
+            leftoverPallets: 0,
+            comment: "changed",
+          },
+          { dailyPickProductId: lineB!.id, palletsPicked: 1, leftoverPallets: 0, comment: null },
         ],
       }),
     );
@@ -495,8 +581,13 @@ describe("grower picking module", () => {
       toSavePickLinesRpcArgs({
         dailyPickId: pickId,
         lines: [
-          { dailyPickProductId: lineA!.id, palletsPicked: 99, comment: "changed" },
-          { dailyPickProductId: lineB!.id, palletsPicked: 7, comment: null },
+          {
+            dailyPickProductId: lineA!.id,
+            palletsPicked: 99,
+            leftoverPallets: 0,
+            comment: "changed",
+          },
+          { dailyPickProductId: lineB!.id, palletsPicked: 7, leftoverPallets: 0, comment: null },
         ],
       }),
     );
@@ -507,6 +598,102 @@ describe("grower picking module", () => {
     });
     expect(await getPickProductLine(pickId, secondProduct.varietyId)).toMatchObject({
       palletsPicked: "7.00",
+    });
+  }, 30000);
+
+  it("save_pick_lines' arrangement floor is on picked + leftover COMBINED, not either field alone", async () => {
+    const { client: backoffice, userId: adminId } = await signedInBackoffice();
+    const grower = await createTestGrowerWithProduct();
+    cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
+    const { day, arrangement } = await createClosedTestDay(adminId);
+    const customer = await createTestCompany("Test Customer", "customer");
+    cleanupFns.push(() => deleteTestCompany(customer.id));
+    cleanupFns.push(() => deleteTestTradingDay(day.id));
+
+    const bootstrap = await backoffice.rpc(
+      "bootstrap_grower_pick",
+      toBootstrapGrowerPickRpcArgs({ tradingDayId: day.id, growerCompanyId: grower.companyId }),
+    );
+    const pickId = bootstrap.data!.id;
+    const line = await getPickProductLine(pickId, grower.varietyId);
+
+    const growerClient = await signedInGrowerFor(grower.companyId);
+
+    // Seed 4 picked + 6 leftover = 10 combined.
+    const seed = await growerClient.rpc(
+      "save_pick_lines",
+      toSavePickLinesRpcArgs({
+        dailyPickId: pickId,
+        lines: [
+          { dailyPickProductId: line!.id, palletsPicked: 4, leftoverPallets: 6, comment: null },
+        ],
+      }),
+    );
+    expect(seed.error).toBeNull();
+
+    // 6 of the 10 combined pallets get arranged to a customer — the floor is
+    // now 6, regardless of how it's split between the two fields.
+    const orderLine = await createTestOrderProductLine(day.id, customer.id, grower.varietyId, 6);
+    await createTestArrangementRecord({
+      dailyArrangementId: arrangement.id,
+      dailyPickProductId: line!.id,
+      dailyOrderProductId: orderLine.id,
+      customerCompanyId: customer.id,
+      quantityPallets: 6,
+    });
+
+    // 3 picked + 2 leftover = 5 combined, below the 6-pallet floor: rejected,
+    // even though palletsPicked alone (3) is well above what 3 < 4 might
+    // suggest — the check is on the sum.
+    const rejected = await growerClient.rpc(
+      "save_pick_lines",
+      toSavePickLinesRpcArgs({
+        dailyPickId: pickId,
+        lines: [
+          { dailyPickProductId: line!.id, palletsPicked: 3, leftoverPallets: 2, comment: null },
+        ],
+      }),
+    );
+    expect(rejected.error).not.toBeNull();
+    expect(rejected.error?.code).toBe(GROWER_ERROR_CODES.CONFLICT);
+    expect(await getPickProductLine(pickId, grower.varietyId)).toMatchObject({
+      palletsPicked: "4.00",
+      leftoverPallets: "6.00",
+    });
+
+    // 3 picked + 3 leftover = 6 combined, exactly at the floor: a grower may
+    // freely shift quantity between the two fields (here, moving 1 pallet
+    // from picked into leftover) as long as the sum holds.
+    const atFloor = await growerClient.rpc(
+      "save_pick_lines",
+      toSavePickLinesRpcArgs({
+        dailyPickId: pickId,
+        lines: [
+          { dailyPickProductId: line!.id, palletsPicked: 3, leftoverPallets: 3, comment: null },
+        ],
+      }),
+    );
+    expect(atFloor.error).toBeNull();
+    expect(await getPickProductLine(pickId, grower.varietyId)).toMatchObject({
+      palletsPicked: "3.00",
+      leftoverPallets: "3.00",
+    });
+
+    // Zeroing out leftover entirely (e.g. it went bad) succeeds as long as
+    // picked alone still covers what's arranged.
+    const zeroedLeftover = await growerClient.rpc(
+      "save_pick_lines",
+      toSavePickLinesRpcArgs({
+        dailyPickId: pickId,
+        lines: [
+          { dailyPickProductId: line!.id, palletsPicked: 6, leftoverPallets: 0, comment: null },
+        ],
+      }),
+    );
+    expect(zeroedLeftover.error).toBeNull();
+    expect(await getPickProductLine(pickId, grower.varietyId)).toMatchObject({
+      palletsPicked: "6.00",
+      leftoverPallets: "0.00",
     });
   }, 30000);
 
@@ -540,8 +727,8 @@ describe("grower picking module", () => {
         // Grower one's own pick — authorized — but carrying grower two's line.
         dailyPickId: pickOne.data!.id,
         lines: [
-          { dailyPickProductId: lineOne!.id, palletsPicked: 5, comment: null },
-          { dailyPickProductId: lineTwo!.id, palletsPicked: 5, comment: null },
+          { dailyPickProductId: lineOne!.id, palletsPicked: 5, leftoverPallets: 0, comment: null },
+          { dailyPickProductId: lineTwo!.id, palletsPicked: 5, leftoverPallets: 0, comment: null },
         ],
       }),
     );

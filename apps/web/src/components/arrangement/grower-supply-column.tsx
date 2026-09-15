@@ -104,7 +104,9 @@ function GrowerRow({
   toggleSubmitDisabled: boolean;
 }) {
   const time = formatPickupTime(grower.pickupTime);
-  const free = grower.picked - grower.allocated;
+  // Free stock is picked + leftover minus allocated — carried-forward
+  // leftover counts as real supply the same as a fresh pick (see board-data.ts).
+  const free = grower.picked + grower.leftover - grower.allocated;
   const holdsSelection = selection?.growerId === grower.growerId;
 
   return (
@@ -146,6 +148,7 @@ function GrowerRow({
                 counts. */}
             <span className="mt-0.5 block text-xs text-ink-subtle">
               {formatPallets(grower.picked)} נקטף
+              {grower.leftover > 0 && ` + ${formatPallets(grower.leftover)} עודף`}
               {free > 0 && ` · ${formatPallets(free)} פנוי`}
             </span>
           </span>
@@ -279,18 +282,25 @@ function GrowerFamilyBlock({
                   >
                     {line.varietyName}
                   </span>
-                  {/* Allocated over picked, the way the reference pairs its
-                      two boxes — "how much of what he brought is spoken for"
-                      is one fact, not two. Committed-first so it reads as the
-                      familiar "4 of 10", matching the identical fraction in
-                      the customer card headers; a numeric fraction with no
-                      Hebrew in it, so it stays LTR. */}
+                  {/* Allocated over picked+leftover, the way the reference
+                      pairs its two boxes — "how much of what he has is spoken
+                      for" is one fact, not two. Committed-first so it reads
+                      as the familiar "4 of 10", matching the identical
+                      fraction in the customer card headers; a numeric
+                      fraction with no Hebrew in it, so it stays LTR. The
+                      denominator is picked+leftover, not picked alone —
+                      leftover counts as real supply and is the true ceiling
+                      this line can be arranged against (see
+                      check_arrangement_allocation). The per-field breakdown
+                      lives in the pick editor behind the pencil above. */}
                   <span className="shrink-0 text-xs tabular-nums" dir="ltr">
                     <span className={line.allocated > 0 ? "text-accent" : "text-ink-subtle"}>
                       {formatPallets(line.allocated)}
                     </span>
                     <span className="text-ink-subtle"> / </span>
-                    <span className="font-semibold text-ink">{formatPallets(line.picked)}</span>
+                    <span className="font-semibold text-ink">
+                      {formatPallets(line.picked + line.leftover)}
+                    </span>
                   </span>
                 </span>
                 {line.comment && (

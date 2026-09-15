@@ -52,6 +52,11 @@ export function toUpdatePickProductDetailsRpcArgs(input: UpdatePickProductDetail
 export const pickLineInputSchema = z.object({
   dailyPickProductId: z.string().uuid(),
   palletsPicked: z.number().nonnegative(),
+  // Carried forward from the grower's most recent prior line for this
+  // variety by bootstrap_grower_pick/sync_grower_picks (migration 0050),
+  // then independently editable here — the arrangement floor below applies
+  // to palletsPicked + leftoverPallets combined, not either alone.
+  leftoverPallets: z.number().nonnegative(),
   comment: z.string().nullable(),
 });
 export type PickLineInput = z.infer<typeof pickLineInputSchema>;
@@ -72,6 +77,7 @@ export function toSavePickLinesRpcArgs(input: SavePickLinesInput) {
     p_lines: input.lines.map((line) => ({
       dailyPickProductId: line.dailyPickProductId,
       palletsPicked: line.palletsPicked,
+      leftoverPallets: line.leftoverPallets,
       comment: line.comment,
     })),
   };
@@ -96,8 +102,8 @@ export const GROWER_ERROR_CODES = {
   FORBIDDEN: "42501",
   /** update_pick_product_details, save_pick_lines or send_pick_reminder called against an already-closed pick. */
   INVALID_STATE: "P0007",
-  /** save_pick_lines: a quantity below what's already committed in arrangement_records for that line. */
+  /** save_pick_lines: pallets_picked + leftover_pallets combined below what's already committed in arrangement_records for that line. */
   CONFLICT: "P0006",
-  /** save_pick_lines: a negative or missing pallet count. */
+  /** save_pick_lines: a negative or missing pallet or leftover count. */
   INVALID_INPUT: "P0008",
 } as const;

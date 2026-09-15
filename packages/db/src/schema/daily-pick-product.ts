@@ -16,12 +16,21 @@ import { productVarieties } from "./product-variety";
 // There is deliberately no pickup-time field on this table — pickup time
 // is a per-grower (company) setting, not a per-product one; see
 // `companies.default_pickup_time` and `daily_picks.pickup_time`.
-// `leftover_pallets` is populated once, at pick-close time, by
-// `close_out_pick_leftovers` (0014) — the PRD's own `leftovers` and
-// `the_number_of_leftover_pallets_after_the_day_ended` fields collapse
-// into this one column; they were never two genuinely different values,
-// just the same "pallets picked minus pallets arranged" number computed
-// at two different points in an unnecessarily long pipeline (R6).
+// `leftover_pallets` starts each new trading day carried forward from this
+// grower+variety's most recent prior line (`bootstrap_grower_pick` /
+// `sync_grower_picks`, migration 0050), then is independently editable in
+// the picking editor alongside `pallets_picked` — a grower can see which
+// pallets are freshly picked vs. carried over, and can zero out leftover
+// that has since gone bad without touching today's pick. It counts as real
+// arrangeable supply: `pallets_picked + leftover_pallets` is the allocation
+// ceiling (`check_arrangement_allocation`) and the arrangement-edit floor
+// both fields are jointly held to (`save_pick_lines`). At day-close,
+// `close_out_pick_leftovers` folds it forward again as
+// `pallets_picked + leftover_pallets - arranged`, becoming the next day's
+// carry-in. This reverses an earlier design call (0014/R6) that collapsed
+// the PRD's two leftover fields into this one column on the premise they
+// were "never two genuinely different values" — they now are; don't
+// collapse them back.
 export const dailyPickProducts = pgTable(
   "daily_pick_products",
   {
@@ -34,7 +43,7 @@ export const dailyPickProducts = pgTable(
       .references(() => productVarieties.id),
     palletsPicked: numeric("pallets_picked", { precision: 10, scale: 2 }).notNull().default("0"),
     comment: text("comment"),
-    leftoverPallets: numeric("leftover_pallets", { precision: 10, scale: 2 }),
+    leftoverPallets: numeric("leftover_pallets", { precision: 10, scale: 2 }).notNull().default("0"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

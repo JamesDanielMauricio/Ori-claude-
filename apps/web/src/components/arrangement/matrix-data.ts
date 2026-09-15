@@ -82,9 +82,11 @@ export interface MatrixGrowerRow {
   growerName: string;
   /** סה"כ במלאי — pallets_picked on this one line. */
   inStock: number;
+  /** Leftover carried into today on this line — see BoardPickLine.leftover_pallets. */
+  leftover: number;
   /** סה"כ חולק — arranged off this line, to anyone. */
   allocated: number;
-  /** זמין — what is still free to give away from this line. */
+  /** זמין — (inStock + leftover) minus allocated: what is still free to give away from this line. */
   available: number;
   cells: MatrixCell[];
 }
@@ -97,11 +99,13 @@ export interface MatrixProductRow {
   familyName: string;
   /** סה"כ במלאי — summed across every grower who picked this variety. */
   inStock: number;
+  /** Leftover carried into today, summed across every grower who has this variety. */
+  leftover: number;
   /** סה"כ הוזמן — summed across every customer column. */
   ordered: number;
   /** סה"כ חולק — summed across this row's growers. */
   allocated: number;
-  /** זמין — inStock minus allocated. */
+  /** זמין — (inStock + leftover) minus allocated. */
   available: number;
   /**
    * Two or more growers picked this variety, so the row opens rather than
@@ -260,6 +264,7 @@ export function buildMatrix({
       }
 
       const inStock = parsePallets(line.pallets_picked);
+      const leftover = parsePallets(line.leftover_pallets);
       const allocated = allocatedByPickLine.get(line.id) ?? 0;
       const growerId = growerIdByPickId.get(line.daily_pick_id) ?? "";
       const cells = emptyCells(columns.length);
@@ -283,8 +288,9 @@ export function buildMatrix({
         growerId,
         growerName: growerId ? nameOf(growerId) : "—",
         inStock,
+        leftover,
         allocated,
-        available: inStock - allocated,
+        available: inStock + leftover - allocated,
         cells,
       });
     }
@@ -311,6 +317,7 @@ export function buildMatrix({
       }
 
       const inStock = growers.reduce((sum, grower) => sum + grower.inStock, 0);
+      const leftover = growers.reduce((sum, grower) => sum + grower.leftover, 0);
       const allocated = growers.reduce((sum, grower) => sum + grower.allocated, 0);
       // Present only when this variety came from exactly one lot — the case
       // where the product row and the grower row are the same row.
@@ -323,9 +330,10 @@ export function buildMatrix({
         varietyName: entry.varietyName,
         familyName: entry.familyName,
         inStock,
+        leftover,
         ordered: summed.reduce((sum, cell) => sum + cell.ordered, 0),
         allocated,
-        available: inStock - allocated,
+        available: inStock + leftover - allocated,
         expandable: growers.length > 1,
         growers,
         // With one lot the product row IS the grower row, so it takes that

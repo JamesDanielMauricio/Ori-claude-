@@ -67,7 +67,14 @@ test.describe("Grower — daily picking input", () => {
     // (pick-lines-editor.tsx dropped the per-session edit gate).
     await expect(page.getByRole("button", { name: "ערוך", exact: true })).toHaveCount(0);
 
-    const palletsInput = page.locator('input[type="number"]');
+    // Families are collapsed by default (pick-lines-editor.tsx) — expand the
+    // fixture's one family before its inputs are interactable (`inert`
+    // while collapsed).
+    await page.locator("main").getByRole("button", { expanded: false }).click();
+
+    // Scoped by aria-label, not `input[type="number"]` — the row now also
+    // carries a leftover-pallets input of the same type (pick-lines-editor.tsx).
+    const palletsInput = page.getByLabel("פלטות שנקטפו");
     const commentInput = page.locator('input[type="text"]');
 
     await palletsInput.fill("12.5");
@@ -77,6 +84,8 @@ test.describe("Grower — daily picking input", () => {
     await expect(page.getByText("השורות נשמרו.")).toBeVisible();
 
     await page.reload();
+    // A fresh mount re-collapses every family.
+    await page.locator("main").getByRole("button", { expanded: false }).click();
     // <input type="number"> normalizes its DOM value (strips insignificant
     // trailing zeros) regardless of the exact string the numeric(10,2)
     // column round-trips as — "12.5" here, not "12.50".
@@ -96,6 +105,8 @@ test.describe("Grower — daily picking input", () => {
     // a pick reached from history is not a different kind of object, only a
     // different way of finding one.
     await expect(page).toHaveURL(/\/grower\/picks\?pickId=/);
+    // A route change remounts the editor, re-collapsing every family.
+    await page.locator("main").getByRole("button", { expanded: false }).click();
     await expect(palletsInput).toHaveValue("12.5");
     await expect(commentInput).toHaveValue("gate code 4321");
   });
@@ -119,7 +130,11 @@ test.describe("Grower — daily picking input", () => {
     // Establish a real, saved baseline first, so "the original values"
     // means something other than the bootstrap default. No "ערוך" gate to
     // open first — see the previous test.
-    const palletsInput = page.locator('input[type="number"]');
+    //
+    // Families are collapsed by default — expand the fixture's one family
+    // before its inputs are interactable.
+    await page.locator("main").getByRole("button", { expanded: false }).click();
+    const palletsInput = page.getByLabel("פלטות שנקטפו");
     const commentInput = page.locator('input[type="text"]');
     await palletsInput.fill("3");
     await commentInput.fill("baseline comment");
@@ -138,6 +153,7 @@ test.describe("Grower — daily picking input", () => {
     // ...but the real assertion is server state: a fresh reload re-fetches
     // from scratch, with no client-side draft state left to fall back on.
     await page.reload();
+    await page.locator("main").getByRole("button", { expanded: false }).click();
     await expect(palletsInput).toHaveValue("3");
     await expect(commentInput).toHaveValue("baseline comment");
   });

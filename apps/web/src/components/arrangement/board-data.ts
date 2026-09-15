@@ -24,6 +24,10 @@ export interface BoardPickLine {
   daily_pick_id: string;
   product_variety_id: string;
   pallets_picked: string;
+  /** Carried forward from the grower's most recent prior line for this
+   * variety (bootstrap_grower_pick / sync_grower_picks, migration 0050) —
+   * counts as real supply alongside pallets_picked, not a separate pool. */
+  leftover_pallets: string;
   comment: string | null;
   product_varieties: BoardVarietyRow | null;
 }
@@ -97,16 +101,23 @@ export interface BoardProduct {
   imageUrl: string | null;
   /** נקטף — total pallets picked across every grower. */
   picked: number;
+  /** Total leftover pallets carried into today across every grower — see
+   * BoardPickLine.leftover_pallets. Kept separate from `picked` (not summed
+   * away) so the board can show which is which; it counts as available
+   * supply the same as picked does. */
+  leftover: number;
   /** הוזמן — total pallets ordered across every customer. */
   ordered: number;
   /** חולק — total pallets already committed by arrangement records. */
   allocated: number;
-  /** נותר — picked minus allocated: what is still free to arrange. */
+  /** נותר — (picked + leftover) minus allocated: what is still free to arrange. */
   remaining: number;
   /**
    * The PRD's OOS flag: demand exceeds supply for this variety. Note it
-   * compares against `picked`, not `remaining` — a variety whose whole
-   * supply is already allocated is fully committed, not oversold.
+   * compares against `picked` alone, not `picked + leftover` or `remaining`
+   * — a variety whose whole supply is already allocated is fully committed,
+   * not oversold, and this deliberately doesn't (yet) treat leftover as
+   * covering demand for this flag's purposes.
    */
   outOfStock: boolean;
 }
@@ -116,8 +127,10 @@ export interface GrowerPickLine {
   varietyId: string;
   varietyName: string;
   picked: number;
+  /** Leftover carried into today on this line — see BoardPickLine.leftover_pallets. */
+  leftover: number;
   allocated: number;
-  /** What this grower still has free on this line. */
+  /** What this grower still has free on this line: (picked + leftover) - allocated. */
   remaining: number;
   comment: string | null;
 }
@@ -147,6 +160,8 @@ export interface GrowerSupply {
    */
   pickupTime: string | null;
   picked: number;
+  /** Total leftover carried into today across this grower's lines. */
+  leftover: number;
   allocated: number;
   families: GrowerFamilyGroup[];
   /** True when any of this grower's lines carries the selected variety. */
@@ -307,14 +322,14 @@ export function buildBoard({
   // ---- products (the top strip) ----------------------------------------
   const productAcc = new Map<
     string,
-    { variety: BoardVarietyRow; picked: number; ordered: number }
+    { variety: BoardVarietyRow; picked: number; leftover: number; ordered: number }
   >();
 
   const touch = (variety: BoardVarietyRow | null) => {
     if (!variety) return null;
     let entry = productAcc.get(variety.id);
     if (!entry) {
-      entry = { variety, picked: 0, ordered: 0 };
+      entry = { variety, picked: 0, leftover: 0, ordered: 0 };
       productAcc.set(variety.id, entry);
     }
     return entry;
@@ -322,7 +337,10 @@ export function buildBoard({
 
   for (const line of pickLines) {
     const entry = touch(line.product_varieties);
-    if (entry) entry.picked += num(line.pallets_picked);
+    if (entry) {
+      entry.picked += num(line.pallets_picked);
+      entry.leftover += num(line.leftover_pallets);
+    }
   }
   for (const line of orderLines) {
     const entry = touch(line.product_varieties);
@@ -330,7 +348,7 @@ export function buildBoard({
   }
 
   const products: BoardProduct[] = [...productAcc.values()]
-    .map(({ variety, picked, ordered }) => {
+    .map(({ variety, picked, leftover, ordered }) => {
       const allocated = allocatedByVariety.get(variety.id) ?? 0;
       return {
         varietyId: variety.id,
@@ -339,9 +357,10 @@ export function buildBoard({
         familyName: variety.product_families?.name ?? "",
         imageUrl: variety.product_families?.image_url ?? null,
         picked,
+        leftover,
         ordered,
         allocated,
-        remaining: picked - allocated,
+        remaining: picked + leftover - allocated,
         outOfStock: ordered > picked,
       };
     })
@@ -359,14 +378,17 @@ export function buildBoard({
     .map((pick) => {
       const families = new Map<string, GrowerFamilyGroup>();
       let picked = 0;
+      let leftover = 0;
       let allocated = 0;
 
       for (const line of pick.daily_pick_products) {
         const variety = line.product_varieties;
         if (!variety) continue;
         const linePicked = num(line.pallets_picked);
+        const lineLeftover = num(line.leftover_pallets);
         const lineAllocated = allocatedByPickLine.get(line.id) ?? 0;
         picked += linePicked;
+        leftover += lineLeftover;
         allocated += lineAllocated;
 
         let group = families.get(variety.family_id);
@@ -384,8 +406,9 @@ export function buildBoard({
           varietyId: variety.id,
           varietyName: variety.name,
           picked: linePicked,
+          leftover: lineLeftover,
           allocated: lineAllocated,
-          remaining: linePicked - lineAllocated,
+          remaining: linePicked + lineLeftover - lineAllocated,
           comment: line.comment,
         });
       }
@@ -402,6 +425,7 @@ export function buildBoard({
         pickupTime:
           pick.pickup_time ?? companyById.get(pick.grower_company_id)?.default_pickup_time ?? null,
         picked,
+        leftover,
         allocated,
         families: [...families.values()].sort((a, b) =>
           a.familyName.localeCompare(b.familyName, "he"),

@@ -92,7 +92,14 @@ test.describe("Backoffice — Grower Inventory Status", () => {
     await expect(page.getByRole("button", { name: "ערוך", exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "שמור" })).toBeVisible();
 
-    const palletsInput = page.locator('dialog[open] input[type="number"]');
+    // Families are collapsed by default (pick-lines-editor.tsx) — expand the
+    // fixture's one family before its inputs are interactable (`inert`
+    // while collapsed).
+    await page.locator("dialog[open]").getByRole("button", { expanded: false }).click();
+
+    // Scoped by aria-label, not `input[type="number"]` — the row now also
+    // carries a leftover-pallets input of the same type (pick-lines-editor.tsx).
+    const palletsInput = page.locator("dialog[open]").getByLabel("פלטות שנקטפו");
     await expect(palletsInput).toBeEnabled();
     const commentInput = page.locator('dialog[open] input[type="text"]');
     await palletsInput.fill("8.25");
@@ -104,7 +111,8 @@ test.describe("Backoffice — Grower Inventory Status", () => {
 
     await page.reload();
     await page.getByRole("button", { name: `ערוך את מלאי ${growerName}` }).click();
-    await expect(page.locator('dialog[open] input[type="number"]')).toHaveValue("8.25");
+    await page.locator("dialog[open]").getByRole("button", { expanded: false }).click();
+    await expect(page.locator("dialog[open]").getByLabel("פלטות שנקטפו")).toHaveValue("8.25");
     await expect(page.locator('dialog[open] input[type="text"]')).toHaveValue(
       "distributor-entered note",
     );

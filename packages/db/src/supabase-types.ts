@@ -490,7 +490,7 @@ export type Database = {
           product_variety_id: string;
           pallets_picked: string;
           comment: string | null;
-          leftover_pallets: string | null;
+          leftover_pallets: string;
           created_at: string;
           updated_at: string;
         };
@@ -500,7 +500,7 @@ export type Database = {
           product_variety_id: string;
           pallets_picked?: string;
           comment?: string | null;
-          leftover_pallets?: string | null;
+          leftover_pallets?: string;
           created_at?: string;
           updated_at?: string;
         };
@@ -510,7 +510,7 @@ export type Database = {
           product_variety_id?: string;
           pallets_picked?: string;
           comment?: string | null;
-          leftover_pallets?: string | null;
+          leftover_pallets?: string;
           created_at?: string;
           updated_at?: string;
         };

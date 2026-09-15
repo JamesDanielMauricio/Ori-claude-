@@ -39,12 +39,19 @@ const lychee = {
   product_families: { name: "ליצ׳י", image_url: null },
 };
 
-function pickLine(id: string, pickId: string, variety: typeof lemon, pallets: string) {
+function pickLine(
+  id: string,
+  pickId: string,
+  variety: typeof lemon,
+  pallets: string,
+  leftover = "0",
+) {
   return {
     id,
     daily_pick_id: pickId,
     product_variety_id: variety.id,
     pallets_picked: pallets,
+    leftover_pallets: leftover,
     comment: null,
     product_varieties: variety,
   };
@@ -210,6 +217,37 @@ describe("buildMatrix grower rows", () => {
     const growerB = rowFor(lemon.id).growers[1]!;
     expect(growerB.cells[1]!.price).toBe(12.5);
     expect(growerB.cells[1]!.priceType).toBe("fixed");
+  });
+
+  it("folds leftover_pallets into available as real supply, without inflating inStock", () => {
+    // Grower A's lemon line carries 4 leftover pallets carried forward from a
+    // prior day (bootstrap_grower_pick / sync_grower_picks, migration 0050) —
+    // real, immediately arrangeable supply on top of the fresh pick, but
+    // tracked separately so inStock still reads as "picked today" alone.
+    const withLeftover = buildMatrix({
+      picks: [
+        {
+          ...picks[0]!,
+          daily_pick_products: [
+            pickLine("line-a-lemon", "pick-a", lemon, "5", "4"),
+            picks[0]!.daily_pick_products[1]!,
+          ],
+        },
+        picks[1]!,
+      ],
+      orders,
+      records,
+      companies,
+    });
+    const growerA = withLeftover.rows.find((row) => row.varietyId === lemon.id)!.growers[0]!;
+    expect(growerA.inStock).toBe(5);
+    expect(growerA.leftover).toBe(4);
+    expect(growerA.available).toBe(9); // 5 picked + 4 leftover - 0 allocated
+
+    const row = withLeftover.rows.find((r) => r.varietyId === lemon.id)!;
+    expect(row.inStock).toBe(15); // unchanged: picked only, summed across growers
+    expect(row.leftover).toBe(4);
+    expect(row.available).toBe(17); // 15 picked + 4 leftover - 2 allocated
   });
 
   it("counts a record whose order line is missing against the lot's supply", () => {

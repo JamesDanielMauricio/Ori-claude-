@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ActionBar } from "@/components/reference-data/action-bar";
 import { inputClassName } from "@/components/reference-data/form-field";
+import { Icon } from "@/components/ui/icon";
 import { ProductThumbnail } from "@/components/ui/product-thumbnail";
 import { QueryError } from "@/components/ui/query-error";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -15,6 +16,7 @@ import { createClient } from "@/lib/supabase/client";
 interface PickProductLineRow {
   id: string;
   pallets_picked: string;
+  leftover_pallets: string;
   comment: string | null;
   product_varieties: {
     name: string;
@@ -26,6 +28,7 @@ interface PickProductLineRow {
 interface DraftLine {
   id: string;
   pallets: string;
+  leftover: string;
   comment: string;
 }
 
@@ -33,6 +36,7 @@ function toDraftLines(rows: PickProductLineRow[]): DraftLine[] {
   return rows.map((row) => ({
     id: row.id,
     pallets: row.pallets_picked,
+    leftover: row.leftover_pallets,
     comment: row.comment ?? "",
   }));
 }
@@ -41,6 +45,7 @@ interface PickFamilyVariety {
   id: string;
   varietyName: string;
   pallets: string;
+  leftover: string;
   comment: string;
 }
 
@@ -82,6 +87,7 @@ function groupDraftByFamily(rows: PickProductLineRow[], draft: DraftLine[]): Pic
       id: row.id,
       varietyName: variety.name,
       pallets: line?.pallets ?? "",
+      leftover: line?.leftover ?? "",
       comment: line?.comment ?? "",
     });
   }
@@ -103,6 +109,7 @@ function toSavedLines(lines: DraftLine[]) {
   return lines.map((line) => ({
     dailyPickProductId: line.id,
     palletsPicked: Number(line.pallets || 0),
+    leftoverPallets: Number(line.leftover || 0),
     comment: line.comment || null,
   }));
 }
@@ -164,6 +171,24 @@ export function PickLinesEditor({
   const [draft, setDraft] = useState<DraftLine[]>([]);
   // See the re-seeding effect below.
   const touched = useRef(false);
+  // Collapsed by default — a grower's or a distributor's popup can list a
+  // dozen families, and expanding all of them up front is a wall of inputs
+  // before anyone has asked to edit any of it. Local UI state, not tied to
+  // the draft/query: it survives a save or a refetch, only resetting when
+  // this component itself unmounts (e.g. the oversight dialog closes).
+  const [expandedFamilyIds, setExpandedFamilyIds] = useState<Set<string>>(new Set());
+
+  function toggleFamily(familyId: string) {
+    setExpandedFamilyIds((current) => {
+      const next = new Set(current);
+      if (next.has(familyId)) {
+        next.delete(familyId);
+      } else {
+        next.add(familyId);
+      }
+      return next;
+    });
+  }
 
   const queryKey = ["grower", "pick-lines", dailyPickId];
 
@@ -173,7 +198,7 @@ export function PickLinesEditor({
       const { data, error } = await supabase
         .from("daily_pick_products")
         .select(
-          "id, pallets_picked, comment, product_varieties(name, family_id, product_families(name, image_url))",
+          "id, pallets_picked, leftover_pallets, comment, product_varieties(name, family_id, product_families(name, image_url))",
         )
         .eq("daily_pick_id", dailyPickId)
         .order("product_variety_id");
@@ -248,7 +273,14 @@ export function PickLinesEditor({
       const draftById = new Map(draft.map((line) => [line.id, line]));
       return rows.map((row) => {
         const line = draftById.get(row.id);
-        return line ? { ...row, pallets_picked: line.pallets, comment: line.comment || null } : row;
+        return line
+          ? {
+              ...row,
+              pallets_picked: line.pallets,
+              leftover_pallets: line.leftover,
+              comment: line.comment || null,
+            }
+          : row;
       });
     },
   );
@@ -336,52 +368,121 @@ export function PickLinesEditor({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-3">
-        {families.map((family) => (
-          <div
-            key={family.familyId}
-            className="overflow-hidden rounded-xl bg-surface shadow-card ring-1 ring-inset ring-border/70"
-          >
-            <div className="flex items-center gap-2.5 border-b border-border/70 bg-surface-muted/50 px-4 py-3">
-              <ProductThumbnail imageUrl={family.imageUrl} size="sm" />
-              <p className="truncate text-sm font-semibold text-ink">{family.familyName}</p>
+        {families.map((family) => {
+          const expanded = expandedFamilyIds.has(family.familyId);
+          return (
+            <div
+              key={family.familyId}
+              className="overflow-hidden rounded-xl bg-surface shadow-card ring-1 ring-inset ring-border/70"
+            >
+              <button
+                type="button"
+                onClick={() => toggleFamily(family.familyId)}
+                aria-expanded={expanded}
+                className={`group flex w-full items-center gap-2.5 bg-surface-muted/50 px-4 py-3 text-start transition-colors duration-200 hover:bg-surface-muted ${
+                  expanded ? "border-b border-border/70" : ""
+                }`}
+              >
+                <Icon
+                  name="chevronDown"
+                  className={`h-4 w-4 shrink-0 transition-[transform,color] duration-300 ease-[cubic-bezier(0.22,0.61,0.36,1)] ${
+                    expanded ? "rotate-180 text-accent" : "text-ink-muted group-hover:text-accent"
+                  }`}
+                />
+                <ProductThumbnail imageUrl={family.imageUrl} size="sm" />
+                <p className="min-w-0 flex-1 truncate text-sm font-semibold text-ink">
+                  {family.familyName}
+                </p>
+              </button>
+              {/* Height-animated rather than mounted/unmounted (globals.css
+                  `.accordion-panel`), and `inert` while collapsed so a closed
+                  family's inputs stay out of the tab order — same pattern as
+                  the arrangement board's grower rows (grower-supply-column.tsx). */}
+              <div className="accordion-panel" data-open={expanded}>
+                <div>
+                  {/* Column header, per family rather than once for the
+                      whole list: a header above the list can scroll out of
+                      view long before a family further down gets opened,
+                      leaving that family's own numbers unlabeled. Living
+                      inside the panel it opens with means it's always right
+                      there when the columns it names actually appear.
+                      Reuses each row's own widths (w-24/w-24/w-40) so the
+                      labels line up with their inputs; hidden below sm: a
+                      row's own inputs wrap under the variety name at that
+                      width (flex-wrap on the li below), so a fixed header
+                      would stop lining up with them there. */}
+                  <div className="hidden items-center gap-3 border-b border-border/60 px-4 py-1.5 text-xs font-medium text-ink-subtle sm:flex">
+                    <span className="min-w-0 flex-1" />
+                    <span className="w-24 text-center">נקטף</span>
+                    <span className="w-24 text-center">עודף</span>
+                    <span className="w-40 flex-1 sm:flex-none" />
+                  </div>
+                  <ul inert={!expanded}>
+                    {family.varieties.map((variety) => (
+                      <li
+                        key={variety.id}
+                        className="flex flex-wrap items-center gap-3 border-b border-border/60 px-4 py-3 last:border-b-0"
+                      >
+                        <p className="min-w-0 flex-1 text-sm font-medium text-ink">
+                          {variety.varietyName}
+                        </p>
+                        {/* The shared header above labels these two columns
+                            (נקטף/עודף) — this input carries its own
+                            aria-label too, so it's still identified on its
+                            own for anyone not reading the header visually. */}
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          disabled={locked}
+                          aria-label={`פלטות שנקטפו — ${variety.varietyName}`}
+                          className={`${inputClassName} w-24`}
+                          value={variety.pallets}
+                          onChange={(event) =>
+                            updateLine(variety.id, { pallets: event.target.value })
+                          }
+                        />
+                        {/* Carried forward from the grower's most recent prior
+                            line for this variety (bootstrap_grower_pick /
+                            sync_grower_picks, migration 0050) and
+                            independently editable — kept as its own number,
+                            not folded into "pallets", so a grower can see
+                            which pallets are fresh vs. carried over and can
+                            zero this out alone if it's gone bad. Counts as
+                            real arrangeable supply either way: the save floor
+                            (P0006) guards pallets + leftover combined, not
+                            either field alone. */}
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          disabled={locked}
+                          aria-label={`פלטות עודף — ${variety.varietyName}`}
+                          className={`${inputClassName} w-24`}
+                          value={variety.leftover}
+                          onChange={(event) =>
+                            updateLine(variety.id, { leftover: event.target.value })
+                          }
+                        />
+                        <input
+                          type="text"
+                          disabled={locked}
+                          placeholder="הערה"
+                          aria-label={`הערה — ${variety.varietyName}`}
+                          className={`${inputClassName} w-40 flex-1 sm:flex-none`}
+                          value={variety.comment}
+                          onChange={(event) =>
+                            updateLine(variety.id, { comment: event.target.value })
+                          }
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
             </div>
-            <ul>
-              {family.varieties.map((variety) => (
-                <li
-                  key={variety.id}
-                  className="flex flex-wrap items-center gap-3 border-b border-border/60 px-4 py-3 last:border-b-0"
-                >
-                  <p className="min-w-0 flex-1 text-sm font-medium text-ink">{variety.varietyName}</p>
-                  {/* No visible column labels — this used to be a table with
-                      a header row, but that header made sense once, for a
-                      flat list; repeated per family it would outweigh the
-                      rows themselves. Each control still carries its own
-                      aria-label, and the number input is legible from its
-                      native browser affordance alone. */}
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    disabled={locked}
-                    aria-label={`פלטות שנקטפו — ${variety.varietyName}`}
-                    className={`${inputClassName} w-24`}
-                    value={variety.pallets}
-                    onChange={(event) => updateLine(variety.id, { pallets: event.target.value })}
-                  />
-                  <input
-                    type="text"
-                    disabled={locked}
-                    placeholder="הערה"
-                    aria-label={`הערה — ${variety.varietyName}`}
-                    className={`${inputClassName} w-40 flex-1 sm:flex-none`}
-                    value={variety.comment}
-                    onChange={(event) => updateLine(variety.id, { comment: event.target.value })}
-                  />
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {!locked && (

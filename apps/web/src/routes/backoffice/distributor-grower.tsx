@@ -43,6 +43,7 @@ interface GrowerCompany {
 interface PickLineRow {
   id: string;
   pallets_picked: string;
+  leftover_pallets: string;
   comment: string | null;
   product_varieties: {
     id: string;
@@ -167,7 +168,7 @@ export default function DistributorAsGrowerPage() {
         .from("daily_picks")
         .select(
           `id, grower_company_id, status, submitted_at, pickup_time, reminder_sent_at,
-           daily_pick_products(id, pallets_picked, comment, product_varieties(id, name, family_id, product_families(id, name, image_url)))`,
+           daily_pick_products(id, pallets_picked, leftover_pallets, comment, product_varieties(id, name, family_id, product_families(id, name, image_url)))`,
         )
         .eq("trading_day_id", dayId!);
       if (error) throw error;
@@ -218,6 +219,24 @@ export default function DistributorAsGrowerPage() {
         .order("name");
       if (error) throw error;
       return data as Array<{ id: string; name: string; product_families: { name: string } | null }>;
+    },
+  });
+
+  // Which growers have an in-season list at all — separate from
+  // `pickByGrowerId` because "no pick yet today" is ambiguous on its own: it
+  // covers both "hasn't picked yet" (initiate_business_day already
+  // bootstrapped their pick, they just haven't filled it in) and "has no
+  // products assigned, so initiate_business_day skipped them entirely" (see
+  // migration 0049's `exists (select 1 from grower_products ...)` filter).
+  // Only the second case needs a distributor to act somewhere other than the
+  // pick editor, so it gets called out on the row instead of looking
+  // identical to the first until the pencil is clicked.
+  const growersWithProductsQuery = useQuery({
+    queryKey: ["grower-oversight", "growers-with-products"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("grower_products").select("company_id");
+      if (error) throw error;
+      return new Set(data.map((row) => row.company_id));
     },
   });
 
@@ -302,6 +321,9 @@ export default function DistributorAsGrowerPage() {
       setProductsDialogGrower(null);
       void queryClient.invalidateQueries({ queryKey: ["grower-oversight", "grower-products"] });
       void queryClient.invalidateQueries({
+        queryKey: ["grower-oversight", "growers-with-products"],
+      });
+      void queryClient.invalidateQueries({
         queryKey: ["grower-oversight", "picks-for-day", dayId],
       });
     },
@@ -370,11 +392,36 @@ export default function DistributorAsGrowerPage() {
     saveProductsMutation.mutate(undefined, { onSettled: () => setSavingProducts(false) });
   }
 
-  const isLoading = growersQuery.isLoading || (!!dayId && picksForDayQuery.isLoading);
+  const isLoading =
+    growersQuery.isLoading ||
+    (!!dayId && picksForDayQuery.isLoading) ||
+    growersWithProductsQuery.isLoading;
 
   const rows = sortedGrowers.map((grower) => {
     const pick = pickByGrowerId.get(grower.id) ?? null;
-    const tone = !pick ? "warning" : pick.status === "draft" ? "neutral" : "accent";
+    const hasProducts = growersWithProductsQuery.data?.has(grower.id) ?? true;
+    // Green ("done") takes priority over everything else: submitted, or
+    // closed outright, or the trading day itself already closed (which
+    // closes every pick in bulk regardless of whether this grower ever
+    // submitted — see migrations 0011/0013/0015/0022/0024's identical
+    // `update daily_picks set status = 'closed' where trading_day_id = ...`,
+    // and the case where the grower never had a pick at all). Checked
+    // against the day's own `phase`, not `dayView.isLive`: a pinned past
+    // date is "not live" but its phase could in principle be anything, so
+    // phase is the only field that actually means "closed" (per James
+    // 2026-09-15).
+    //
+    // Below that: orange means "carrying leftover stock" — real unsold
+    // supply from a prior day (migration 0050's carry-forward) the
+    // distributor still needs to account for while there's still time to.
+    // No pick at all is neutral, not orange: the caption below already
+    // explains that case in words, so it doesn't need the warmest color too.
+    const dayClosed = dayView.day?.phase === "closed";
+    const isDone = pick?.status === "submitted" || pick?.status === "closed" || dayClosed;
+    const totalLeftover = pick
+      ? pick.daily_pick_products.reduce((sum, line) => sum + (Number(line.leftover_pallets) || 0), 0)
+      : 0;
+    const tone = isDone ? "accent" : totalLeftover > 0 ? "warning" : "neutral";
     const statusCaption =
       pick?.status === "submitted" && pick.submitted_at
         ? `נשלח ב-${new Date(pick.submitted_at).toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" })}`
@@ -385,7 +432,14 @@ export default function DistributorAsGrowerPage() {
     // once it has one (taken at submit/close, so it survives a later edit
     // to the company's default), otherwise the company's live default.
     const pickupTime = formatPickupTime(pick?.pickup_time ?? grower.default_pickup_time);
-    const caption = [pickupTime && `איסוף ${pickupTime}`, statusCaption].filter(Boolean).join(" · ") || null;
+    // A grower with no pick AND no in-season products isn't "waiting to
+    // pick" — they were never bootstrapped one, and won't be until someone
+    // adds products for them (same action the pencil falls back to below).
+    // Called out here so the row explains itself without opening anything.
+    const caption =
+      !pick && !hasProducts
+        ? "אין מוצרים בעונה — יש להוסיף מוצרים"
+        : [pickupTime && `איסוף ${pickupTime}`, statusCaption].filter(Boolean).join(" · ") || null;
     const families = pick ? groupPickLines(pick.daily_pick_products) : [];
     const reminding = reminderMutation.isPending && reminderMutation.variables === pick?.id;
 
@@ -457,14 +511,19 @@ export default function DistributorAsGrowerPage() {
           <Skeleton className="h-14 w-full" />
           <Skeleton className="h-14 w-full" />
         </div>
-      ) : growersQuery.isError || picksForDayQuery.isError ? (
+      ) : growersQuery.isError || picksForDayQuery.isError || growersWithProductsQuery.isError ? (
         <QueryError
           what="מגדלים"
           onRetry={() => {
             void growersQuery.refetch();
             void picksForDayQuery.refetch();
+            void growersWithProductsQuery.refetch();
           }}
-          retrying={growersQuery.isFetching || picksForDayQuery.isFetching}
+          retrying={
+            growersQuery.isFetching ||
+            picksForDayQuery.isFetching ||
+            growersWithProductsQuery.isFetching
+          }
         />
       ) : rows.length === 0 ? (
         <EmptyState

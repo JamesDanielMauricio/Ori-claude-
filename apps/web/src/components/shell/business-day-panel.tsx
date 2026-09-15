@@ -55,8 +55,10 @@ type ConfirmAction = "initiate" | "openShop" | "closeShop" | "closeDay" | null;
 // The date shown here is a picker (lib/trading-day-view.tsx): choosing a
 // past date pins every date-aware backoffice screen — Shop, Arrangement,
 // Grower Inventory Status, Customer Order Status — to that day's own data
-// instead of the live one, read-only, until "חזרה ליום הפעיל" clears it. The
-// lifecycle buttons below are deliberately UNAFFECTED by that pin — they
+// instead of the live one, read-only, until "חזרה ליום הפעיל" clears it (or
+// until the picker is pointed back at the live day's own date, which
+// useTradingDayView treats as equivalent to unpinned for editing purposes).
+// The lifecycle buttons below are deliberately UNAFFECTED by that pin — they
 // always act on the actual open day (useOpenTradingDay, not the picked
 // date), because there is only ever one non-closed trading day at a time
 // (trading_days_single_open_idx) and "open the shop" has no meaning applied
@@ -73,7 +75,12 @@ export function BusinessDayPanel() {
   const phase = day?.phase;
 
   const { selectedDate, setSelectedDate } = useSelectedTradingDay();
-  const isViewingPinnedDate = selectedDate !== null;
+  // Not just `selectedDate !== null`: once the picked date equals the live
+  // day's own date, useTradingDayView already treats every other screen's
+  // data as editable/live again (lib/trading-day-view.tsx), so this link
+  // would offer to "go back" to somewhere already being shown — hide it
+  // rather than leave a no-op affordance on screen.
+  const isViewingPinnedDate = selectedDate !== null && selectedDate !== day?.trade_date;
 
   const shopQueryKey = ["business-day-panel", "shop", day?.id] as const;
 
@@ -281,9 +288,9 @@ export function BusinessDayPanel() {
     <div className="flex flex-col gap-2 border-b border-border bg-surface-muted px-3 py-3">
       {/* The day this whole backoffice area is showing. Picking a date here
           pins Shop, Arrangement, Grower Inventory Status and Customer Order
-          Status to that day's own data — read-only, since only the live day
-          below can ever be edited — until "חזרה ליום הפעיל" clears it. See
-          lib/trading-day-view.tsx for why that pin is deliberately kept
+          Status to that day's own data — read-only, unless the picked date
+          is itself the live day's date — until "חזרה ליום הפעיל" clears it.
+          See lib/trading-day-view.tsx for why that pin is deliberately kept
           separate from the lifecycle actions beneath it. */}
       <TradingDayCalendarPicker
         selectedDate={selectedDate}

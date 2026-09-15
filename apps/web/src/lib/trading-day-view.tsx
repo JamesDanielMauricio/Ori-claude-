@@ -36,12 +36,13 @@ const SelectedTradingDayContext = createContext<SelectedTradingDayState | null>(
 // backoffice screen keeps showing that date rather than resetting to today
 // on every click.
 //
-// A picked date always means "pinned", even on the rare click that happens
-// to land on today's own date: there is deliberately no comparison against
-// the live day to auto-recover from that. "חזרה ליום הפעיל" is the one way
-// back — see BusinessDayPanel — which keeps this state's meaning simple
-// enough to audit at a glance instead of depending on a coincidence never
-// being possible.
+// A picked date is stored as-is, even on the click that happens to land on
+// today's own (live) date — this state only tracks "what did the picker
+// last choose," not "is that different from the live day." useTradingDayView
+// below is what compares the two to decide whether the result counts as
+// live for editing purposes; "חזרה ליום הפעיל" (see BusinessDayPanel) always
+// remains the one way to clear the pin back to null and follow the live day
+// going forward, regardless of dates matching.
 export function SelectedTradingDayProvider({ children }: { children: ReactNode }) {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   // Memoized so this provider re-rendering for any other reason doesn't hand
@@ -137,9 +138,10 @@ export function useOpenTradingDay() {
 //
 // `isLive` is what those screens gate their own editing controls on, not
 // the resolved day's own phase or status. A pinned day is read-only through
-// these screens even on the rare click that pins today's own date, and even
-// though its phase may still technically permit a write — "is this the day
-// currently being worked" is a fact about the picker, not about the row.
+// these screens UNLESS the pinned date is the live day's own date — picking
+// today's date in the calendar is meant to land you back on today, editable,
+// not on a frozen read-only copy of it — even though the row is read via
+// `pinnedQuery` rather than `openDayQuery` in that case (see `active` below).
 export function useTradingDayView() {
   const supabase = createClient();
   const { selectedDate } = useSelectedTradingDay();
@@ -167,8 +169,18 @@ export function useTradingDayView() {
     },
   });
 
-  const isLive = selectedDate === null;
-  const active = isLive ? openDayQuery : pinnedQuery;
+  // Live if nothing is pinned, OR the pinned date happens to equal the open
+  // day's own date — comparing against openDayQuery.data (not pinnedQuery's
+  // row) because that's the one query that always reflects "which date is
+  // currently the live one," independent of whichever row pinnedQuery below
+  // resolves to.
+  const isLive =
+    selectedDate === null || selectedDate === (openDayQuery.data?.trade_date ?? null);
+  // `day` itself still always comes from whichever query matches the picker's
+  // own state (openDayQuery when nothing is pinned, pinnedQuery once
+  // something is) — isLive above only changes whether that day is editable,
+  // not which query is the source of it.
+  const active = selectedDate === null ? openDayQuery : pinnedQuery;
 
   return {
     day: active.data ?? null,

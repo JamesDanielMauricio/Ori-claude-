@@ -248,7 +248,17 @@ export default function DistributorAsCustomerPage() {
 
   const rows = sortedCustomers.map((customer) => {
     const order = orderByCustomerId.get(customer.id) ?? null;
-    const tone = !order ? "warning" : order.status === "submitted" ? "accent" : "neutral";
+    // Green ("done") once submitted, or once the trading day itself has
+    // closed — orders have no "closed" status of their own (daily_orders
+    // only ever holds 'open'/'submitted', see migration 0017), so a
+    // customer who never submitted still turns green once the day is over
+    // and nothing further can happen. Checked against the day's own
+    // `phase`, not `dayView.isLive`: a pinned past date is "not live" but
+    // its phase could in principle be anything (per James 2026-09-15, same
+    // rule as distributor-grower.tsx's identical tone comment).
+    const dayClosed = dayView.day?.phase === "closed";
+    const tone =
+      order?.status === "submitted" || dayClosed ? "accent" : !order ? "warning" : "neutral";
     const caption =
       order?.status === "submitted" && order.submitted_at
         ? `נשלח ב-${new Date(order.submitted_at).toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" })}`
@@ -337,6 +347,22 @@ export default function DistributorAsCustomerPage() {
               ? "פתח יום עסקים בסרגל הצד כדי לנהל הזמנות בשם לקוחות."
               : "בחר תאריך אחר בסרגל הצד, או חזור ליום הפעיל."
           }
+        />
+      ) : dayView.day?.phase === "initiated" ? (
+        // Same root cause as the !dayId branch above, one phase later: the
+        // trading day is open but open_shop hasn't run yet, so it hasn't
+        // bootstrapped a daily_orders header for anyone (see migration
+        // 0031's open_shop — that insert is what creates them, and it only
+        // runs on the initiated -> shop_open transition). Every customer
+        // would otherwise render as `!order`, which the tone logic reads as
+        // "warning" — not a real signal here, just "nobody can order yet",
+        // so every name would show orange for a reason that has nothing to
+        // do with any individual customer. Blocked here instead, same as
+        // above, rather than showing a wall of false alarms.
+        <EmptyState
+          icon="cart"
+          title="החנות עדיין לא נפתחה"
+          hint="פתח את החנות בסרגל הצד כדי שלקוחות יוכלו להזמין, ולנהל הזמנות בשמם."
         />
       ) : rows.length === 0 ? (
         <EmptyState

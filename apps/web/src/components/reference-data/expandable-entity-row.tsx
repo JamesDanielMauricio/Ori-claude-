@@ -11,8 +11,11 @@ import { Icon } from "@/components/ui/icon";
 // what fills `children` when expanded, and what the edit pencil opens,
 // differs.
 const TONE_TEXT = {
-  // Nothing submitted yet today — the row a distributor is most likely
-  // chasing, so it gets the warmest color rather than the quietest one.
+  // The warmest color, reserved for whichever state each screen considers
+  // most in need of the distributor's attention right now. Meaning is
+  // screen-specific: distributor-customer.tsx uses it for "no order yet
+  // today"; distributor-grower.tsx uses it for "carrying leftover stock"
+  // (see that file's own tone comment) rather than "hasn't picked yet".
   warning: "text-warning",
   // Done: submitted or closed.
   accent: "text-accent",

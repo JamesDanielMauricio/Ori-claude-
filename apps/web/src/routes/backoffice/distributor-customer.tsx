@@ -272,7 +272,6 @@ export default function DistributorAsCustomerPage() {
           !dayView.isLive || !order || order.status === "submitted" || reminderMutation.isPending
         }
         reminding={reminding}
-        reminded={!!order?.reminder_sent_at}
       >
         <FamilyGroupedLines families={families} emptyLabel="אין עדיין הזמנה עבור לקוח זה." />
       </ExpandableEntityRow>

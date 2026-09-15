@@ -32,7 +32,6 @@ export function ExpandableEntityRow({
   remindLabel,
   remindDisabled,
   reminding,
-  reminded,
   children,
 }: {
   name: string;
@@ -47,13 +46,6 @@ export function ExpandableEntityRow({
   remindLabel: string;
   remindDisabled: boolean;
   reminding: boolean;
-  /**
-   * Shown as a checkmark the instant the bell is clicked, optimistically —
-   * before the RPC round trip confirms it — and cleared again either by the
-   * caller (on a failed send) or after a few seconds (on a real one). See
-   * distributor-grower.tsx / distributor-customer.tsx for the timing.
-   */
-  reminded?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -94,8 +86,6 @@ export function ExpandableEntityRow({
               aria-hidden
               className="animate-spin-loop h-3 w-3 rounded-full border-2 border-current border-t-transparent"
             />
-          ) : reminded ? (
-            <Icon name="checkCircle" className="h-3.5 w-3.5" />
           ) : (
             <Icon name="bell" className="h-3.5 w-3.5" />
           )}

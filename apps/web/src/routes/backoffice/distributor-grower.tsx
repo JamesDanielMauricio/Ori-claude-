@@ -416,7 +416,6 @@ export default function DistributorAsGrowerPage() {
           !dayView.isLive || !pick || pick.status === "closed" || reminderMutation.isPending
         }
         reminding={reminding}
-        reminded={!!pick?.reminder_sent_at}
       >
         <FamilyGroupedLines families={families} emptyLabel="אין מוצרים בעונה עבור מגדל זה." />
       </ExpandableEntityRow>

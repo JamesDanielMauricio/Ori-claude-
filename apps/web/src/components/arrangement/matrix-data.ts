@@ -27,6 +27,8 @@
 // Kept free of React and of the network so the arithmetic — which is what a
 // distributor is trusting when they decide a customer is covered — can be
 // read and tested on its own, exactly as board-data.ts is.
+import { formatVarietyName } from "@/lib/variety-label";
+
 import {
   parsePallets,
   type BoardCompany,
@@ -256,7 +258,7 @@ export function buildMatrix({
       let entry = byVariety.get(variety.id);
       if (!entry) {
         entry = {
-          varietyName: variety.name,
+          varietyName: formatVarietyName(variety.name, variety.sizes),
           familyName: variety.product_families?.name ?? "",
           growers: [],
         };

@@ -16,6 +16,7 @@ import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { hasChanges } from "@/lib/has-changes";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
+import { formatVarietyName } from "@/lib/variety-label";
 
 interface GrowerCompany {
   id: string;
@@ -167,10 +168,15 @@ export default function GrowersPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("product_varieties")
-        .select("id, name, product_families(name)")
+        .select("id, name, sizes, product_families(name)")
         .order("name");
       if (error) throw error;
-      return data as Array<{ id: string; name: string; product_families: { name: string } | null }>;
+      return data as Array<{
+        id: string;
+        name: string;
+        sizes: string | null;
+        product_families: { name: string } | null;
+      }>;
     },
   });
 
@@ -179,8 +185,8 @@ export default function GrowersPage() {
       (catalogQuery.data ?? []).map((product) => ({
         id: product.id,
         label: product.product_families?.name
-          ? `${product.product_families.name} — ${product.name}`
-          : product.name,
+          ? `${product.product_families.name} — ${formatVarietyName(product.name, product.sizes)}`
+          : formatVarietyName(product.name, product.sizes),
       })),
     [catalogQuery.data],
   );

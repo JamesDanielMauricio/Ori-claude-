@@ -21,6 +21,7 @@ import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { nudgeWhatsAppDispatch } from "@/lib/nudge-whatsapp-dispatch";
 import { createClient } from "@/lib/supabase/client";
 import { useTradingDayView } from "@/lib/trading-day-view";
+import { formatVarietyName } from "@/lib/variety-label";
 
 interface CustomerCompany {
   id: string;
@@ -35,6 +36,7 @@ interface OrderLineRow {
   product_varieties: {
     id: string;
     name: string;
+    sizes: string | null;
     family_id: string;
     product_families: { id: string; name: string; image_url: string | null } | null;
   } | null;
@@ -69,7 +71,7 @@ function groupOrderLines(lines: OrderLineRow[]): FamilyGroupedRow[] {
     const pallets = Number(line.pallets_ordered) || 0;
     group.lines.push({
       id: line.id,
-      varietyName: variety.name,
+      varietyName: formatVarietyName(variety.name, variety.sizes),
       quantityLabel: formatPallets(pallets),
       hasQuantity: pallets > 0,
       comment: line.comment,
@@ -141,7 +143,7 @@ export default function DistributorAsCustomerPage() {
         .from("daily_orders")
         .select(
           `id, customer_company_id, status, submitted_at, reminder_sent_at,
-           daily_order_products(id, pallets_ordered, comment, product_varieties(id, name, family_id, product_families(id, name, image_url)))`,
+           daily_order_products(id, pallets_ordered, comment, product_varieties(id, name, sizes, family_id, product_families(id, name, image_url)))`,
         )
         .eq("trading_day_id", dayId!);
       if (error) throw error;

@@ -15,6 +15,7 @@ import { useToast } from "@/components/ui/toast";
 import { hasChanges } from "@/lib/has-changes";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
+import { formatVarietyName } from "@/lib/variety-label";
 
 import { CommentPopup } from "./comment-popup";
 import {
@@ -216,7 +217,7 @@ export function OrderLinesEditor({
         imageUrl: family.imageUrl,
         varieties: family.varieties.map((row) => ({
           varietyId: row.variety_id,
-          varietyName: row.variety_name,
+          varietyName: formatVarietyName(row.variety_name, row.sizes),
           priceLabel: formatPrice(row),
           packType: row.pack_type,
           pallets: draft[row.variety_id]?.pallets ?? "",

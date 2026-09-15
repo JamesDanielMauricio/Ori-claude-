@@ -8,6 +8,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
+import { formatVarietyName } from "@/lib/variety-label";
 
 interface ProductVarietyRow {
   id: string;
@@ -163,8 +164,8 @@ export function PriceEditDialog({
 
   const title = varietyQuery.data
     ? varietyQuery.data.product_families?.name
-      ? `מחיר — ${varietyQuery.data.product_families.name} — ${varietyQuery.data.name}`
-      : `מחיר — ${varietyQuery.data.name}`
+      ? `מחיר — ${varietyQuery.data.product_families.name} — ${formatVarietyName(varietyQuery.data.name, varietyQuery.data.sizes)}`
+      : `מחיר — ${formatVarietyName(varietyQuery.data.name, varietyQuery.data.sizes)}`
     : "מחיר";
 
   return (

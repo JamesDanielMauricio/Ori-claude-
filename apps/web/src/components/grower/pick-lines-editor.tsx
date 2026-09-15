@@ -12,6 +12,7 @@ import { useToast } from "@/components/ui/toast";
 import { hasChanges } from "@/lib/has-changes";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
+import { formatVarietyName } from "@/lib/variety-label";
 
 interface PickProductLineRow {
   id: string;
@@ -20,6 +21,7 @@ interface PickProductLineRow {
   comment: string | null;
   product_varieties: {
     name: string;
+    sizes: string | null;
     family_id: string;
     product_families: { name: string; image_url: string | null } | null;
   } | null;
@@ -85,7 +87,7 @@ function groupDraftByFamily(rows: PickProductLineRow[], draft: DraftLine[]): Pic
     const line = draftById.get(row.id);
     group.varieties.push({
       id: row.id,
-      varietyName: variety.name,
+      varietyName: formatVarietyName(variety.name, variety.sizes),
       pallets: line?.pallets ?? "",
       leftover: line?.leftover ?? "",
       comment: line?.comment ?? "",
@@ -198,7 +200,7 @@ export function PickLinesEditor({
       const { data, error } = await supabase
         .from("daily_pick_products")
         .select(
-          "id, pallets_picked, leftover_pallets, comment, product_varieties(name, family_id, product_families(name, image_url))",
+          "id, pallets_picked, leftover_pallets, comment, product_varieties(name, sizes, family_id, product_families(name, image_url))",
         )
         .eq("daily_pick_id", dailyPickId)
         .order("product_variety_id");

@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
+import { formatVarietyName } from "@/lib/variety-label";
 
 import { formatPrice, type FamilyGroup } from "./catalog-grouping";
 
@@ -38,7 +39,7 @@ export function SubmissionConfirmationDialog({
                       className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-md border border-border px-3 py-2 text-sm"
                     >
                       <span className="min-w-0 flex-1 truncate">
-                        {variety.variety_name}
+                        {formatVarietyName(variety.variety_name, variety.sizes)}
                         {!variety.is_orderable && (
                           <span className="ms-2 text-xs text-danger">(אזל מהמלאי)</span>
                         )}

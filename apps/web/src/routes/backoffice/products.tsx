@@ -26,6 +26,7 @@ import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { hasChanges } from "@/lib/has-changes";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
+import { formatVarietyName } from "@/lib/variety-label";
 
 type PackType = "pallets" | "crates";
 
@@ -1201,7 +1202,7 @@ export default function ProductsPage() {
         title="מחיקת מוצר"
       >
         <p className="mb-4 text-sm">
-          האם למחוק את המוצר &quot;{deleteTarget?.name}&quot;? פעולה זו אינה הפיכה.
+          האם למחוק את המוצר &quot;{deleteTarget ? formatVarietyName(deleteTarget.name, deleteTarget.sizes) : ""}&quot;? פעולה זו אינה הפיכה.
         </p>
         <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={() => setDeleteTargetId(null)}>

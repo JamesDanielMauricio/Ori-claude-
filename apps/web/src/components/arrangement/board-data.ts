@@ -10,11 +10,16 @@
 // Kept out of the route component and free of dependencies so the arithmetic
 // — which is what a distributor is trusting when they decide whether a
 // customer's order is covered — can be read and tested on its own.
+import { formatVarietyName } from "@/lib/variety-label";
 
 /** A variety as it arrives embedded on a pick or order line. */
 export interface BoardVarietyRow {
   id: string;
   name: string;
+  /** Free-text size descriptor (product_varieties.sizes), shown beside the
+   * name wherever a variety is displayed — see formatVarietyName. Optional so
+   * existing test fixtures that predate this field still type-check. */
+  sizes?: string | null;
   family_id: string;
   product_families: { name: string; image_url: string | null } | null;
 }
@@ -352,7 +357,7 @@ export function buildBoard({
       const allocated = allocatedByVariety.get(variety.id) ?? 0;
       return {
         varietyId: variety.id,
-        varietyName: variety.name,
+        varietyName: formatVarietyName(variety.name, variety.sizes),
         familyId: variety.family_id,
         familyName: variety.product_families?.name ?? "",
         imageUrl: variety.product_families?.image_url ?? null,
@@ -404,7 +409,7 @@ export function buildBoard({
         group.lines.push({
           pickLineId: line.id,
           varietyId: variety.id,
-          varietyName: variety.name,
+          varietyName: formatVarietyName(variety.name, variety.sizes),
           picked: linePicked,
           leftover: lineLeftover,
           allocated: lineAllocated,
@@ -483,7 +488,7 @@ export function buildBoard({
         lines.push({
           orderLineId: line.id,
           varietyId: variety.id,
-          varietyName: variety.name,
+          varietyName: formatVarietyName(variety.name, variety.sizes),
           familyName: variety.product_families?.name ?? "",
           ordered: lineOrdered,
           previousOrdered:

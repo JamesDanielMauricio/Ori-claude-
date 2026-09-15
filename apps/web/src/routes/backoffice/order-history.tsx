@@ -19,6 +19,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { createClient } from "@/lib/supabase/client";
+import { formatVarietyName } from "@/lib/variety-label";
 
 interface OrderRow {
   id: string;
@@ -31,7 +32,11 @@ interface OrderLineRow {
   id: string;
   pallets_ordered: number;
   comment: string | null;
-  product_varieties: { name: string; product_families: { name: string } | null } | null;
+  product_varieties: {
+    name: string;
+    sizes: string | null;
+    product_families: { name: string } | null;
+  } | null;
   arrangement_records: Array<{ quantity_pallets: number; price: number | null }>;
 }
 
@@ -97,7 +102,7 @@ export default function ArrangedOrderHistoryPage() {
       const { data, error } = await supabase
         .from("daily_order_products")
         .select(
-          "id, pallets_ordered, comment, product_varieties(name, product_families(name)), arrangement_records(quantity_pallets, price)",
+          "id, pallets_ordered, comment, product_varieties(name, sizes, product_families(name)), arrangement_records(quantity_pallets, price)",
         )
         .eq("daily_order_id", selectedOrderId!)
         .order("product_variety_id");
@@ -238,7 +243,12 @@ export default function ArrangedOrderHistoryPage() {
                             <TableRow key={line.id}>
                               <TableCell>
                                 <span className="block font-medium text-ink">
-                                  {line.product_varieties?.name ?? ""}
+                                  {line.product_varieties
+                                    ? formatVarietyName(
+                                        line.product_varieties.name,
+                                        line.product_varieties.sizes,
+                                      )
+                                    : ""}
                                 </span>
                                 {line.product_varieties?.product_families?.name && (
                                   <span className="mt-0.5 block text-xs text-ink-muted">

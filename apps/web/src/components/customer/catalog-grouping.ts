@@ -15,6 +15,7 @@ export interface CatalogRow {
   family_name: string;
   variety_id: string;
   variety_name: string;
+  sizes: string | null;
   pack_type: "pallets" | "crates" | null;
   price: number | null;
   price_range_from: number | null;

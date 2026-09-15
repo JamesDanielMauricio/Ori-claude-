@@ -1163,6 +1163,7 @@ export type Database = {
           family_name: string;
           variety_id: string;
           variety_name: string;
+          sizes: string | null;
           pack_type: Database["public"]["Enums"]["pack_type"] | null;
           price: number | null;
           price_range_from: number | null;

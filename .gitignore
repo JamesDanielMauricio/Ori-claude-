@@ -17,6 +17,10 @@ out/
 # contains a live MCP bearer token — never commit
 .mcp.json
 
+# Bubble data snapshots (packages/db/scripts/bubble-export.ts) — real
+# people's emails and phone numbers; never commit
+.bubble-export/
+
 # logs
 *.log
 npm-debug.log*

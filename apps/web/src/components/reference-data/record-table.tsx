@@ -16,6 +16,13 @@ import {
 export interface RecordTableColumn<T> {
   key: string;
   label: string;
+  // What this column means for a GROUP row, when the group draws itself into
+  // the columns rather than as a band (see RecordTableGroupContent). Rendered
+  // under the main label in the subtle ink, so one header row labels both
+  // levels at once: "זן" over a variety's name and "משפחה" over the family
+  // name in the same column. Omitted by every column a group leaves empty,
+  // and by every ungrouped table.
+  groupLabel?: string;
   render: (row: T) => ReactNode;
   // The inline editable control for this column — an <input>/<select> bound
   // to the caller's own form state via closure, shown instead of `render`
@@ -25,6 +32,34 @@ export interface RecordTableColumn<T> {
   // read-only on an editing row.
   renderEdit?: (row: T) => ReactNode;
 }
+
+// How one group row draws itself. Two shapes, because a group is a real
+// record and its two states want different things from the grid:
+//
+//   `cells` — the group's own fields sit in the SAME columns its records use,
+//   so a single header row stands for both levels (a `groupLabel` on each
+//   column says what it means for a group). This is the reading state, and
+//   it's what stops a collapsed group from being a name adrift in a row of
+//   empty cells.
+//
+//   `band` — one cell across the full width, for content the column grid
+//   can't take. The family EDIT form is the case that forced this: its image
+//   URL field is several times the width of any column it could sit in, so
+//   aligning it would re-measure every column in the table on each keystroke
+//   and shunt the rows underneath sideways while the user typed.
+export type RecordTableGroupContent =
+  | {
+      kind: "cells";
+      // Goes in the frozen actions column, alongside the expand toggle the
+      // caller draws wherever it likes among `cells`.
+      actions: ReactNode;
+      // Keyed by column key. A column missing from the map renders empty,
+      // and the table maps it through its OWN visible-column list — so a
+      // column the user has hidden hides on group rows too and the grid stays
+      // aligned.
+      cells: Record<string, ReactNode>;
+    }
+  | { kind: "band"; content: ReactNode };
 
 // One collapsible section of a grouped table — a product FAMILY on the
 // Products screen, the only screen that groups so far. The caller owns the
@@ -38,12 +73,11 @@ export interface RecordTableGroup {
   // What a search term matches the GROUP against, independent of its rows —
   // so a family with no varieties yet is still findable by name.
   searchText: string;
-  // The header row's content, spanning the full table width. Receives the
-  // expansion state the table ACTUALLY rendered with, which is not always
-  // the `expandedIds` the caller passed in (see `grouping` below) — drawing
-  // the chevron from this argument is what keeps it pointing the same way
-  // as the rows underneath it.
-  header: (expanded: boolean) => ReactNode;
+  // The header row's content. Receives the expansion state the table ACTUALLY
+  // rendered with, which is not always the `expandedIds` the caller passed in
+  // (see `grouping` below) — drawing the chevron from this argument is what
+  // keeps it pointing the same way as the rows underneath it.
+  header: (expanded: boolean) => RecordTableGroupContent;
 }
 
 // The pinned first column. Frozen with `position: sticky` rather than left
@@ -66,6 +100,16 @@ export interface RecordTableGroup {
 // horizontal freeze actually needs.
 const PINNED_CELL =
   "sticky start-0 z-0 bg-surface group-hover/row:bg-[color-mix(in_oklab,var(--color-accent-soft)_55%,var(--color-surface))] after:absolute after:inset-y-0 after:end-0 after:w-px after:bg-border";
+
+// The group row's own fill — a shade stronger than the sticky header's (see
+// table.tsx for why both are mixed from `ink` rather than taken from
+// `surface-muted`), so a section band reads as a section and not as one more
+// record. Named because the pinned actions cell on a group row has to repeat
+// it: that cell is opaque by necessity (it hides the cells scrolling under
+// it), so taking `surface` there would punch a hole in the band.
+const GROUP_ROW_FILL = "bg-[color-mix(in_oklab,var(--color-ink)_9%,var(--color-surface))]";
+
+const PINNED_GROUP_CELL = `sticky start-0 z-0 ${GROUP_ROW_FILL} after:absolute after:inset-y-0 after:end-0 after:w-px after:bg-border`;
 
 // The five Backoffice management screens' record view (Products, Growers,
 // Customers, Transporters, Users): every field of every record as its own
@@ -154,6 +198,21 @@ export function RecordTable<T>({
     groups: RecordTableGroup[];
     getGroupId: (row: T) => string;
     expandedIds: ReadonlySet<string>;
+    // The "add a record to THIS group" affordance, rendered as the first row
+    // inside every expanded group. Optional: a grouped table without one
+    // simply opens onto its records.
+    //
+    // It exists because the group is already named by the act of opening it
+    // — asking the user to press a toolbar button and then re-state the group
+    // in a dropdown throws that away. Returns the same content shape a group
+    // header does, so an add row lines up with the columns like everything
+    // else in the table.
+    //
+    // Hidden, not disabled, while any row is being edited: the draft it
+    // creates lands in this very position, so leaving a greyed-out copy of
+    // the control directly above its own result reads as a second, broken
+    // add row rather than as a locked one.
+    renderAddRow?: (group: RecordTableGroup) => RecordTableGroupContent;
   };
   loading?: boolean;
   searchPlaceholder?: string;
@@ -280,6 +339,38 @@ export function RecordTable<T>({
   // table emits these from inside each section as well as, for orphans,
   // outside them — and a second copy of the pinned actions cell is exactly
   // the kind of duplication that drifts.
+  // One group row's cells. The `cells` shape is laid out against this
+  // component's own `visibleColumns` rather than against whatever the caller
+  // thinks the columns are: the column-visibility picker lives here, so only
+  // here knows which ones survived it, and a group that emitted its own <td>
+  // list would fall out of alignment the moment a column was hidden.
+  // `pinnedClassName` because the two callers sit on different fills: a group
+  // HEADER carries the band colour, while the add row is an ordinary row in
+  // the list and has to take the row fill and the row hover, or it reads as a
+  // second band wedged under the first.
+  function renderGroupCells(content: RecordTableGroupContent, pinnedClassName = PINNED_GROUP_CELL) {
+    if (content.kind === "band") {
+      // `p-0` because a band owns its own padding inside whatever block it
+      // renders (typically a `sticky start-0` one, so a long form stays put
+      // at the frozen edge while the table scrolls sideways under it);
+      // padding on the cell itself would push that block off the edge.
+      return (
+        <td colSpan={visibleColumns.length + 1} className="p-0">
+          {content.content}
+        </td>
+      );
+    }
+
+    return (
+      <>
+        <TableCell className={pinnedClassName}>{content.actions}</TableCell>
+        {visibleColumns.map((column) => (
+          <TableCell key={column.key}>{content.cells[column.key] ?? null}</TableCell>
+        ))}
+      </>
+    );
+  }
+
   function renderRow(row: T) {
     const id = getRowId(row);
     const isEditing = id === editingId;
@@ -411,11 +502,34 @@ export function RecordTable<T>({
                   BOTH axes (its thead pins it vertically, `start-0` pins it
                   horizontally) and has to stay on top of whichever header
                   cell scrolls under it. */}
-              <TableHead className="sticky start-0 z-20 w-24 bg-surface-muted after:absolute after:inset-y-0 after:end-0 after:w-px after:bg-border">
+              {/* Opaque, and mixed to the SAME tint the <thead> carries (see
+                  table.tsx) rather than to `surface-muted`: this cell has to
+                  hide the header cells sliding under it, so it can't take the
+                  thead's own translucency — but if it takes a different
+                  colour instead it reads as a notch cut out of the header.
+                  Those two were the same value on the light page and five
+                  points apart on the dark one, which is what made the notch
+                  visible there and nowhere else. */}
+              <TableHead className="sticky start-0 z-20 w-24 bg-[color-mix(in_oklab,var(--color-ink)_7%,var(--color-surface))] align-top after:absolute after:inset-y-0 after:end-0 after:w-px after:bg-border-strong">
                 פעולות
               </TableHead>
+              {/* Two lines, not "זן / משפחה" on one: stacking keeps the
+                  column's width at the wider of the two words instead of
+                  their sum, which matters on a table already wide enough to
+                  scroll — and it reads as what it is, one column standing
+                  for a record and for the group above it. The group meaning
+                  goes in the subtle ink so the record meaning still leads.
+                  `align-top` so every primary label sits on one baseline
+                  whether or not its column carries a second line. */}
               {visibleColumns.map((column) => (
-                <TableHead key={column.key}>{column.label}</TableHead>
+                <TableHead key={column.key} className="align-top">
+                  <span className="block">{column.label}</span>
+                  {column.groupLabel && (
+                    <span className="mt-0.5 block font-medium text-ink-subtle">
+                      {column.groupLabel}
+                    </span>
+                  )}
+                </TableHead>
               ))}
             </TableRow>
           </TableHeader>
@@ -424,21 +538,21 @@ export function RecordTable<T>({
               ? [
                   ...grouped.sections.map((section) => (
                     <Fragment key={`group:${section.group.id}`}>
-                      <tr className="bg-surface-muted/70 shadow-[inset_0_1px_0_var(--color-border)]">
-                        {/* One cell across the whole table, actions
-                            included, rather than a header that reuses the
-                            pinned actions column: that lets the caller's
-                            entire header — toggle, name, its own edit
-                            controls — ride in a single `sticky start-0`
-                            block, so a family stays labelled while the
-                            sixteen variety columns scroll horizontally
-                            underneath it. `p-0` because the header owns its
-                            own padding inside that block; the cell itself is
-                            table-wide and padding on it would push the
-                            content away from the frozen edge. */}
-                        <td colSpan={visibleColumns.length + 1} className="p-0">
-                          {section.group.header(section.expanded)}
-                        </td>
+                      {/* The band has to read as a SECTION, not as one more
+                          record: a collapsed group is a row whose cells are
+                          all empty, so if it carries the same fill as the
+                          rows around it the screen becomes a list of names
+                          floating in an otherwise blank grid — which is
+                          exactly what it looked like. Same self-flipping ink
+                          mix the header uses, a shade stronger, so the
+                          separation survives the dark theme (`surface-muted`
+                          at 70% did not — see table.tsx). The rules top and
+                          bottom close the band off from the rows above and
+                          below it. */}
+                      <tr
+                        className={`${GROUP_ROW_FILL} shadow-[inset_0_1px_0_var(--color-border-strong),inset_0_-1px_0_var(--color-border-strong)]`}
+                      >
+                        {renderGroupCells(section.group.header(section.expanded))}
                       </tr>
                       {/* Collapsed groups render no rows at all. The
                           height-animated `.accordion-panel` used elsewhere
@@ -446,6 +560,11 @@ export function RecordTable<T>({
                           CSS grid without destroying the column alignment
                           that is the entire point of a table — so the
                           motion budget goes on the chevron instead. */}
+                      {section.expanded && grouping?.renderAddRow && editingId === null && (
+                        <tr className="group/row transition-colors duration-150 hover:bg-accent-soft/40">
+                          {renderGroupCells(grouping.renderAddRow(section.group), PINNED_CELL)}
+                        </tr>
+                      )}
                       {section.expanded && section.rows.map(renderRow)}
                     </Fragment>
                   )),
@@ -483,12 +602,24 @@ export function RowIconButton({
       disabled={disabled}
       aria-label={label}
       title={label}
-      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ring-1 ring-inset transition-colors duration-150 disabled:pointer-events-none disabled:opacity-40 ${
+      // Delete and edit sit on EVERY row, so they are drawn as outlines and
+      // fill in only on hover/focus. Filled chips read fine on one row and
+      // badly on forty: a soft-red disc repeated down the whole length of the
+      // table made the most destructive control on the screen its single
+      // loudest element, and the eye had to push past a column of them to
+      // reach the data. The glyph keeps its colour, so the affordance is
+      // still legible at rest — it is the block of fill that goes, not the
+      // warning.
+      //
+      // `accent` is the exception and stays filled: it is the save button,
+      // which exists on at most one row at a time and is the primary action
+      // of that moment.
+      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ring-1 ring-inset transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:pointer-events-none disabled:opacity-40 ${
         tone === "danger"
-          ? "bg-danger-soft text-danger ring-danger/25 hover:bg-danger hover:text-danger-ink"
+          ? "text-danger ring-border hover:bg-danger hover:text-danger-ink hover:ring-danger"
           : tone === "accent"
-            ? "bg-accent-soft text-accent ring-accent/25 hover:bg-accent hover:text-accent-ink"
-            : "bg-surface-muted text-ink-muted ring-border hover:bg-accent-soft hover:text-accent"
+            ? "bg-accent text-accent-ink ring-accent hover:bg-accent-hover"
+            : "text-ink-muted ring-border hover:bg-accent-soft hover:text-accent hover:ring-accent/30"
       }`}
     >
       <Icon name={icon} className="h-3.5 w-3.5" />

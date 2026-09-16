@@ -31,6 +31,23 @@ function editingRow(page: Page) {
     .filter({ has: page.getByRole("button", { name: "שמור", exact: true }) });
 }
 
+// Opens a family and starts a new variety inside it. There is no toolbar
+// "new product" button any more: a variety cannot exist without a family, so
+// it is created from the "זן חדש" row that sits first inside an open family,
+// which is what supplies the family instead of a dropdown.
+//
+// The toggle is matched on its `aria-expanded` state rather than on its
+// "הרחב"/"כווץ" label, because that label flips with the state — and the
+// family may arrive already open, since saving a family or a variety leaves
+// its family expanded.
+async function addVarietyToFamily(page: Page, familyName: string) {
+  const toggle = page.locator("button[aria-expanded]").filter({ hasText: familyName }).first();
+  if ((await toggle.getAttribute("aria-expanded")) === "false") {
+    await toggle.click();
+  }
+  await page.getByRole("button", { name: `זן חדש ${familyName}` }).click();
+}
+
 // Signs in as a fresh backoffice admin and lands on the Products screen —
 // shared by both tests below, which each need their own throwaway account.
 async function signInToProducts(page: Page, email: string, password: string) {
@@ -69,15 +86,10 @@ test.describe("Backoffice — Products", () => {
     await signInToProducts(page, admin.email, admin.password);
 
     const productName = `זן E2E ${randomUUID()}`;
-    // The table's own toolbar add button (record-table.tsx's `onAdd`)
-    // prepends a draft row, already in inline-edit mode — one button now,
-    // not the old list-button-plus-empty-pane-button pair, so no
-    // `.first()` disambiguation needed.
-    await page.getByRole("button", { name: "מוצר חדש" }).click();
-    await chooseOption(
-      editingRow(page).getByRole("combobox", { name: "משפחה", exact: true }),
-      family.name,
-    );
+    await addVarietyToFamily(page, family.name);
+    // The whole point of adding from inside a family: the draft arrives
+    // already assigned to it, so there is no dropdown step to perform here.
+    await expect(editingRow(page)).toContainText(family.name);
     await editingRow(page).getByLabel("זן / שם").fill(productName);
     await editingRow(page).getByLabel("מחיר", { exact: true }).fill("12.5");
     await editingRow(page).getByRole("button", { name: "שמור" }).click();
@@ -166,11 +178,7 @@ test.describe("Backoffice — Products", () => {
     // --- Put a variety in it, which is what the delete has to refuse over.
     await page.getByPlaceholder("חיפוש מוצר, זן או משפחה").fill("");
     const varietyName = `זן E2E ${randomUUID()}`;
-    await page.getByRole("button", { name: "מוצר חדש" }).click();
-    await chooseOption(
-      editingRow(page).getByRole("combobox", { name: "משפחה", exact: true }),
-      familyName,
-    );
+    await addVarietyToFamily(page, familyName);
     await editingRow(page).getByLabel("זן / שם").fill(varietyName);
     await editingRow(page).getByRole("button", { name: "שמור", exact: true }).click();
     cleanupFns.push(async () => {

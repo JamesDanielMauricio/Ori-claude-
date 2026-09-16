@@ -13,6 +13,7 @@ import {
   RowIconButton,
   type RecordTableColumn,
   type RecordTableGroup,
+  type RecordTableGroupContent,
 } from "@/components/reference-data/record-table";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
@@ -100,6 +101,33 @@ const NEW_FAMILY_ID = "__new_family__";
 const CREATED_AT_FORMAT = new Intl.DateTimeFormat("he-IL", { dateStyle: "short" });
 
 const PACK_TYPE_LABEL: Record<PackType, string> = { pallets: "משטחים", crates: "ארגזים" };
+
+// An empty cell is a value too, and on this screen most varieties leave most
+// of the optional pricing fields unset — so a placeholder drawn in the same
+// ink as real data turns the table into a field of dashes with the handful of
+// actual numbers lost somewhere inside it. Drawn in the subtle ink instead:
+// still plainly "nothing set here", but no longer competing with the values
+// that ARE set. An empty string counts as unset for the same reason `||` did
+// before: these columns come back as "" rather than null when the source row
+// has never been given one.
+function orDash(value: string | number | null | undefined) {
+  if (value === null || value === undefined || value === "") {
+    return <span className="text-ink-subtle">—</span>;
+  }
+  return value;
+}
+
+// The name column carries a family's expand chevron and photo as well as a
+// name — and those two pushed the family name 4rem inboard of the varieties
+// listed directly underneath it, so the parent read as drifting away from its
+// own children. They now sit in a fixed-width gutter instead, and a variety's
+// name is padded by exactly that width, which puts every name in the column
+// on one edge whichever level it belongs to. Two halves of one measurement,
+// so they are declared together and must stay equal: `w-16` is 4rem and so is
+// `ps-16`. It costs the column nothing, because its width was already set by
+// the longest family name plus this same gutter.
+const NAME_GUTTER = "w-16";
+const NAME_GUTTER_PAD = "ps-16";
 
 function blankForm(defaultFamilyId: string): FormState {
   return {
@@ -617,11 +645,14 @@ export default function ProductsPage() {
     setForm(toFormState(row, capsQuery.data?.get(row.id) ?? []));
   }
 
-  function handleNew() {
-    const defaultFamilyId = familiesQuery.data?.[0]?.id ?? "";
+  // Starts a draft variety already assigned to one family. The family is
+  // opened as well as selected, because the draft row is grouped by the
+  // family the FORM names (see `getGroupId`) — into a collapsed group it
+  // would be seeded correctly and then be invisible.
+  function handleNewInFamily(familyId: string) {
     setEditingId(NEW_ROW_ID);
-    openFamily(defaultFamilyId);
-    setForm(blankForm(defaultFamilyId));
+    openFamily(familyId);
+    setForm(blankForm(familyId));
   }
 
   function handleCancel() {
@@ -683,21 +714,30 @@ export default function ProductsPage() {
     {
       key: "name",
       label: "זן",
-      render: (row) => <span className="font-medium text-ink">{row.name}</span>,
+      groupLabel: "משפחה",
+      render: (row) => (
+        <span className={`block font-medium text-ink ${NAME_GUTTER_PAD}`}>{row.name}</span>
+      ),
       renderEdit: () => (
-        <input
-          aria-label="זן / שם"
-          autoFocus
-          required
-          className={`${inputClassName} w-full min-w-[9rem]`}
-          value={form.name}
-          onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-        />
+        // Padded to the same gutter as the read state, so the field opens
+        // exactly where the name it replaces was sitting rather than jumping
+        // to the cell edge the moment the row goes into edit mode.
+        <div className={NAME_GUTTER_PAD}>
+          <input
+            aria-label="זן / שם"
+            autoFocus
+            required
+            className={`${inputClassName} w-full min-w-[9rem]`}
+            value={form.name}
+            onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+          />
+        </div>
       ),
     },
     {
       key: "family",
       label: "משפחה",
+      groupLabel: "קטגוריה",
       // Redundant with the header row this variety already sits under while
       // it's only being read — but it stays, because MOVING a variety to a
       // different family is a real edit and this dropdown is the only place
@@ -706,7 +746,16 @@ export default function ProductsPage() {
       // the family it is about to be SAVED to, not the one it came from),
       // which is why the target family is opened here too: otherwise the row
       // would drop into a collapsed group and vanish mid-edit.
-      render: (row) => familyById.get(row.family_id)?.name ?? "—",
+      // Drawn in the muted ink rather than the body ink: in a grouped table
+      // every row of a section repeats that section's own name, which makes
+      // this the most-repeated text on the screen and, at full strength, the
+      // thing the eye keeps landing on instead of the fields that actually
+      // differ from row to row. It stays visible — a row can be searched into
+      // view away from its family, and an orphan row has no header above it
+      // at all — just quieter.
+      render: (row) => (
+        <span className="text-ink-muted">{orDash(familyById.get(row.family_id)?.name)}</span>
+      ),
       renderEdit: () => (
         <Select
           aria-label="משפחה"
@@ -716,14 +765,17 @@ export default function ProductsPage() {
             openFamily(next);
             setForm((current) => ({ ...current, familyId: next }));
           }}
-          options={familiesQuery.data?.map((family) => ({ value: family.id, label: family.name })) ?? []}
+          options={
+            familiesQuery.data?.map((family) => ({ value: family.id, label: family.name })) ?? []
+          }
         />
       ),
     },
     {
       key: "sizes",
       label: "גודל",
-      render: (row) => row.sizes || "—",
+      groupLabel: "מספר זנים",
+      render: (row) => orDash(row.sizes),
       renderEdit: () => (
         <input
           aria-label="גדלים"
@@ -736,7 +788,7 @@ export default function ProductsPage() {
     {
       key: "packType",
       label: "סוג אריזה",
-      render: (row) => (row.pack_type ? PACK_TYPE_LABEL[row.pack_type] : "—"),
+      render: (row) => orDash(row.pack_type ? PACK_TYPE_LABEL[row.pack_type] : null),
       renderEdit: () => (
         <Select
           aria-label="סוג אריזה"
@@ -756,7 +808,7 @@ export default function ProductsPage() {
     {
       key: "price",
       label: "מחיר",
-      render: (row) => row.price || "—",
+      render: (row) => orDash(row.price),
       renderEdit: () => (
         <input
           type="number"
@@ -771,7 +823,7 @@ export default function ProductsPage() {
     {
       key: "priceFrom",
       label: "טווח מ-",
-      render: (row) => row.price_range_from || "—",
+      render: (row) => orDash(row.price_range_from),
       renderEdit: () => (
         <input
           type="number"
@@ -788,7 +840,7 @@ export default function ProductsPage() {
     {
       key: "priceTo",
       label: "טווח עד",
-      render: (row) => row.price_range_to || "—",
+      render: (row) => orDash(row.price_range_to),
       renderEdit: () => (
         <input
           type="number"
@@ -805,7 +857,7 @@ export default function ProductsPage() {
     {
       key: "priceType",
       label: "סוג מחיר",
-      render: (row) => row.price_type || "—",
+      render: (row) => orDash(row.price_type),
       renderEdit: () => (
         <input
           aria-label="סוג תמחור"
@@ -844,7 +896,7 @@ export default function ProductsPage() {
       // means uncapped. See product-variety.ts's schema comment for how it
       // differs from the per-customer caps column (one default for every
       // customer vs. an override for one).
-      render: (row) => row.number_of_orders_per_customer ?? "—",
+      render: (row) => orDash(row.number_of_orders_per_customer),
       renderEdit: () => (
         <input
           type="number"
@@ -967,7 +1019,8 @@ export default function ProductsPage() {
     {
       key: "created",
       label: "נוצר",
-      render: (row) => (row.created_at ? CREATED_AT_FORMAT.format(new Date(row.created_at)) : "—"),
+      render: (row) =>
+        orDash(row.created_at ? CREATED_AT_FORMAT.format(new Date(row.created_at)) : null),
     },
   ];
 
@@ -1017,21 +1070,69 @@ export default function ProductsPage() {
     ...(familiesQuery.data ?? []).map(toGroup),
   ];
 
-  function renderFamilyHeader(family: ProductFamily, varietyCount: number, expanded: boolean) {
+  function renderFamilyHeader(
+    family: ProductFamily,
+    varietyCount: number,
+    expanded: boolean,
+  ): RecordTableGroupContent {
     const isEditing = editingFamilyId === family.id;
     const isDraft = family.id === NEW_FAMILY_ID;
     // Locked while any OTHER edit is open — a row's, or another family's.
     const locked = tableEditingId !== null && !isEditing;
 
-    return (
-      // `sticky start-0 w-fit`: the header is content-width inside a cell
-      // that spans the whole (deliberately over-wide) table, so it stays
-      // parked at the frozen edge while the variety columns scroll sideways
-      // underneath. Without it a family's name scrolls away and the rows
-      // below it lose the only thing saying whose they are.
-      <div className="sticky start-0 flex w-fit max-w-full items-center gap-2 px-3 py-2">
-        {isEditing ? (
-          <>
+    // The family's expand toggle, drawn wherever the caller of this helper
+    // puts it. It stays available while the family is being edited —
+    // renaming a family and checking what's inside it are independent, and
+    // taking the chevron away mid-edit would be a dead end. A draft family
+    // has nothing to expand onto, so it gets a plain thumbnail instead.
+    const toggle = isDraft ? (
+      <ProductThumbnail imageUrl={familyForm.imageUrl} size="sm" />
+    ) : (
+      <button
+        type="button"
+        onClick={() => toggleFamily(family.id)}
+        aria-expanded={expanded}
+        aria-label={`${expanded ? "כווץ" : "הרחב"} ${family.name}`}
+        className="group flex shrink-0 items-center rounded-md py-1 text-start"
+      >
+        {/* The gutter. Fixed at NAME_GUTTER so the name after it starts on the
+            same edge as every variety name in this column; its contents come
+            to 56px (chevron, gap, photo), which leaves the remaining 8px as
+            the gap before the name. */}
+        <span className={`flex ${NAME_GUTTER} shrink-0 items-center gap-2`}>
+          <Icon
+            name="chevronDown"
+            className={`h-4 w-4 shrink-0 transition-[transform,color] duration-300 ease-[cubic-bezier(0.22,0.61,0.36,1)] ${
+              expanded ? "rotate-180 text-accent" : "text-ink-muted group-hover:text-accent"
+            }`}
+          />
+          <ProductThumbnail
+            imageUrl={isEditing ? familyForm.imageUrl : family.image_url}
+            size="sm"
+          />
+        </span>
+        {/* A shade larger than a row's own text: this is a section title, and
+            the band it sits on reads as a section, so the name should lead it
+            rather than match the varieties listed underneath. */}
+        {!isEditing && (
+          <span className="truncate text-[0.9375rem] font-semibold text-ink">{family.name}</span>
+        )}
+      </button>
+    );
+
+    // Editing falls back to one full-width band rather than the column grid
+    // the read state uses. The image-URL field is the reason: it needs ~14rem
+    // to show a URL at all, against a `גודל` column that is barely 4rem, so
+    // sitting it in a cell would re-measure every column in the table and
+    // shove the variety rows sideways on each keystroke. `sticky start-0`
+    // keeps the form parked at the frozen edge while the table scrolls under
+    // it; `px-4` matches the padding a row's own cells carry (table.tsx), so
+    // the controls stay in line with the varieties' edit/delete.
+    if (isEditing) {
+      return {
+        kind: "band",
+        content: (
+          <div className="sticky start-0 flex w-fit max-w-full items-center gap-2.5 px-4 py-2.5">
             <RowIconButton
               icon="checkCircle"
               label="שמור משפחה"
@@ -1046,64 +1147,7 @@ export default function ProductsPage() {
               onClick={handleCancelFamily}
               disabled={savingFamily}
             />
-          </>
-        ) : (
-          <>
-            {/* Deliberately not disabled for a family that still holds
-                varieties: the button opens a dialog that explains WHY it
-                can't go (and offers no delete), which teaches the rule.
-                A greyed-out trash teaches nothing, and its `title` tooltip
-                never fires on a disabled control. */}
-            <RowIconButton
-              icon="trash"
-              label="מחק משפחה"
-              tone="danger"
-              onClick={() => setDeleteFamilyTargetId(family.id)}
-              disabled={locked}
-            />
-            <RowIconButton
-              icon="pencil"
-              label="ערוך משפחה"
-              tone="neutral"
-              onClick={() => handleEditFamily(family)}
-              disabled={locked}
-            />
-          </>
-        )}
-
-        {/* The expand toggle stays available while the family is being
-            edited — renaming a family and checking what's inside it are
-            independent, and taking the chevron away mid-edit would be a
-            dead end. A draft family has nothing to expand onto, so it gets
-            a plain thumbnail instead of a toggle. */}
-        {isDraft ? (
-          <ProductThumbnail imageUrl={familyForm.imageUrl} size="sm" />
-        ) : (
-          <button
-            type="button"
-            onClick={() => toggleFamily(family.id)}
-            aria-expanded={expanded}
-            aria-label={`${expanded ? "כווץ" : "הרחב"} ${family.name}`}
-            className="group flex shrink-0 items-center gap-2 rounded-md py-1 text-start"
-          >
-            <Icon
-              name="chevronDown"
-              className={`h-4 w-4 shrink-0 transition-[transform,color] duration-300 ease-[cubic-bezier(0.22,0.61,0.36,1)] ${
-                expanded ? "rotate-180 text-accent" : "text-ink-muted group-hover:text-accent"
-              }`}
-            />
-            <ProductThumbnail
-              imageUrl={isEditing ? familyForm.imageUrl : family.image_url}
-              size="sm"
-            />
-            {!isEditing && (
-              <span className="truncate text-sm font-semibold text-ink">{family.name}</span>
-            )}
-          </button>
-        )}
-
-        {isEditing ? (
-          <>
+            {toggle}
             <input
               aria-label="שם המשפחה"
               autoFocus
@@ -1135,17 +1179,53 @@ export default function ProductsPage() {
                 setFamilyForm((current) => ({ ...current, imageUrl: event.target.value }))
               }
             />
-          </>
-        ) : (
-          <>
-            {family.category && <StatusPill tone="neutral">{family.category}</StatusPill>}
-            <span className="shrink-0 text-xs font-semibold text-ink-subtle">
-              {varietyCountLabel(varietyCount)}
-            </span>
-          </>
-        )}
-      </div>
-    );
+          </div>
+        ),
+      };
+    }
+
+    // Reading: the family's own fields go in the very columns its varieties
+    // use, so the one header row stands for both levels — name under
+    // "זן / משפחה", category under "משפחה / קטגוריה", the variety count under
+    // "גודל / מספר זנים". The family name no longer stays frozen at the start
+    // edge as it did when this was a band, and doesn't need to: every variety
+    // row carries its family in its own column, which is the redundancy that
+    // now earns its keep.
+    return {
+      kind: "cells",
+      actions: (
+        <div className="flex items-center gap-1.5">
+          {/* Deliberately not disabled for a family that still holds
+              varieties: the button opens a dialog that explains WHY it can't
+              go (and offers no delete), which teaches the rule. A greyed-out
+              trash teaches nothing, and its `title` tooltip never fires on a
+              disabled control. */}
+          <RowIconButton
+            icon="trash"
+            label="מחק משפחה"
+            tone="danger"
+            onClick={() => setDeleteFamilyTargetId(family.id)}
+            disabled={locked}
+          />
+          <RowIconButton
+            icon="pencil"
+            label="ערוך משפחה"
+            tone="neutral"
+            onClick={() => handleEditFamily(family)}
+            disabled={locked}
+          />
+        </div>
+      ),
+      cells: {
+        name: toggle,
+        family: family.category ? <StatusPill tone="neutral">{family.category}</StatusPill> : null,
+        sizes: (
+          <span className="whitespace-nowrap text-xs font-semibold text-ink-subtle">
+            {varietyCountLabel(varietyCount)}
+          </span>
+        ),
+      },
+    };
   }
 
   return (
@@ -1166,11 +1246,22 @@ export default function ProductsPage() {
         onSaveEdit={handleSave}
         onCancelEdit={editingFamilyId ? handleCancelFamily : handleCancel}
         onDelete={(row) => setDeleteTargetId(row.id)}
-        onAdd={handleNew}
-        addLabel="מוצר חדש"
-        // Two "new" buttons for the screen's two record types, side by side
-        // rather than one button that asks which. `toolbarExtra` is where
-        // RecordTable already puts a screen's own extra controls.
+        // No `onAdd`: a variety is created from the "זן חדש" row inside an
+        // open family, never from the toolbar. A variety cannot exist without
+        // a family — product_varieties.family_id is a NOT NULL foreign key,
+        // and saveProductInputSchema requires a uuid — so a toolbar "new
+        // product" had no family to name and papered over it by silently
+        // picking whichever family happened to sort first, leaving the user
+        // to correct it in a dropdown. With no families at all it produced a
+        // draft that could never be saved and rendered outside every group.
+        // Adding from inside a family states the family by construction.
+        //
+        // The cost, accepted: with every family collapsed (the state the
+        // screen opens in) there is no add control on screen until a family
+        // is opened. That matches the screen's own premise — the subtitle
+        // already says a family opens onto its varieties — and creating a
+        // FAMILY, which genuinely has no parent to sit inside, keeps its
+        // toolbar button below.
         toolbarExtra={
           <Button
             type="button"
@@ -1184,6 +1275,43 @@ export default function ProductsPage() {
         }
         grouping={{
           groups,
+          // The first row inside an opened family: adding a variety here
+          // carries the family with it, so the משפחה dropdown on the draft
+          // comes up already answered instead of asking the user to name a
+          // family they just pointed at.
+          renderAddRow: (group) => ({
+            kind: "cells",
+            actions: null,
+            cells: {
+              name: (
+                <button
+                  type="button"
+                  onClick={() => handleNewInFamily(group.id)}
+                  // One of these exists per open family, so the visible "זן
+                  // חדש" alone would name several buttons identically. The
+                  // family name is appended rather than substituted, so the
+                  // accessible name still starts with the text on screen.
+                  aria-label={`זן חדש ${familyById.get(group.id)?.name ?? ""}`.trim()}
+                  className="group/add flex items-center text-start"
+                >
+                  {/* The plus rides in the same gutter the family's chevron
+                      and photo use, so the label beside it lines up with
+                      every variety name in the column and the row reads as
+                      the first entry in the list rather than a banner over
+                      it. */}
+                  <span className={`flex ${NAME_GUTTER} shrink-0 items-center`}>
+                    <Icon
+                      name="plusCircle"
+                      className="h-4 w-4 text-ink-subtle transition-colors duration-150 group-hover/add:text-accent"
+                    />
+                  </span>
+                  <span className="text-sm font-medium text-ink-muted transition-colors duration-150 group-hover/add:text-accent">
+                    זן חדש
+                  </span>
+                </button>
+              ),
+            },
+          }),
           // The row being edited is grouped by the family it will be SAVED
           // to, not the one it currently belongs to — so both a draft row
           // and a variety being moved between families appear under the
@@ -1202,7 +1330,9 @@ export default function ProductsPage() {
         title="מחיקת מוצר"
       >
         <p className="mb-4 text-sm">
-          האם למחוק את המוצר &quot;{deleteTarget ? formatVarietyName(deleteTarget.name, deleteTarget.sizes) : ""}&quot;? פעולה זו אינה הפיכה.
+          האם למחוק את המוצר &quot;
+          {deleteTarget ? formatVarietyName(deleteTarget.name, deleteTarget.sizes) : ""}&quot;?
+          פעולה זו אינה הפיכה.
         </p>
         <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={() => setDeleteTargetId(null)}>

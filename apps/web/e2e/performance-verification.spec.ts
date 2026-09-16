@@ -40,7 +40,9 @@ test.describe("Performance verification — measured against the source's docume
     await runCleanup(cleanupFns);
   });
 
-  test("Issue 2 — switching between backoffice screens renders in under 1 second with no full navigation", async ({ page }) => {
+  test("Issue 2 — switching between backoffice screens renders in under 1 second with no full navigation", async ({
+    page,
+  }) => {
     const company = await createTestCompany();
     cleanupFns.push(() => deleteTestCompany(company.id));
     const admin = await createTestProfile({ companyId: company.id, role: "backoffice" });
@@ -55,31 +57,47 @@ test.describe("Performance verification — measured against the source's docume
     await page.evaluate(() => {
       (window as unknown as { __navMarker: number }).__navMarker = Date.now();
     });
-    const markerBefore = await page.evaluate(() => (window as unknown as { __navMarker: number }).__navMarker);
+    const markerBefore = await page.evaluate(
+      () => (window as unknown as { __navMarker: number }).__navMarker,
+    );
 
     const start = Date.now();
     await page.getByRole("link", { name: "מוצרים", exact: true }).click();
-    // `.first()`: the products screen renders this name twice by design (the
-    // button above the list, and the empty detail pane's call-to-action).
-    // Either one appearing proves the route rendered, which is all this
-    // timing assertion waits for.
-    await expect(page.getByRole("button", { name: "מוצר חדש" }).first()).toBeVisible();
+    // The screen's only unconditional toolbar button. A variety is added from
+    // inside an open family now, so there is no "מוצר חדש" button to wait on
+    // — and no add control at all until a family is expanded, which is state
+    // this timing assertion must not depend on. Creating a FAMILY has no
+    // parent to sit inside, so its button is always there, and it appearing
+    // proves the route rendered, which is all this waits for.
+    await expect(page.getByRole("button", { name: "משפחה חדשה" }).first()).toBeVisible();
     const elapsedMs = Date.now() - start;
 
-    const markerAfter = await page.evaluate(() => (window as unknown as { __navMarker: number }).__navMarker);
-    expect(markerAfter, "a full page navigation would have wiped this in-memory marker").toBe(markerBefore);
+    const markerAfter = await page.evaluate(
+      () => (window as unknown as { __navMarker: number }).__navMarker,
+    );
+    expect(markerAfter, "a full page navigation would have wiped this in-memory marker").toBe(
+      markerBefore,
+    );
 
     console.log(`[perf] backoffice route switch (shop -> products): ${elapsedMs}ms`);
     expect(elapsedMs).toBeLessThan(1000);
   });
 
-  test("Issue 3/5 — re-selecting a previously-viewed order row in customer history fires no new query", async ({ page }) => {
+  test("Issue 3/5 — re-selecting a previously-viewed order row in customer history fires no new query", async ({
+    page,
+  }) => {
     const grower = await createTestGrowerWithProduct();
     cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
 
-    const customerCompany = await createTestCompany(`לקוח בדיקה ${crypto.randomUUID()}`, "customer");
+    const customerCompany = await createTestCompany(
+      `לקוח בדיקה ${crypto.randomUUID()}`,
+      "customer",
+    );
     cleanupFns.push(() => deleteTestCompany(customerCompany.id));
-    const customerUser = await createTestProfile({ companyId: customerCompany.id, role: "customer" });
+    const customerUser = await createTestProfile({
+      companyId: customerCompany.id,
+      role: "customer",
+    });
     cleanupFns.push(() => deleteTestUser(customerUser.userId));
 
     const adminCompany = await createTestCompany();
@@ -91,16 +109,34 @@ test.describe("Performance verification — measured against the source's docume
     // submitted order for this customer — direct-inserted, since this
     // test only needs two distinct, already-populated history rows to
     // click between, not a real lifecycle walk.
-    const dayA = await createTestTradingDay({ initiatedByUserId: admin.userId, phase: "closed", tradeDate: "2026-07-01" });
+    const dayA = await createTestTradingDay({
+      initiatedByUserId: admin.userId,
+      phase: "closed",
+      tradeDate: "2026-07-01",
+    });
     cleanupFns.push(() => deleteTestTradingDay(dayA.id));
-    const dayB = await createTestTradingDay({ initiatedByUserId: admin.userId, phase: "closed", tradeDate: "2026-07-02" });
+    const dayB = await createTestTradingDay({
+      initiatedByUserId: admin.userId,
+      phase: "closed",
+      tradeDate: "2026-07-02",
+    });
     cleanupFns.push(() => deleteTestTradingDay(dayB.id));
 
-    const [orderA] = await db.insert(dailyOrders).values({ tradingDayId: dayA.id, customerCompanyId: customerCompany.id }).returning();
-    const [orderB] = await db.insert(dailyOrders).values({ tradingDayId: dayB.id, customerCompanyId: customerCompany.id }).returning();
+    const [orderA] = await db
+      .insert(dailyOrders)
+      .values({ tradingDayId: dayA.id, customerCompanyId: customerCompany.id })
+      .returning();
+    const [orderB] = await db
+      .insert(dailyOrders)
+      .values({ tradingDayId: dayB.id, customerCompanyId: customerCompany.id })
+      .returning();
     if (!orderA || !orderB) throw new Error("failed to create test orders");
-    await db.insert(dailyOrderProducts).values({ dailyOrderId: orderA.id, productVarietyId: grower.varietyId, palletsOrdered: "2" });
-    await db.insert(dailyOrderProducts).values({ dailyOrderId: orderB.id, productVarietyId: grower.varietyId, palletsOrdered: "3" });
+    await db
+      .insert(dailyOrderProducts)
+      .values({ dailyOrderId: orderA.id, productVarietyId: grower.varietyId, palletsOrdered: "2" });
+    await db
+      .insert(dailyOrderProducts)
+      .values({ dailyOrderId: orderB.id, productVarietyId: grower.varietyId, palletsOrdered: "3" });
 
     const lineRequestUrls: string[] = [];
     page.on("request", (request) => {
@@ -167,7 +203,9 @@ test.describe("Performance verification — measured against the source's docume
     expect(countAfterRevisitA).toBe(1);
   });
 
-  test("Issue 4 — submitting a customer order does not trigger a full page reload", async ({ page }) => {
+  test("Issue 4 — submitting a customer order does not trigger a full page reload", async ({
+    page,
+  }) => {
     const grower = await createTestGrowerWithProduct();
     cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
 
@@ -181,9 +219,15 @@ test.describe("Performance verification — measured against the source's docume
     // bootstrap only creates a daily_orders row for customers that
     // already exist at that moment (matching customer-order.spec.ts's
     // own established ordering).
-    const customerCompany = await createTestCompany(`לקוח בדיקה ${crypto.randomUUID()}`, "customer");
+    const customerCompany = await createTestCompany(
+      `לקוח בדיקה ${crypto.randomUUID()}`,
+      "customer",
+    );
     cleanupFns.push(() => deleteTestCompany(customerCompany.id));
-    const customerUser = await createTestProfile({ companyId: customerCompany.id, role: "customer" });
+    const customerUser = await createTestProfile({
+      companyId: customerCompany.id,
+      role: "customer",
+    });
     cleanupFns.push(() => deleteTestUser(customerUser.userId));
 
     const tradeDate = new Date().toISOString().slice(0, 10);
@@ -196,7 +240,12 @@ test.describe("Performance verification — measured against the source's docume
 
     // Give the grower's line real supply so the customer's order form has
     // something orderable to click.
-    const pickRow = await adminClient.from("daily_picks").select("id").eq("trading_day_id", dayId).eq("grower_company_id", grower.companyId).single();
+    const pickRow = await adminClient
+      .from("daily_picks")
+      .select("id")
+      .eq("trading_day_id", dayId)
+      .eq("grower_company_id", grower.companyId)
+      .single();
     await adminClient
       .from("daily_pick_products")
       .update({ pallets_picked: "10" })
@@ -212,7 +261,9 @@ test.describe("Performance verification — measured against the source's docume
     await page.evaluate(() => {
       (window as unknown as { __navMarker: number }).__navMarker = Date.now();
     });
-    const markerBefore = await page.evaluate(() => (window as unknown as { __navMarker: number }).__navMarker);
+    const markerBefore = await page.evaluate(
+      () => (window as unknown as { __navMarker: number }).__navMarker,
+    );
 
     // Rows render collapsed; expand this fixture's own product row before it
     // has a quantity control to set. No "ערוך" click in between — the shop is
@@ -236,10 +287,13 @@ test.describe("Performance verification — measured against the source's docume
     await expect(page.getByText("ההזמנה נשלחה.")).toBeVisible();
     const submitElapsedMs = Date.now() - submitStart;
 
-    const markerAfter = await page.evaluate(() => (window as unknown as { __navMarker: number }).__navMarker);
-    expect(markerAfter, "a full page reload (the source's ChangePage -> Current page) would have wiped this in-memory marker").toBe(
-      markerBefore,
+    const markerAfter = await page.evaluate(
+      () => (window as unknown as { __navMarker: number }).__navMarker,
     );
+    expect(
+      markerAfter,
+      "a full page reload (the source's ChangePage -> Current page) would have wiped this in-memory marker",
+    ).toBe(markerBefore);
 
     console.log(`[perf] customer order submit, click-to-confirmation-toast: ${submitElapsedMs}ms`);
     expect(submitElapsedMs).toBeLessThan(3000);

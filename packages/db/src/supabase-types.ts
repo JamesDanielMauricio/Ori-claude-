@@ -1328,6 +1328,7 @@ export type Database = {
         };
         Returns: {
           target: string;
+          is_group: boolean;
           message: string;
         }[];
       };

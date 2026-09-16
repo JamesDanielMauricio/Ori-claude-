@@ -188,6 +188,7 @@ describe("notifications module", () => {
     expect(error).toBeNull();
     expect(data).toHaveLength(1);
     expect(data![0]!.target).toBe("grp-123");
+    expect(data![0]!.is_group).toBe(true);
     expect(data![0]!.message).toContain(growerCompany.name);
     expect(data![0]!.message).toContain("בננה — צהובה");
     expect(data![0]!.message).toContain("2026-07-12");
@@ -236,6 +237,7 @@ describe("notifications module", () => {
     // Only the user with a phone on file is a real send target.
     expect(data).toHaveLength(1);
     expect(data![0]!.target).toBe("972501234567");
+    expect(data![0]!.is_group).toBe(false);
     expect(data![0]!.message).toContain("Dana hi");
   }, 30000);
 

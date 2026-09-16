@@ -121,6 +121,18 @@ function text(record: BubbleRecord, field: string): string | null {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
 }
 
+// Bubble's own "group id (whatsapp)" field stores the full Green API chat
+// id, e.g. "120363417140195112@g.us" — confirmed against every non-empty
+// value in the test-env export, not just assumed. whatsapp_group_id is
+// meant to be bare (packages/db/migrations/0053_resolve-outbox-target-kind.sql):
+// dispatch appends "@g.us"/"@c.us" itself now, so importing the suffix
+// verbatim would double it to "...@g.us@g.us" on every group send the
+// moment this script is re-run.
+function whatsappGroupId(record: BubbleRecord, field: string): string | null {
+  const value = text(record, field);
+  return value?.replace(/@g\.us$/, "") ?? null;
+}
+
 function numberValue(record: BubbleRecord, field: string): number | null {
   const value = record[field];
   return typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -460,7 +472,7 @@ function planReference(data: ExportData, report: Report): ReferencePlan {
       status,
       default_pickup_time: pickupTime ? israelTime(pickupTime) : null,
       can_see_product_prices: booleanValue(company, "Can see product prices"),
-      whatsapp_group_id: text(company, "group id (whatsapp)"),
+      whatsapp_group_id: whatsappGroupId(company, "group id (whatsapp)"),
       created_at: createdAt(company),
       updated_at: modifiedAt(company),
     });

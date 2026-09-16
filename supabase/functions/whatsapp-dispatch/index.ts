@@ -94,6 +94,7 @@ interface PendingOutboxRow {
 
 interface DispatchTarget {
   target: string;
+  is_group: boolean;
   message: string;
 }
 
@@ -147,18 +148,20 @@ function getGreenApiCredentials(env: "dev" | "live"): GreenApiCredentials {
   };
 }
 
-// Green API chat ids are `{phone}@c.us` for an individual and
-// `{id}@g.us` for a group. resolve_outbox_dispatch's `target` is either a
-// raw phone number (the 972-prefixed individual-dispatch batch) or
-// whatever string a company's whatsapp_group_id was set to — if that
-// already looks like a Green API id (contains "@"), it's passed through
-// unchanged rather than double-suffixed.
-function toChatId(target: string): string {
-  return target.includes("@") ? target : `${target}@c.us`;
+// Green API chat ids are `{phone}@c.us` for an individual and `{id}@g.us`
+// for a group. resolve_outbox_dispatch (migration 0053) tells us which
+// case we're in via is_group, rather than us guessing from the target
+// string's shape — a bare whatsapp_group_id (e.g. "120363012345678901")
+// and a bare phone number look identical otherwise, so a guess based on
+// "does it contain @" silently sent groups to @c.us the moment an admin
+// stopped typing the suffix into the backoffice field by hand.
+function toChatId(target: string, isGroup: boolean): string {
+  return `${target}@${isGroup ? "g" : "c"}.us`;
 }
 
 async function sendWhatsAppMessage(
   to: string,
+  isGroup: boolean,
   body: string,
   credentials: GreenApiCredentials,
 ): Promise<{ success: boolean; error?: string }> {
@@ -170,7 +173,7 @@ async function sendWhatsAppMessage(
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chatId: toChatId(to), message: body }),
+      body: JSON.stringify({ chatId: toChatId(to, isGroup), message: body }),
     });
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
@@ -293,8 +296,10 @@ Deno.serve(async (req) => {
         continue;
       }
 
+      // The dev override number is always an individual phone, never a group.
       const result = await sendWhatsAppMessage(
         settings.whatsapp_dev_override_phone,
+        false,
         previewMessage as string,
         credentials,
       );
@@ -339,12 +344,12 @@ Deno.serve(async (req) => {
     const resolvedTargets = (targets ?? []) as DispatchTarget[];
     const errors: string[] = [];
 
-    for (const { target, message } of resolvedTargets) {
+    for (const { target, is_group, message } of resolvedTargets) {
       if (alreadySent.has(target)) continue;
 
       // Reached only in live env (dev returns above before this point), so
       // this always sends to the real resolved recipient.
-      const result = await sendWhatsAppMessage(target, message, credentials);
+      const result = await sendWhatsAppMessage(target, is_group, message, credentials);
       if (!result.success) {
         errors.push(result.error ?? `send to ${target} failed`);
         continue;

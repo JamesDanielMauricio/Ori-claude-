@@ -45,7 +45,7 @@ test.describe("Backoffice — Transporters", () => {
 
     await page.goto("/backoffice/transporters");
 
-    const transporterName = `E2E Transporter ${randomUUID()}`;
+    const transporterName = `מוביל E2E ${randomUUID()}`;
     // The table's own toolbar add button (record-table.tsx's `onAdd`)
     // prepends a draft row, already in inline-edit mode — one button now,
     // so no `.first()` disambiguation needed.

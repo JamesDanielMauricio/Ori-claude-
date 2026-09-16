@@ -23,7 +23,7 @@ import { createServiceRoleClient } from "./supabase-clients";
 // Supabase's own internal tables.
 
 export async function createTestCompany(
-  name = `Test Company ${randomUUID()}`,
+  name = `חברת בדיקה ${randomUUID()}`,
   type: (typeof companies.$inferInsert)["type"] = "backoffice",
 ) {
   const [company] = await db.insert(companies).values({ name, type }).returning();
@@ -69,7 +69,7 @@ export async function createTestProfile(options: CreateTestProfileOptions): Prom
     userId: data.user.id,
     companyId: options.companyId,
     role: options.role,
-    displayName: options.displayName ?? "Test User",
+    displayName: options.displayName ?? "משתמש בדיקה",
     mustChangePassword: options.mustChangePassword ?? false,
     phoneNumber: options.phoneNumber,
   });

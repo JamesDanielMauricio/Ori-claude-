@@ -77,7 +77,7 @@ test.describe("Performance verification — measured against the source's docume
     const grower = await createTestGrowerWithProduct();
     cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
 
-    const customerCompany = await createTestCompany(`Test Customer ${crypto.randomUUID()}`, "customer");
+    const customerCompany = await createTestCompany(`לקוח בדיקה ${crypto.randomUUID()}`, "customer");
     cleanupFns.push(() => deleteTestCompany(customerCompany.id));
     const customerUser = await createTestProfile({ companyId: customerCompany.id, role: "customer" });
     cleanupFns.push(() => deleteTestUser(customerUser.userId));
@@ -181,7 +181,7 @@ test.describe("Performance verification — measured against the source's docume
     // bootstrap only creates a daily_orders row for customers that
     // already exist at that moment (matching customer-order.spec.ts's
     // own established ordering).
-    const customerCompany = await createTestCompany(`Test Customer ${crypto.randomUUID()}`, "customer");
+    const customerCompany = await createTestCompany(`לקוח בדיקה ${crypto.randomUUID()}`, "customer");
     cleanupFns.push(() => deleteTestCompany(customerCompany.id));
     const customerUser = await createTestProfile({ companyId: customerCompany.id, role: "customer" });
     cleanupFns.push(() => deleteTestUser(customerUser.userId));

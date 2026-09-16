@@ -68,7 +68,7 @@ test.describe("Backoffice — Products", () => {
 
     await signInToProducts(page, admin.email, admin.password);
 
-    const productName = `E2E Variety ${randomUUID()}`;
+    const productName = `זן E2E ${randomUUID()}`;
     // The table's own toolbar add button (record-table.tsx's `onAdd`)
     // prepends a draft row, already in inline-edit mode — one button now,
     // not the old list-button-plus-empty-pane-button pair, so no
@@ -144,7 +144,7 @@ test.describe("Backoffice — Products", () => {
     await signInToProducts(page, admin.email, admin.password);
 
     // --- Create the family through its draft header row.
-    const familyName = `E2E Family ${randomUUID()}`;
+    const familyName = `משפחת E2E ${randomUUID()}`;
     await page.getByRole("button", { name: "משפחה חדשה" }).click();
     await page.getByLabel("שם המשפחה").fill(familyName);
     await page.getByLabel("קטגוריית המשפחה").fill("ירק");
@@ -165,7 +165,7 @@ test.describe("Backoffice — Products", () => {
 
     // --- Put a variety in it, which is what the delete has to refuse over.
     await page.getByPlaceholder("חיפוש מוצר, זן או משפחה").fill("");
-    const varietyName = `E2E Variety ${randomUUID()}`;
+    const varietyName = `זן E2E ${randomUUID()}`;
     await page.getByRole("button", { name: "מוצר חדש" }).click();
     await chooseOption(
       editingRow(page).getByRole("combobox", { name: "משפחה", exact: true }),

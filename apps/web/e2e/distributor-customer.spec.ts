@@ -51,7 +51,7 @@ test.describe("Backoffice — Customer Order Status", () => {
     // already exist at that moment (same ordering requirement
     // performance-verification.spec.ts's Issue 4 test already established).
     const customerCompany = await createTestCompany(
-      `Test Customer ${crypto.randomUUID()}`,
+      `לקוח בדיקה ${crypto.randomUUID()}`,
       "customer",
     );
     cleanupFns.push(() => deleteTestCompany(customerCompany.id));
@@ -157,7 +157,7 @@ test.describe("Backoffice — Customer Order Status", () => {
     const adminClient = await signInTestUser(admin.email, admin.password);
 
     const customerCompany = await createTestCompany(
-      `Test Customer ${crypto.randomUUID()}`,
+      `לקוח בדיקה ${crypto.randomUUID()}`,
       "customer",
     );
     cleanupFns.push(() => deleteTestCompany(customerCompany.id));
@@ -213,9 +213,9 @@ test.describe("Backoffice — Customer Order Status", () => {
     cleanupFns.push(() => deleteTestUser(admin.userId));
     const adminClient = await signInTestUser(admin.email, admin.password);
 
-    const customerA = await createTestCompany(`Test Customer A ${crypto.randomUUID()}`, "customer");
+    const customerA = await createTestCompany(`לקוח בדיקה א ${crypto.randomUUID()}`, "customer");
     cleanupFns.push(() => deleteTestCompany(customerA.id));
-    const customerB = await createTestCompany(`Test Customer B ${crypto.randomUUID()}`, "customer");
+    const customerB = await createTestCompany(`לקוח בדיקה ב ${crypto.randomUUID()}`, "customer");
     cleanupFns.push(() => deleteTestCompany(customerB.id));
 
     const tradeDate = new Date().toISOString().slice(0, 10);

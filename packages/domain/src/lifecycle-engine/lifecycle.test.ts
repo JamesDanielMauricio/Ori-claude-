@@ -78,7 +78,7 @@ describe("lifecycle engine", () => {
     cleanupFns.push(() => deleteTestGrowerWithProduct(submittingGrower));
     const noShowGrower = await createTestGrowerWithProduct({ defaultPickupTime: "09:45" });
     cleanupFns.push(() => deleteTestGrowerWithProduct(noShowGrower));
-    const customer = await createTestCompany(`Test Customer ${randomUUID()}`, "customer");
+    const customer = await createTestCompany(`לקוח בדיקה ${randomUUID()}`, "customer");
     cleanupFns.push(() => deleteTestCompany(customer.id));
 
     const backoffice = await signedInBackoffice();
@@ -471,7 +471,7 @@ describe("lifecycle engine", () => {
 
     const grower = await createTestGrowerWithProduct();
     cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
-    const customer = await createTestCompany(`Test Customer ${randomUUID()}`, "customer");
+    const customer = await createTestCompany(`לקוח בדיקה ${randomUUID()}`, "customer");
     cleanupFns.push(() => deleteTestCompany(customer.id));
 
     // Created directly at "shop_closed" (not via initiate_business_day)

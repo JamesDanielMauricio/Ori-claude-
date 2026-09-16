@@ -29,7 +29,7 @@ test.describe("Alerts — in-app bell", () => {
   });
 
   test("shows an unread badge, marks an alert read and navigates to its deep link on click", async ({ page }) => {
-    const customerCompany = await createTestCompany(`Test Customer ${crypto.randomUUID()}`, "customer");
+    const customerCompany = await createTestCompany(`לקוח בדיקה ${crypto.randomUUID()}`, "customer");
     cleanupFns.push(() => deleteTestCompany(customerCompany.id));
     const customerUser = await createTestProfile({ companyId: customerCompany.id, role: "customer" });
     cleanupFns.push(() => deleteTestUser(customerUser.userId));

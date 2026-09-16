@@ -66,7 +66,7 @@ export async function createTestGrowerWithProduct(
   const [company] = await db
     .insert(companies)
     .values({
-      name: `Test Grower ${randomUUID()}`,
+      name: `מגדל בדיקה ${randomUUID()}`,
       type: "grower",
       ...(options.defaultPickupTime === undefined ? {} : { defaultPickupTime: options.defaultPickupTime }),
     })
@@ -75,7 +75,7 @@ export async function createTestGrowerWithProduct(
 
   const [family] = await db
     .insert(productFamilies)
-    .values({ name: `Test Family ${randomUUID()}` })
+    .values({ name: `משפחת בדיקה ${randomUUID()}` })
     .returning();
   if (!family) throw new Error("failed to create test product family");
 
@@ -83,7 +83,7 @@ export async function createTestGrowerWithProduct(
     .insert(productVarieties)
     .values({
       familyId: family.id,
-      name: `Test Variety ${randomUUID()}`,
+      name: `זן בדיקה ${randomUUID()}`,
       ...(options.price === undefined ? {} : { price: options.price.toString() }),
     })
     .returning();

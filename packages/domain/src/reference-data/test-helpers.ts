@@ -10,19 +10,19 @@ import { eq } from "drizzle-orm";
 // (createTestCompany, createTestProfile, signInTestUser, runCleanup) live
 // there already and are reused directly rather than duplicated here.
 
-export async function createTestGrowerCompany(name = `Test Grower ${randomUUID()}`) {
+export async function createTestGrowerCompany(name = `מגדל בדיקה ${randomUUID()}`) {
   const [company] = await db.insert(companies).values({ name, type: "grower" }).returning();
   if (!company) throw new Error("failed to create test grower company");
   return company;
 }
 
-export async function createTestCustomerCompany(name = `Test Customer ${randomUUID()}`) {
+export async function createTestCustomerCompany(name = `לקוח בדיקה ${randomUUID()}`) {
   const [company] = await db.insert(companies).values({ name, type: "customer" }).returning();
   if (!company) throw new Error("failed to create test customer company");
   return company;
 }
 
-export async function createTestTransporterCompany(name = `Test Transporter ${randomUUID()}`) {
+export async function createTestTransporterCompany(name = `מוביל בדיקה ${randomUUID()}`) {
   const [company] = await db.insert(companies).values({ name, type: "transporter" }).returning();
   if (!company) throw new Error("failed to create test transporter company");
   return company;
@@ -32,7 +32,7 @@ export async function deleteTestCompany(companyId: string): Promise<void> {
   await db.delete(companies).where(eq(companies.id, companyId));
 }
 
-export async function createTestProductFamily(name = `Test Family ${randomUUID()}`) {
+export async function createTestProductFamily(name = `משפחת בדיקה ${randomUUID()}`) {
   const [family] = await db.insert(productFamilies).values({ name }).returning();
   if (!family) throw new Error("failed to create test product family");
   return family;
@@ -53,7 +53,7 @@ export async function createTestProductVariety(options: CreateTestProductVariety
     .insert(productVarieties)
     .values({
       familyId: options.familyId,
-      name: options.name ?? `Test Variety ${randomUUID()}`,
+      name: options.name ?? `זן בדיקה ${randomUUID()}`,
       version: options.version ?? 1,
     })
     .returning();

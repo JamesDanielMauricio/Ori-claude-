@@ -23,7 +23,7 @@ export async function createTestAlertType(options: CreateTestAlertTypeOptions = 
   const [row] = await db
     .insert(alertTypes)
     .values({
-      mainText: options.mainText ?? `Test Alert Type ${randomUUID()}`,
+      mainText: options.mainText ?? `סוג התראה לבדיקה ${randomUUID()}`,
       secondLineOfText: options.secondLineOfText ?? null,
       sendAsWhatsappDefault: options.sendAsWhatsappDefault ?? false,
       sendAsNotificationDefault: options.sendAsNotificationDefault ?? true,
@@ -87,7 +87,7 @@ export async function createTestNotificationTemplate(options: CreateTestNotifica
     .insert(notificationTemplates)
     .values({
       templateKey: options.templateKey ?? `test_template_${randomUUID()}`,
-      title: options.title ?? "Test Title",
+      title: options.title ?? "כותרת בדיקה",
       content: options.content ?? "%FIRST_NAME% - %ORDER_DETAILS% - %CURRENT_OPEN_BUSINESS_DAY%%NL%bye",
       link: options.link ?? null,
     })

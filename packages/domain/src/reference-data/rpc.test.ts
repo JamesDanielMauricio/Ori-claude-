@@ -56,7 +56,7 @@ describe("reference-data save functions", () => {
       toSaveProductRpcArgs({
         id: product.id,
         familyId: family.id,
-        name: "Written by first writer",
+        name: "נכתב על ידי הכותב הראשון",
         sizes: null,
         packType: null,
         price: null,
@@ -72,7 +72,7 @@ describe("reference-data save functions", () => {
       }),
     );
     expect(firstWriter.error).toBeNull();
-    expect(firstWriter.data).toMatchObject({ name: "Written by first writer", version: 2 });
+    expect(firstWriter.data).toMatchObject({ name: "נכתב על ידי הכותב הראשון", version: 2 });
 
     // Second writer read the row before the first writer's save landed —
     // still holds the now-stale version 1.
@@ -81,7 +81,7 @@ describe("reference-data save functions", () => {
       toSaveProductRpcArgs({
         id: product.id,
         familyId: family.id,
-        name: "Written by second writer",
+        name: "נכתב על ידי הכותב השני",
         sizes: null,
         packType: null,
         price: null,
@@ -106,12 +106,12 @@ describe("reference-data save functions", () => {
       .select("name, version")
       .eq("id", product.id)
       .single();
-    expect(current).toMatchObject({ name: "Written by first writer", version: 2 });
+    expect(current).toMatchObject({ name: "נכתב על ידי הכותב הראשון", version: 2 });
   });
 
   it("save_grower: a save that fails partway leaves no partial state behind", async () => {
     const client = await signedInBackofficeClient();
-    const growerName = `Partial-failure probe ${randomUUID()}`;
+    const growerName = `בדיקת כשל חלקי ${randomUUID()}`;
 
     // A product variety id that doesn't exist violates grower_products'
     // foreign key — this must fail the *whole* call, including the
@@ -145,7 +145,7 @@ describe("reference-data save functions", () => {
     cleanupFns.push(() => deleteTestProductVariety(product.id));
 
     const client = await signedInBackofficeClient();
-    const growerName = `Happy-path grower ${randomUUID()}`;
+    const growerName = `מגדל תקין ${randomUUID()}`;
 
     const result = await client.rpc(
       "save_grower",
@@ -173,7 +173,7 @@ describe("reference-data save functions", () => {
 
   it("save_grower: assigns a transporter (id 8's cc target), and rejects a non-transporter company id", async () => {
     const client = await signedInBackofficeClient();
-    const transporter = await createTestCompany(`Test Transporter ${randomUUID()}`, "transporter");
+    const transporter = await createTestCompany(`מוביל בדיקה ${randomUUID()}`, "transporter");
     cleanupFns.push(() => deleteTestCompany(transporter.id));
     const growerName = `Transporter-assignment grower ${randomUUID()}`;
 

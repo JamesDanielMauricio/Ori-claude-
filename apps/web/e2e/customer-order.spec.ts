@@ -74,7 +74,7 @@ test.describe("Customer — order + history", () => {
     cleanupFns.push(() => deleteTestProductVariety(depletedVariety.id));
     await db.insert(growerProducts).values({ companyId: grower.companyId, productVarietyId: depletedVariety.id });
 
-    const customerCompany = await createTestCompany("Test Customer", "customer");
+    const customerCompany = await createTestCompany("לקוח בדיקה", "customer");
     cleanupFns.push(() => deleteTestCompany(customerCompany.id));
     const customerUser = await createTestProfile({ companyId: customerCompany.id, role: "customer" });
     cleanupFns.push(() => deleteTestUser(customerUser.userId));

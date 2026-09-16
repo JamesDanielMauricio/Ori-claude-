@@ -159,7 +159,7 @@ describe("grower picking module", () => {
     const grower = await createTestGrowerWithProduct();
     cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
     const { day, arrangement } = await createClosedTestDay(adminId);
-    const customer = await createTestCompany("Test Customer", "customer");
+    const customer = await createTestCompany("לקוח בדיקה", "customer");
     cleanupFns.push(() => deleteTestCompany(customer.id));
 
     const pickedProduct = await addGrowerProduct(grower.companyId);
@@ -243,7 +243,7 @@ describe("grower picking module", () => {
     const grower = await createTestGrowerWithProduct();
     cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
     const { day, arrangement } = await createClosedTestDay(adminId);
-    const customer = await createTestCompany("Test Customer", "customer");
+    const customer = await createTestCompany("לקוח בדיקה", "customer");
     cleanupFns.push(() => deleteTestCompany(customer.id));
     // See the sibling "pruning" test above for why this must be pushed
     // after the customer.
@@ -349,7 +349,7 @@ describe("grower picking module", () => {
       toUpdatePickProductPalletsRpcArgs({ dailyPickProductId: line1!.id, palletsPicked: 10 }),
     );
 
-    const customer = await createTestCompany("Test Customer", "customer");
+    const customer = await createTestCompany("לקוח בדיקה", "customer");
     cleanupFns.push(() => deleteTestCompany(customer.id));
 
     const orderLine = await createTestOrderProductLine(day1.id, customer.id, grower.varietyId, 5);
@@ -510,7 +510,7 @@ describe("grower picking module", () => {
     cleanupFns.push(() => deleteTestProductVariety(secondProduct));
 
     const { day, arrangement } = await createClosedTestDay(adminId);
-    const customer = await createTestCompany("Test Customer", "customer");
+    const customer = await createTestCompany("לקוח בדיקה", "customer");
     cleanupFns.push(() => deleteTestCompany(customer.id));
     // Pushed after every fixture the day's cascade could collide with — see
     // createClosedTestDay's comment on LIFO ordering.
@@ -606,7 +606,7 @@ describe("grower picking module", () => {
     const grower = await createTestGrowerWithProduct();
     cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
     const { day, arrangement } = await createClosedTestDay(adminId);
-    const customer = await createTestCompany("Test Customer", "customer");
+    const customer = await createTestCompany("לקוח בדיקה", "customer");
     cleanupFns.push(() => deleteTestCompany(customer.id));
     cleanupFns.push(() => deleteTestTradingDay(day.id));
 

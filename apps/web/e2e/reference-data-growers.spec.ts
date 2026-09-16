@@ -47,9 +47,9 @@ test.describe("Backoffice — Growers", () => {
   test("creates a grower, then edits its name, in-season product selection, and assigned transporter", async ({ page }) => {
     const family = await createTestProductFamily();
     cleanupFns.push(() => deleteTestProductFamily(family.id));
-    const product = await createTestProductVariety({ familyId: family.id, name: `E2E Variety ${randomUUID()}` });
+    const product = await createTestProductVariety({ familyId: family.id, name: `זן E2E ${randomUUID()}` });
     cleanupFns.push(() => deleteTestProductVariety(product.id));
-    const transporter = await createTestCompany(`E2E Transporter ${randomUUID()}`, "transporter");
+    const transporter = await createTestCompany(`מוביל E2E ${randomUUID()}`, "transporter");
     cleanupFns.push(() => deleteTestCompany(transporter.id));
 
     const company = await createTestCompany();
@@ -65,7 +65,7 @@ test.describe("Backoffice — Growers", () => {
 
     await page.goto("/backoffice/growers");
 
-    const growerName = `E2E Grower ${randomUUID()}`;
+    const growerName = `מגדל E2E ${randomUUID()}`;
     // The table's own toolbar add button (record-table.tsx's `onAdd`)
     // prepends a draft row, already in inline-edit mode — no dialog. Only
     // one such button now (unlike the old list-plus-empty-pane layout,

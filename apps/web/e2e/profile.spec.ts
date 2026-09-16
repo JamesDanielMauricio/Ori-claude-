@@ -12,7 +12,7 @@ test.describe("Profile — self-service edit", () => {
   });
 
   test("a user edits their display name and phone, and both persist across a reload", async ({ page }) => {
-    const company = await createTestCompany(`Test Customer ${crypto.randomUUID()}`, "customer");
+    const company = await createTestCompany(`לקוח בדיקה ${crypto.randomUUID()}`, "customer");
     cleanupFns.push(() => deleteTestCompany(company.id));
     const user = await createTestProfile({ companyId: company.id, role: "customer" });
     cleanupFns.push(() => deleteTestUser(user.userId));
@@ -39,7 +39,7 @@ test.describe("Profile — self-service edit", () => {
   });
 
   test("editing then cancelling discards the change — the original value survives a reload", async ({ page }) => {
-    const company = await createTestCompany(`Test Customer ${crypto.randomUUID()}`, "customer");
+    const company = await createTestCompany(`לקוח בדיקה ${crypto.randomUUID()}`, "customer");
     cleanupFns.push(() => deleteTestCompany(company.id));
     const user = await createTestProfile({ companyId: company.id, role: "customer", displayName: "Original Name" });
     cleanupFns.push(() => deleteTestUser(user.userId));

@@ -80,7 +80,7 @@ test.describe("Backoffice — Users", () => {
     // Create: the bulk-import flow.
     await page.goto("/backoffice/users/import");
     const newUserEmail = `e2e-${randomUUID()}@example.test`;
-    const newUserDisplayName = `E2E User ${randomUUID()}`;
+    const newUserDisplayName = `משתמש E2E ${randomUUID()}`;
     await page.getByLabel("אימייל").fill(newUserEmail);
     await page.getByLabel("שם תצוגה").fill(newUserDisplayName);
     await chooseOption(page.getByRole("combobox", { name: "תפקיד", exact: true }), "מגדל");

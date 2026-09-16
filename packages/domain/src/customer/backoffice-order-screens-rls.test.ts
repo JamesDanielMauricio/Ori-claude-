@@ -56,9 +56,9 @@ describe("backoffice order/arrangement screens Row Level Security", () => {
   });
 
   it("companies: a grower reading the customer list (as distributor-customer's list panel does) sees only their own row, not other customers'", async () => {
-    const ownCompany = await createTestCompany(`Test Grower ${randomUUID()}`, "grower");
+    const ownCompany = await createTestCompany(`מגדל בדיקה ${randomUUID()}`, "grower");
     cleanupFns.push(() => deleteTestCompany(ownCompany.id));
-    const customerCompany = await createTestCompany(`Test Customer ${randomUUID()}`, "customer");
+    const customerCompany = await createTestCompany(`לקוח בדיקה ${randomUUID()}`, "customer");
     cleanupFns.push(() => deleteTestCompany(customerCompany.id));
 
     const grower = await createTestProfile({ companyId: ownCompany.id, role: "grower" });
@@ -77,7 +77,7 @@ describe("backoffice order/arrangement screens Row Level Security", () => {
   it("daily_orders and daily_order_products: a grower (non-owning, non-backoffice caller) reads nothing for a customer's order; backoffice reads everything", async () => {
     const grower = await createTestGrowerWithProduct();
     cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
-    const customerCompany = await createTestCompany(`Test Customer ${randomUUID()}`, "customer");
+    const customerCompany = await createTestCompany(`לקוח בדיקה ${randomUUID()}`, "customer");
     cleanupFns.push(() => deleteTestCompany(customerCompany.id));
 
     const tradeDate = new Date().toISOString().slice(0, 10);
@@ -116,7 +116,7 @@ describe("backoffice order/arrangement screens Row Level Security", () => {
   it("arrangement_records: backoffice-only — even the owning customer can't read their own arrangement record directly", async () => {
     const grower = await createTestGrowerWithProduct();
     cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
-    const customerCompany = await createTestCompany(`Test Customer ${randomUUID()}`, "customer");
+    const customerCompany = await createTestCompany(`לקוח בדיקה ${randomUUID()}`, "customer");
     cleanupFns.push(() => deleteTestCompany(customerCompany.id));
 
     const tradeDate = new Date().toISOString().slice(0, 10);

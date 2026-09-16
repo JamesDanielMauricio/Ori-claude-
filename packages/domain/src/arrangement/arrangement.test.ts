@@ -72,7 +72,7 @@ describe("arrangement module", () => {
   async function setUpDayWithSupplyAndDemand(palletsPicked: number, palletsOrdered: number) {
     const grower = await createTestGrowerWithProduct();
     cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
-    const customer = await createTestCompany(`Test Customer ${crypto.randomUUID()}`, "customer");
+    const customer = await createTestCompany(`לקוח בדיקה ${crypto.randomUUID()}`, "customer");
     cleanupFns.push(() => deleteTestCompany(customer.id));
 
     const tradeDate = new Date().toISOString().slice(0, 10);
@@ -172,9 +172,9 @@ describe("arrangement module", () => {
   it("create_arrangement_record rejects a genuinely concurrent double-call that would jointly over-allocate the same pick line — two real rpc() calls racing via Promise.all", async () => {
     const grower = await createTestGrowerWithProduct();
     cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
-    const customerA = await createTestCompany(`Test Customer ${crypto.randomUUID()}`, "customer");
+    const customerA = await createTestCompany(`לקוח בדיקה ${crypto.randomUUID()}`, "customer");
     cleanupFns.push(() => deleteTestCompany(customerA.id));
-    const customerB = await createTestCompany(`Test Customer ${crypto.randomUUID()}`, "customer");
+    const customerB = await createTestCompany(`לקוח בדיקה ${crypto.randomUUID()}`, "customer");
     cleanupFns.push(() => deleteTestCompany(customerB.id));
 
     const tradeDate = new Date().toISOString().slice(0, 10);
@@ -488,7 +488,7 @@ describe("arrangement module", () => {
       .where(eq(productVarieties.id, grower.varietyId));
 
     const transporter = await createTestCompany(
-      `Test Transporter ${crypto.randomUUID()}`,
+      `מוביל בדיקה ${crypto.randomUUID()}`,
       "transporter",
     );
     // Pushed after setUpDayWithSupplyAndDemand's own registrations, so

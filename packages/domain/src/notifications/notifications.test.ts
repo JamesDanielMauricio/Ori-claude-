@@ -71,13 +71,13 @@ describe("notifications module", () => {
     const alertType = await createTestAlertType();
     cleanupFns.push(() => deleteTestAlertType(alertType.id));
 
-    const companyA = await createTestCompany(`Test Customer ${crypto.randomUUID()}`, "customer");
+    const companyA = await createTestCompany(`לקוח בדיקה ${crypto.randomUUID()}`, "customer");
     cleanupFns.push(() => deleteTestCompany(companyA.id));
     const userA = await createTestProfile({ companyId: companyA.id, role: "customer" });
     cleanupFns.push(() => deleteTestUser(userA.userId));
     const clientA = await signInTestUser(userA.email, userA.password);
 
-    const companyB = await createTestCompany(`Test Customer ${crypto.randomUUID()}`, "customer");
+    const companyB = await createTestCompany(`לקוח בדיקה ${crypto.randomUUID()}`, "customer");
     cleanupFns.push(() => deleteTestCompany(companyB.id));
     const userB = await createTestProfile({ companyId: companyB.id, role: "customer" });
     cleanupFns.push(() => deleteTestUser(userB.userId));
@@ -111,7 +111,7 @@ describe("notifications module", () => {
     const alertType = await createTestAlertType({ sendAsWhatsappDefault: true, sendAsNotificationDefault: false });
     cleanupFns.push(() => deleteTestAlertType(alertType.id));
 
-    const customerCompany = await createTestCompany(`Test Customer ${crypto.randomUUID()}`, "customer");
+    const customerCompany = await createTestCompany(`לקוח בדיקה ${crypto.randomUUID()}`, "customer");
     cleanupFns.push(() => deleteTestCompany(customerCompany.id));
     const customerUser = await createTestProfile({ companyId: customerCompany.id, role: "customer" });
     cleanupFns.push(() => deleteTestUser(customerUser.userId));
@@ -164,7 +164,7 @@ describe("notifications module", () => {
     });
     cleanupFns.push(() => deleteTestNotificationTemplate(template.id));
 
-    const growerCompany = await createTestCompany(`Test Grower ${crypto.randomUUID()}`, "grower");
+    const growerCompany = await createTestCompany(`מגדל בדיקה ${crypto.randomUUID()}`, "grower");
     cleanupFns.push(() => deleteTestCompany(growerCompany.id));
     await db.update(companies).set({ whatsappGroupId: "grp-123" }).where(eq(companies.id, growerCompany.id));
 
@@ -200,7 +200,7 @@ describe("notifications module", () => {
     });
     cleanupFns.push(() => deleteTestNotificationTemplate(template.id));
 
-    const customerCompany = await createTestCompany(`Test Customer ${crypto.randomUUID()}`, "customer");
+    const customerCompany = await createTestCompany(`לקוח בדיקה ${crypto.randomUUID()}`, "customer");
     cleanupFns.push(() => deleteTestCompany(customerCompany.id));
 
     const withPhone = await createTestProfile({
@@ -250,7 +250,7 @@ describe("notifications module", () => {
     });
     cleanupFns.push(() => deleteTestNotificationTemplate(closeArrangementTemplate.id));
 
-    const company = await createTestCompany(`Test Customer ${crypto.randomUUID()}`, "customer");
+    const company = await createTestCompany(`לקוח בדיקה ${crypto.randomUUID()}`, "customer");
     cleanupFns.push(() => deleteTestCompany(company.id));
     await db.update(companies).set({ whatsappGroupId: "grp-toggle-test" }).where(eq(companies.id, company.id));
 
@@ -313,7 +313,7 @@ describe("notifications module", () => {
     const template = await createTestNotificationTemplate({ content: "%FIRST_NAME% - %ORDER_DETAILS%" });
     cleanupFns.push(() => deleteTestNotificationTemplate(template.id));
 
-    const company = await createTestCompany(`Test Customer ${crypto.randomUUID()}`, "customer");
+    const company = await createTestCompany(`לקוח בדיקה ${crypto.randomUUID()}`, "customer");
     cleanupFns.push(() => deleteTestCompany(company.id));
     await db.update(companies).set({ whatsappGroupId: "grp-fail-test" }).where(eq(companies.id, company.id));
 
@@ -375,7 +375,7 @@ describe("notifications module", () => {
     cleanupFns.push(() => deleteTestNotificationTemplate(template.id));
 
     // No whatsapp_group_id, so dispatch falls back to per-user messaging.
-    const company = await createTestCompany(`Test Customer ${crypto.randomUUID()}`, "customer");
+    const company = await createTestCompany(`לקוח בדיקה ${crypto.randomUUID()}`, "customer");
     cleanupFns.push(() => deleteTestCompany(company.id));
 
     // resolve_outbox_dispatch builds the target as '972' + the number with a

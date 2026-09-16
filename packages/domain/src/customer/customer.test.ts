@@ -114,7 +114,7 @@ describe("customer ordering module", () => {
   }
 
   async function createTestCustomer(tradingDayId: string) {
-    const company = await createTestCompany(`Test Customer ${randomUUID()}`, "customer");
+    const company = await createTestCompany(`לקוח בדיקה ${randomUUID()}`, "customer");
     cleanupFns.push(() => deleteTestCompany(company.id));
     await createTestDailyOrder({ tradingDayId, customerCompanyId: company.id });
     return { companyId: company.id };
@@ -301,7 +301,7 @@ describe("customer ordering module", () => {
     expect(outside.error).not.toBeNull();
     expect(outside.error?.code).toBe(CUSTOMER_ERROR_CODES.INVALID_INPUT);
 
-    const growerCompany = await createTestCompany(`Test Grower Caller ${randomUUID()}`, "grower");
+    const growerCompany = await createTestCompany(`מגדל קורא לבדיקה ${randomUUID()}`, "grower");
     cleanupFns.push(() => deleteTestCompany(growerCompany.id));
     const growerUser = await createTestProfile({ companyId: growerCompany.id, role: "grower" });
     cleanupFns.push(() => deleteTestUser(growerUser.userId));

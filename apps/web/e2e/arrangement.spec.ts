@@ -88,7 +88,7 @@ test.describe("Backoffice — arrangement workspace", () => {
     cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
     // The board addresses growers by name — see selectGrowerProduct.
     const growerName = grower.companyName;
-    const customerCompany = await createTestCompany("Test Customer", "customer");
+    const customerCompany = await createTestCompany("לקוח בדיקה", "customer");
     cleanupFns.push(() => deleteTestCompany(customerCompany.id));
     // Created BEFORE open_shop, which is what bootstraps a daily_orders
     // header per active customer. This one never orders anything: they are
@@ -233,18 +233,18 @@ test.describe("Backoffice — arrangement workspace", () => {
     // --- ✓ / ✎ on a customer who ordered the selected product ---
     // A row with a record already written starts idle: pencil showing, box
     // locked. Pressing the pencil is what opens it for editing.
-    const arrangeInput = page.getByLabel("כמות לסידור עבור Test Customer");
+    const arrangeInput = page.getByLabel("כמות לסידור עבור לקוח בדיקה");
     await expect(arrangeInput).toHaveValue("5");
     await expect(arrangeInput).toBeDisabled();
-    await page.getByRole("button", { name: "ערוך סידור עבור Test Customer" }).click();
+    await page.getByRole("button", { name: "ערוך סידור עבור לקוח בדיקה" }).click();
     await expect(arrangeInput).toBeEnabled();
 
     await arrangeInput.fill("4");
-    await page.getByRole("button", { name: "שמור סידור עבור Test Customer" }).click();
+    await page.getByRole("button", { name: "שמור סידור עבור לקוח בדיקה" }).click();
     await expect(page.getByText("הסידור נשמר.")).toBeVisible();
     await expect(page.getByRole("group", { name: "חולק" })).toContainText("4");
     // Saved rows go back to idle.
-    await expect(page.getByRole("button", { name: "ערוך סידור עבור Test Customer" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "ערוך סידור עבור לקוח בדיקה" })).toBeVisible();
 
     // The price must survive a quantity-only press. arrange_to_customer
     // COALESCEs price onto the existing record rather than assigning it, so
@@ -254,11 +254,11 @@ test.describe("Backoffice — arrangement workspace", () => {
     await expect(page.getByLabel("כמות משטחים", { exact: true })).toHaveValue("4");
     await expect(recordPrice).toHaveValue("12.5");
 
-    // A refused quantity must not be left sitting in the box. Test Customer
+    // A refused quantity must not be left sitting in the box. לקוח בדיקה
     // ordered 6, so 99 over-allocates and the RPC raises P0009; the row has
     // to put the stored value back, because a rejected write leaves that
     // value unchanged and so the re-seed-on-server-change guard never fires.
-    await page.getByRole("button", { name: "ערוך סידור עבור Test Customer" }).click();
+    await page.getByRole("button", { name: "ערוך סידור עבור לקוח בדיקה" }).click();
     await arrangeInput.fill("99");
     await arrangeInput.press("Enter");
     await expect(page.getByText(/חורגת ממה שנקטף/)).toBeVisible();
@@ -305,8 +305,8 @@ test.describe("Backoffice — arrangement workspace", () => {
     await page.locator("dialog[open]").getByRole("button", { name: "סגור" }).click();
     await expect(page.locator("dialog[open]")).toHaveCount(0);
 
-    await page.getByRole("button", { name: "ערוך את הזמנת Test Customer" }).click();
-    await expect(page.locator("dialog[open]")).toContainText("הזמנה — Test Customer");
+    await page.getByRole("button", { name: "ערוך את הזמנת לקוח בדיקה" }).click();
+    await expect(page.locator("dialog[open]")).toContainText("הזמנה — לקוח בדיקה");
     await expect(page).toHaveURL(/\/backoffice\/arrangement$/);
     const orderDialog = page.locator("dialog[open]");
     await expect(orderDialog.getByRole("button", { name: "ערוך", exact: true })).toHaveCount(0);

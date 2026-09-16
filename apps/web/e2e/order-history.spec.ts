@@ -33,7 +33,7 @@ test.describe("Backoffice — Order History", () => {
   test("a distributor picks a known date and sees ordered vs. arranged pallets for a customer's line", async ({ page }) => {
     const grower = await createTestGrowerWithProduct();
     cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
-    const customerCompany = await createTestCompany(`Test Customer ${crypto.randomUUID()}`, "customer");
+    const customerCompany = await createTestCompany(`לקוח בדיקה ${crypto.randomUUID()}`, "customer");
     cleanupFns.push(() => deleteTestCompany(customerCompany.id));
 
     const adminCompany = await createTestCompany();

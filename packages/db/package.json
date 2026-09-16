@@ -17,7 +17,6 @@
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
     "db:generate-types": "supabase gen types typescript --local > src/supabase-types.ts",
-    "migrate:from-bubble": "tsx scripts/migrate-from-bubble.ts",
     "bubble:export": "tsx scripts/bubble-export.ts",
     "import:from-bubble": "tsx scripts/import-from-bubble.ts"
   },

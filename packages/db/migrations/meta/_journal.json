@@ -379,6 +379,13 @@
       "when": 1789308000000,
       "tag": "0053_resolve-outbox-target-kind",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1789311600000,
+      "tag": "0054_resolve-outbox-dispatch-security-note",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,22 @@
+-- Documentation only: running this changes nothing in the database.
+--
+-- 0053 dropped and recreated resolve_outbox_dispatch to add is_group, and
+-- the recreated definition lost the explanation 0024 kept above its
+-- `security invoker` clause. 0053 has already been applied, so rather than
+-- edit it, the explanation is restated here above a statement that
+-- re-asserts the setting the function already has.
+--
+-- SECURITY: security invoker, deliberately — the function runs with the
+-- privileges of whoever calls it, so every table it reads is filtered by
+-- that caller's own RLS. That allows exactly the callers that need it: the
+-- whatsapp-dispatch Edge Function, whose service-role key bypasses RLS by
+-- design, and a backoffice session (drainNotificationOutbox, this project's
+-- tests), which the backoffice-only policies on notification_outbox (0020)
+-- and notification_templates (0023) let read every row. It protects against
+-- every other signed-in user: execute is granted to `authenticated`, so a
+-- security definer version would let a customer or grower pass any outbox
+-- id and read back the composed message and the phone number of every user
+-- at another company. Run as invoker, their read of notification_outbox
+-- finds no row and the call stops at its P0002 NOT_FOUND error before it
+-- reaches a template, a company or a profile.
+alter function public.resolve_outbox_dispatch(uuid) security invoker;

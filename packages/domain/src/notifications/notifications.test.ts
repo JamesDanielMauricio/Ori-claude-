@@ -357,6 +357,11 @@ describe("notifications module", () => {
     const succeedingChannel = new FakeNotificationChannel();
     const retryResult = await drainNotificationOutbox({ client: admin.client, channel: succeedingChannel });
     expect(retryResult.sent).toBe(1);
+    // The group id arrives bare and flagged as a group: a channel can't tell
+    // a group id from a phone number by looking at it.
+    expect(succeedingChannel.sent).toEqual([
+      expect.objectContaining({ to: "grp-fail-test", isGroup: true }),
+    ]);
 
     const { data: afterRetry } = await admin.client
       .from("notification_outbox")
@@ -428,6 +433,7 @@ describe("notifications module", () => {
       "972500000001",
       "972500000002",
     ]);
+    expect(firstChannel.sent.map((message) => message.isGroup)).toEqual([false, false]);
 
     const { data: afterFirst } = await admin.client
       .from("notification_outbox")

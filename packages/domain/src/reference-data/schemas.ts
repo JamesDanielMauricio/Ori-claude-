@@ -13,12 +13,22 @@ export const packTypeSchema = z.enum(["pallets", "crates"]);
 // (fail fast with field-level errors) — the actual authorization and
 // data-integrity boundary is the function + RLS, not this schema.
 
+// A company's WhatsApp group id is stored bare: whatsapp-dispatch appends
+// Green API's "@g.us" itself, so a full chat id pasted in — the form Bubble
+// stored it in — would go out as "...@g.us@g.us" and never arrive. Every
+// company screen saves through one of the three schemas below, which makes
+// this the one place to strip it. A blank field means no group.
+const whatsappGroupIdSchema = z
+  .string()
+  .nullable()
+  .transform((value) => value?.trim().replace(/@g\.us$/, "") || null);
+
 export const saveGrowerInputSchema = z.object({
   id: z.string().uuid().nullable(),
   name: z.string().min(1),
   status: companyStatusSchema,
   defaultPickupTime: z.string().nullable(),
-  whatsappGroupId: z.string().nullable(),
+  whatsappGroupId: whatsappGroupIdSchema,
   productVarietyIds: z.array(z.string().uuid()),
   // The transporter assigned to move this grower's arranged produce —
   // id 8's cc target on arrangement finalization (see
@@ -45,7 +55,7 @@ export const saveCustomerInputSchema = z.object({
   name: z.string().min(1),
   status: companyStatusSchema,
   canSeeProductPrices: z.boolean().nullable(),
-  whatsappGroupId: z.string().nullable(),
+  whatsappGroupId: whatsappGroupIdSchema,
 });
 export type SaveCustomerInput = z.infer<typeof saveCustomerInputSchema>;
 
@@ -63,7 +73,7 @@ export const saveTransporterInputSchema = z.object({
   id: z.string().uuid().nullable(),
   name: z.string().min(1),
   status: companyStatusSchema,
-  whatsappGroupId: z.string().nullable(),
+  whatsappGroupId: whatsappGroupIdSchema,
 });
 export type SaveTransporterInput = z.infer<typeof saveTransporterInputSchema>;
 

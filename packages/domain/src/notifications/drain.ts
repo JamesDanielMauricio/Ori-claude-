@@ -57,6 +57,7 @@ interface NotificationSettingsRow {
 
 interface DispatchTarget {
   target: string;
+  is_group: boolean;
   message: string;
 }
 
@@ -132,11 +133,11 @@ export async function drainNotificationOutbox(deps: DrainDeps): Promise<DrainRes
     const resolvedTargets = (targets ?? []) as DispatchTarget[];
     const errors: string[] = [];
 
-    for (const { target, message } of resolvedTargets) {
+    for (const { target, is_group, message } of resolvedTargets) {
       // Delivered on an earlier pass — skipping is the whole point of the fix.
       if (alreadySent.has(target)) continue;
 
-      const sendResult = await channel.send({ to: target, body: message });
+      const sendResult = await channel.send({ to: target, isGroup: is_group, body: message });
       if (!sendResult.success) {
         errors.push(sendResult.error ?? `send to ${target} failed`);
         continue;

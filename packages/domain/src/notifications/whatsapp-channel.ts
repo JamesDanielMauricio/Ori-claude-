@@ -16,7 +16,7 @@ export interface WhatsAppChannelConfig {
 
 export function createWhatsAppChannel(config: WhatsAppChannelConfig): NotificationChannel {
   return {
-    async send({ to, body }: OutboundMessage): Promise<SendResult> {
+    async send({ to, isGroup, body }: OutboundMessage): Promise<SendResult> {
       try {
         const response = await fetch(config.apiUrl, {
           method: "POST",
@@ -24,7 +24,7 @@ export function createWhatsAppChannel(config: WhatsAppChannelConfig): Notificati
             Authorization: `Bearer ${config.apiKey}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ to, body }),
+          body: JSON.stringify({ to, isGroup, body }),
         });
         if (!response.ok) {
           const detail = await response.text().catch(() => "");

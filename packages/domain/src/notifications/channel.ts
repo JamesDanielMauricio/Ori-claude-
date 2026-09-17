@@ -9,6 +9,11 @@
 // value-level imports, only this one small dependency-free contract.
 export interface OutboundMessage {
   to: string;
+  // Whether `to` is a WhatsApp group id rather than a phone number. Bare,
+  // the two are indistinguishable, and providers address them differently
+  // (Green API: "@g.us" vs "@c.us") — so a channel is told, never left to
+  // guess from the string.
+  isGroup: boolean;
   body: string;
 }
 

@@ -36,16 +36,19 @@ function editingRow(page: Page) {
 // it is created from the "זן חדש" row that sits first inside an open family,
 // which is what supplies the family instead of a dropdown.
 //
-// The toggle is matched on its `aria-expanded` state rather than on its
-// "הרחב"/"כווץ" label, because that label flips with the state — and the
+// The toggle is found by its full accessible name, in either state — the
 // family may arrive already open, since saving a family or a variety leaves
-// its family expanded.
+// its family expanded. Matching on the family name as visible text instead
+// would also hit a row's "משפחה" dropdown, whose trigger shows the selected
+// family's name.
 async function addVarietyToFamily(page: Page, familyName: string) {
-  const toggle = page.locator("button[aria-expanded]").filter({ hasText: familyName }).first();
-  if ((await toggle.getAttribute("aria-expanded")) === "false") {
-    await toggle.click();
+  const expand = page.getByRole("button", { name: `הרחב ${familyName}`, exact: true });
+  const collapse = page.getByRole("button", { name: `כווץ ${familyName}`, exact: true });
+  await expect(expand.or(collapse)).toBeVisible();
+  if (await expand.isVisible()) {
+    await expand.click();
   }
-  await page.getByRole("button", { name: `זן חדש ${familyName}` }).click();
+  await page.getByRole("button", { name: `זן חדש ${familyName}`, exact: true }).click();
 }
 
 // Signs in as a fresh backoffice admin and lands on the Products screen —
@@ -77,6 +80,10 @@ test.describe("Backoffice — Products", () => {
 
     const family = await createTestProductFamily();
     cleanupFns.push(() => deleteTestProductFamily(family.id));
+    // Somewhere to move the variety to: moving between families is the one
+    // thing the "משפחה" dropdown is still needed for.
+    const otherFamily = await createTestProductFamily();
+    cleanupFns.push(() => deleteTestProductFamily(otherFamily.id));
 
     const company = await createTestCompany();
     cleanupFns.push(() => deleteTestCompany(company.id));
@@ -90,6 +97,9 @@ test.describe("Backoffice — Products", () => {
     // The whole point of adding from inside a family: the draft arrives
     // already assigned to it, so there is no dropdown step to perform here.
     await expect(editingRow(page)).toContainText(family.name);
+    // Nothing typed yet, so nothing to save: the family the draft arrived
+    // with is not an edit.
+    await expect(editingRow(page).getByRole("button", { name: "שמור", exact: true })).toBeDisabled();
     await editingRow(page).getByLabel("זן / שם").fill(productName);
     await editingRow(page).getByLabel("מחיר", { exact: true }).fill("12.5");
     await editingRow(page).getByRole("button", { name: "שמור" }).click();
@@ -108,6 +118,10 @@ test.describe("Backoffice — Products", () => {
     // the rest of this step reads fields directly off the page — safe
     // since only one row can be mid-edit at a time.
     await productRow.getByRole("button", { name: "ערוך" }).click();
+    await chooseOption(
+      editingRow(page).getByRole("combobox", { name: "משפחה", exact: true }),
+      otherFamily.name,
+    );
     await editingRow(page).getByLabel("חריגת הזמנה מותרת (No Overbooking)").fill("3");
     await editingRow(page).getByLabel("זמין בעונה הנוכחית").click();
 
@@ -137,6 +151,15 @@ test.describe("Backoffice — Products", () => {
     // …and the cap is readable straight off the row too, with nothing
     // expanded or opened.
     await expect(productRow).toContainText(`${capCustomer.name}: 4`);
+
+    // The family move was saved, not just drawn: after a reload the variety
+    // still sits under the other family. The row leaving edit mode is the
+    // wait — that only happens once the server accepts the save, so the
+    // reload can't cut the request off.
+    await expect(editingRow(page)).toHaveCount(0, { timeout: 15000 });
+    await page.reload();
+    await page.getByPlaceholder("חיפוש מוצר, זן או משפחה").fill(productName);
+    await expect(productRow).toContainText(otherFamily.name, { timeout: 15000 });
   });
 
   // The family half of the screen: the catalog's grouping level is a record
@@ -177,6 +200,12 @@ test.describe("Backoffice — Products", () => {
 
     // --- Put a variety in it, which is what the delete has to refuse over.
     await page.getByPlaceholder("חיפוש מוצר, זן או משפחה").fill("");
+    // The name column holds every family's expand toggle and its "זן חדש"
+    // button, so the column picker must not be able to hide it.
+    const columnPicker = page.getByLabel("בחירת עמודות");
+    await columnPicker.click();
+    await expect(page.getByRole("checkbox", { name: "זן", exact: true })).toBeDisabled();
+    await columnPicker.click();
     const varietyName = `זן E2E ${randomUUID()}`;
     await addVarietyToFamily(page, familyName);
     await editingRow(page).getByLabel("זן / שם").fill(varietyName);

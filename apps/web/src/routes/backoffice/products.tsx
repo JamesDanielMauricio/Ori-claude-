@@ -667,9 +667,14 @@ export default function ProductsPage() {
   // re-seeds the form from the returned row. It is the optimistic-locking
   // token (R7), not a field, so it neither can nor should make the form read
   // as changed.
+  //
+  // A draft's baseline is a blank form in the draft's OWN family. The family
+  // comes from which "זן חדש" was clicked, not from anything the user typed,
+  // so it must not light up the save button on an otherwise empty draft —
+  // which it did when this compared against whichever family sorts first.
   const baselineForm = selected
     ? toFormState(selected, capsQuery.data?.get(selected.id) ?? [])
-    : blankForm(familiesQuery.data?.[0]?.id ?? "");
+    : blankForm(form.familyId);
   const dirty = hasChanges(form, baselineForm);
 
   function handleSave() {
@@ -715,6 +720,9 @@ export default function ProductsPage() {
       key: "name",
       label: "זן",
       groupLabel: "משפחה",
+      // Every family's expand toggle and "זן חדש" button live in this
+      // column, so hiding it would strand the whole catalog closed.
+      alwaysVisible: true,
       render: (row) => (
         <span className={`block font-medium text-ink ${NAME_GUTTER_PAD}`}>{row.name}</span>
       ),

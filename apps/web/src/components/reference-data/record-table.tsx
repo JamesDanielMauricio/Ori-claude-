@@ -23,6 +23,11 @@ export interface RecordTableColumn<T> {
   // name in the same column. Omitted by every column a group leaves empty,
   // and by every ungrouped table.
   groupLabel?: string;
+  // Locks the column on in the column picker (shown there checked and
+  // disabled). For a column holding controls the table can't do without —
+  // on a grouped table, whichever column the caller puts each group's expand
+  // toggle in: hide that one and no group can be opened or closed again.
+  alwaysVisible?: boolean;
   render: (row: T) => ReactNode;
   // The inline editable control for this column — an <input>/<select> bound
   // to the caller's own form state via closure, shown instead of `render`
@@ -335,10 +340,6 @@ export function RecordTable<T>({
     });
   }
 
-  // One record's <tr>. A function rather than inline JSX because a grouped
-  // table emits these from inside each section as well as, for orphans,
-  // outside them — and a second copy of the pinned actions cell is exactly
-  // the kind of duplication that drifts.
   // One group row's cells. The `cells` shape is laid out against this
   // component's own `visibleColumns` rather than against whatever the caller
   // thinks the columns are: the column-visibility picker lives here, so only
@@ -371,6 +372,10 @@ export function RecordTable<T>({
     );
   }
 
+  // One record's <tr>. A function rather than inline JSX because a grouped
+  // table emits these from inside each section as well as, for orphans,
+  // outside them — and a second copy of the pinned actions cell is exactly
+  // the kind of duplication that drifts.
   function renderRow(row: T) {
     const id = getRowId(row);
     const isEditing = id === editingId;
@@ -458,11 +463,14 @@ export function RecordTable<T>({
             {columns.map((column) => (
               <label
                 key={column.key}
-                className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-ink hover:bg-surface-muted"
+                className={`flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-ink ${
+                  column.alwaysVisible ? "" : "cursor-pointer hover:bg-surface-muted"
+                }`}
               >
                 <input
                   type="checkbox"
                   checked={!hiddenColumns.has(column.key)}
+                  disabled={column.alwaysVisible}
                   onChange={() => toggleColumn(column.key)}
                   className={checkboxClassName}
                 />

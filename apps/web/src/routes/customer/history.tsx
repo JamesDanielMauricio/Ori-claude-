@@ -9,34 +9,46 @@ import { QueryError } from "@/components/ui/query-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import { createClient } from "@/lib/supabase/client";
 
-interface OrderRow {
+type TradingDayPhase = "initiated" | "shop_open" | "shop_closed" | "closed";
+
+interface DayRow {
   id: string;
-  status: "open" | "submitted";
-  submitted_at: string | null;
-  trading_days: { trade_date: string; phase: "initiated" | "shop_open" | "shop_closed" | "closed" } | null;
+  trade_date: string;
+  phase: TradingDayPhase;
+  // Reverse relation (trading_days -> daily_orders): RLS
+  // (daily_orders_select_own) already scopes this to the caller's own
+  // company, and the table's `unique(trading_day_id, customer_company_id)`
+  // means there is at most one entry here — an array only because that's
+  // how PostgREST shapes a one-to-many embed.
+  daily_orders: Array<{ id: string; status: "open" | "submitted"; submitted_at: string | null }>;
 }
 
 // The list badge collapses order status + trading-day phase into one of
-// three states a customer actually cares about: still editable, sent but
-// the day is wrapping up, or fully closed history. `daily_orders.status`
-// alone only knows "open"/"submitted" — "closed" comes from the trading
-// day itself (see order.tsx's `.neq("phase", "closed")` for the same
-// "closed = finished trading day" convention).
-type BadgeKind = "new" | "sent" | "closed";
+// four states a customer actually cares about: no order was ever placed
+// for that day, still editable, sent but the day is wrapping up, or fully
+// closed history. `daily_orders.status` alone only knows "open"/
+// "submitted" — "closed" comes from the trading day itself (see
+// order.tsx's `.neq("phase", "closed")` for the same "closed = finished
+// trading day" convention).
+type BadgeKind = "none" | "new" | "sent" | "closed";
 
-function badgeFor(row: OrderRow): BadgeKind {
-  if (row.trading_days?.phase === "closed") return "closed";
-  if (row.status === "submitted") return "sent";
+function badgeFor(row: DayRow): BadgeKind {
+  const order = row.daily_orders[0];
+  if (!order) return "none";
+  if (row.phase === "closed") return "closed";
+  if (order.status === "submitted") return "sent";
   return "new";
 }
 
 const BADGE_LABEL: Record<BadgeKind, string> = {
+  none: "לא הוזמן",
   new: "חדש",
   sent: "נשלח",
   closed: "נסגר",
 };
 
 const BADGE_CLASSES: Record<BadgeKind, string> = {
+  none: "border-border-strong text-ink-subtle font-medium",
   new: "border-warning text-warning font-semibold",
   sent: "border-accent text-accent font-semibold",
   closed: "border-border-strong text-ink-subtle font-medium",
@@ -49,45 +61,49 @@ function shortDateLabel(isoDate: string): string {
 }
 
 // Read-only order history (PRD: customer-home/order-history.md) — every
-// past Daily Order for this customer's company, newest first. Cross-company
-// isolation is enforced by RLS (daily_orders_select_own), not a
-// client-side filter. Clicking a row navigates to /customer/order, which
-// renders that order's content — live/editable when its trading day isn't
-// closed yet, read-only otherwise (see order.tsx's `orderId` search param).
+// trading day, newest first, not just the ones this company has an order
+// for. Querying FROM trading_days and embedding daily_orders (rather than
+// the other way around) is what makes a day with no order yet show up as
+// an empty "לא הוזמן" row instead of vanishing outright — the previous
+// query started from daily_orders, so any day this company's header row
+// was never bootstrapped for (new company, empty in-season list at
+// bootstrap time, etc. — see daily-pick-bootstrap.md's "known footgun" for
+// the grower-side equivalent) silently disappeared from history rather
+// than showing as a day with nothing ordered. trading_days itself has no
+// per-company scoping (RLS: trading_days_select_authenticated, `using
+// (true)`) — cross-company isolation only matters for the embedded
+// daily_orders, which RLS (daily_orders_select_own) still scopes to this
+// company same as before. Clicking a row with an order navigates to
+// /customer/order, which renders that order's content — live/editable
+// when its trading day isn't closed yet, read-only otherwise (see
+// order.tsx's `orderId` search param). A row with no order navigates via
+// `tradingDayId` instead, straight to an empty-state view.
 export default function CustomerOrderHistoryPage() {
   const supabase = createClient();
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
 
-  const ordersQuery = useQuery({
+  const daysQuery = useQuery({
     queryKey: ["customer", "order-history"],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("daily_orders")
-        .select("id, status, submitted_at, trading_days(trade_date, phase)");
+        .from("trading_days")
+        .select("id, trade_date, phase, daily_orders(id, status, submitted_at)")
+        .order("trade_date", { ascending: false });
       if (error) throw error;
-      return data as unknown as OrderRow[];
+      return data as unknown as DayRow[];
     },
   });
 
-  const sortedOrders = useMemo(() => {
-    return [...(ordersQuery.data ?? [])].sort((a, b) => {
-      const dateA = a.trading_days?.trade_date ?? "";
-      const dateB = b.trading_days?.trade_date ?? "";
-      return dateB.localeCompare(dateA);
-    });
-  }, [ordersQuery.data]);
+  const sortedDays = useMemo(() => daysQuery.data ?? [], [daysQuery.data]);
 
   // Filters by the visible date label — the only field a row shows, so it's
   // the only thing worth searching (matches the mockup's plain "חיפוש" box).
-  const visibleOrders = useMemo(() => {
+  const visibleDays = useMemo(() => {
     const query = search.trim();
-    if (!query) return sortedOrders;
-    return sortedOrders.filter((row) => {
-      const label = row.trading_days ? shortDateLabel(row.trading_days.trade_date) : "";
-      return label.includes(query);
-    });
-  }, [sortedOrders, search]);
+    if (!query) return sortedDays;
+    return sortedDays.filter((row) => shortDateLabel(row.trade_date).includes(query));
+  }, [sortedDays, search]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -109,33 +125,35 @@ export default function CustomerOrderHistoryPage() {
       </div>
 
       <div className="rounded-lg border border-border bg-surface shadow-card">
-        {ordersQuery.isLoading ? (
+        {daysQuery.isLoading ? (
           <div className="space-y-2 p-3">
             <Skeleton className="h-10 w-full" />
             <Skeleton className="h-10 w-full" />
             <Skeleton className="h-10 w-full" />
           </div>
-        ) : ordersQuery.isError ? (
+        ) : daysQuery.isError ? (
           // Not "you have no orders yet" — that sentence would tell a customer
           // their entire order history had vanished.
           <QueryError
             what="היסטוריית ההזמנות"
-            onRetry={() => void ordersQuery.refetch()}
-            retrying={ordersQuery.isFetching}
+            onRetry={() => void daysQuery.refetch()}
+            retrying={daysQuery.isFetching}
           />
-        ) : sortedOrders.length === 0 ? (
-          <p className="p-4 text-sm text-ink-muted">אין עדיין הזמנות.</p>
-        ) : visibleOrders.length === 0 ? (
+        ) : sortedDays.length === 0 ? (
+          <p className="p-4 text-sm text-ink-muted">אין עדיין ימי מסחר.</p>
+        ) : visibleDays.length === 0 ? (
           <p className="p-4 text-sm text-ink-muted">לא נמצאו הזמנות התואמות לחיפוש.</p>
         ) : (
           <ul>
-            {visibleOrders.map((row) => {
+            {visibleDays.map((row) => {
               const badge = badgeFor(row);
+              const order = row.daily_orders[0];
+              const href = order ? `/customer/order?orderId=${order.id}` : `/customer/order?tradingDayId=${row.id}`;
               return (
                 <li key={row.id}>
                   <button
                     type="button"
-                    onClick={() => navigate(`/customer/order?orderId=${row.id}`)}
+                    onClick={() => navigate(href)}
                     className="flex w-full items-center justify-between border-b border-border px-4 py-2.5 text-start text-sm transition-colors last:border-b-0 hover:bg-canvas"
                   >
                     <span
@@ -145,7 +163,7 @@ export default function CustomerOrderHistoryPage() {
                     </span>
                     <span className="flex items-center gap-1.5 text-ink-muted">
                       <Icon name="calendar" className="h-4 w-4" />
-                      {row.trading_days ? shortDateLabel(row.trading_days.trade_date) : "—"}
+                      {shortDateLabel(row.trade_date)}
                     </span>
                   </button>
                 </li>

@@ -56,13 +56,20 @@ export const PICK_STATUS_TONE: Record<DailyPickSummary["status"], StatusTone> = 
 // separate read-only view: `daily_picks.status` reaches "closed" on its own
 // (an order's status never does — see OrderLinesEditor's `readOnly`
 // comment), so PickLinesEditor already renders a closed pick locked without
-// an extra flag from here.
+// an extra flag from here. `?tradingDayId=` is history.tsx's other link
+// shape — a trading day this grower has no daily_picks row for at all (see
+// history.tsx's header comment for why that happens), so there is no pick
+// to look up by id; NoPickView just confirms nothing was picked.
 export default function GrowerDailyPicksPage() {
   const [searchParams] = useSearchParams();
   const pickId = searchParams.get("pickId");
+  const tradingDayId = searchParams.get("tradingDayId");
 
   if (pickId) {
     return <SpecificPickView pickId={pickId} />;
+  }
+  if (tradingDayId) {
+    return <NoPickView tradingDayId={tradingDayId} />;
   }
   return <TodayPickView />;
 }
@@ -224,6 +231,72 @@ function SpecificPickView({ pickId }: { pickId: string }) {
       tradeDateLabel={tradeDateLabel}
       onSubmitted={() => void queryClient.invalidateQueries({ queryKey: ["grower", "pick-by-id", pickId] })}
     />
+  );
+}
+
+interface EmptyTradingDay {
+  trade_date: string;
+  phase: "initiated" | "shop_open" | "shop_closed" | "closed";
+}
+
+// Reached from a history row for a trading day this grower has no
+// daily_picks row for (see GrowerDailyPicksPage's comment on
+// `tradingDayId`). There's no pick id to fetch lines by, so this only needs
+// the day's own date/phase — read via `trading_days_select_authenticated`
+// (`using (true)`), not company-scoped, which is fine: a trade date and
+// phase carry nothing another company couldn't already infer from the
+// business-day flow.
+function NoPickView({ tradingDayId }: { tradingDayId: string }) {
+  const supabase = createClient();
+
+  const dayQuery = useQuery({
+    queryKey: ["grower", "trading-day-by-id", tradingDayId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("trading_days")
+        .select("trade_date, phase")
+        .eq("id", tradingDayId)
+        .maybeSingle();
+      if (error) throw error;
+      return data as EmptyTradingDay | null;
+    },
+  });
+
+  if (dayQuery.isLoading) {
+    return (
+      <div className="space-y-3">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-10 w-full" />
+      </div>
+    );
+  }
+
+  if (dayQuery.isError) {
+    return <QueryError what="יום המסחר" onRetry={() => void dayQuery.refetch()} retrying={dayQuery.isFetching} />;
+  }
+
+  const day = dayQuery.data;
+  if (!day) {
+    return <p className="text-sm text-ink-muted">יום המסחר לא נמצא.</p>;
+  }
+
+  const tradeDateLabel = new Intl.DateTimeFormat("he-IL", { dateStyle: "long" }).format(new Date(day.trade_date));
+
+  return (
+    <div className="flex flex-col gap-2">
+      <PageHeader title="עדכון יומי" subtitle={tradeDateLabel} />
+      <div className="rounded-xl bg-surface shadow-raised ring-1 ring-inset ring-border/70">
+        <EmptyState
+          icon="sprout"
+          title="לא נוצר ליקוט ביום מסחר זה"
+          hint={
+            day.phase === "closed"
+              ? "לא נמצא ליקוט של החברה שלך עבור יום המסחר הזה."
+              : "לא נוצרה עבורך רשימת ליקוט ליום המסחר הזה. פנה למפיץ כדי לבדוק את שיוך המוצרים שלך."
+          }
+        />
+      </div>
+    </div>
   );
 }
 

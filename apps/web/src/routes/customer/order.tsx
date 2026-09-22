@@ -5,6 +5,7 @@ import { useSearchParams } from "react-router-dom";
 import { weekdayDateLabel } from "@/components/customer/catalog-grouping";
 import { OrderLinesEditor } from "@/components/customer/order-lines-editor";
 import { OrderProductList, type OrderFamilyRow } from "@/components/customer/order-product-list";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Icon } from "@/components/ui/icon";
 import { PageHeader } from "@/components/ui/page-header";
 import { QueryError } from "@/components/ui/query-error";
@@ -21,13 +22,20 @@ import { useOpenTradingDay, type TradingDayPhase } from "@/lib/trading-day-view"
 // An `?orderId=` search param (set by history.tsx's row links) shows a
 // specific past order's content here instead of today's open one, under the
 // same one rule both views use: editable while the shop is open, read-only
-// otherwise (see isOrderEditable).
+// otherwise (see isOrderEditable). `?tradingDayId=` is history.tsx's other
+// link shape — a trading day this company has no daily_orders row for at
+// all (see history.tsx's header comment for why that happens), so there is
+// no order to look up by id; NoOrderView just confirms nothing was ordered.
 export default function CustomerOrderPage() {
   const [searchParams] = useSearchParams();
   const orderId = searchParams.get("orderId");
+  const tradingDayId = searchParams.get("tradingDayId");
 
   if (orderId) {
     return <SpecificOrderView orderId={orderId} />;
+  }
+  if (tradingDayId) {
+    return <NoOrderView tradingDayId={tradingDayId} />;
   }
   return <TodayOrderView />;
 }
@@ -214,6 +222,73 @@ function SpecificOrderView({ orderId }: { orderId: string }) {
   }
 
   return <ClosedOrderView order={order} />;
+}
+
+interface EmptyTradingDay {
+  trade_date: string;
+  phase: TradingDayPhase;
+}
+
+// Reached from a history row for a trading day this company has no
+// daily_orders row for (see CustomerOrderPage's comment on `tradingDayId`).
+// There's no order id to fetch lines by, so this only needs the day's own
+// date/phase — read via `trading_days_select_authenticated` (`using
+// (true)`), not company-scoped, which is fine: a trade date and phase carry
+// nothing another company couldn't already infer from the open-shop flow.
+function NoOrderView({ tradingDayId }: { tradingDayId: string }) {
+  const supabase = createClient();
+
+  const dayQuery = useQuery({
+    queryKey: ["customer", "trading-day-by-id", tradingDayId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("trading_days")
+        .select("trade_date, phase")
+        .eq("id", tradingDayId)
+        .maybeSingle();
+      if (error) throw error;
+      return data as EmptyTradingDay | null;
+    },
+  });
+
+  if (dayQuery.isLoading) {
+    return (
+      <div className="space-y-3">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-10 w-full" />
+      </div>
+    );
+  }
+
+  if (dayQuery.isError) {
+    return (
+      <QueryError what="יום המסחר" onRetry={() => void dayQuery.refetch()} retrying={dayQuery.isFetching} />
+    );
+  }
+
+  const day = dayQuery.data;
+  if (!day) {
+    return <p className="text-sm text-ink-muted">יום המסחר לא נמצא.</p>;
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <PageHeader
+        title={`הזמנה — ${new Intl.DateTimeFormat("he-IL", { dateStyle: "long" }).format(new Date(day.trade_date))}`}
+      />
+      <div className="rounded-xl bg-surface shadow-raised ring-1 ring-inset ring-border/70">
+        <EmptyState
+          icon="calendar"
+          title="לא הוזמן ביום מסחר זה"
+          hint={
+            day.phase === "closed" || day.phase === "shop_closed"
+              ? "לא נמצאה הזמנה של החברה שלך עבור יום המסחר הזה."
+              : "טרם נוצרה הזמנה עבור החברה שלך ביום המסחר הזה. אם החנות פתוחה ואתם מצפים להזמין, פנו למפיץ."
+          }
+        />
+      </div>
+    </div>
+  );
 }
 
 interface HistoricalLineRow {

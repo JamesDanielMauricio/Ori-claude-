@@ -104,7 +104,11 @@ export function Dialog({
       // near-white, and the page behind a modal would turn pale instead of dim.
       className={`m-auto max-h-[85dvh] w-[calc(100%-2rem)] flex-col overflow-hidden rounded-xl border border-border bg-surface p-0 text-ink shadow-overlay backdrop:bg-scrim open:flex ${SIZE_CLASSES[size]}`}
     >
-      <div className="flex shrink-0 items-center justify-between gap-4 border-b border-border bg-surface-muted px-6 py-4">
+      {/* `py-3`, paired with the 40px close button below, keeps this header
+          the same 64px it was when the button was 32px and the padding was
+          `py-4` — the button grew into the padding rather than on top of it,
+          so no dialog in the app changes height. */}
+      <div className="flex shrink-0 items-center justify-between gap-4 border-b border-border bg-surface-muted px-6 py-3">
         <h2 id={titleId} className="text-sm font-semibold">
           {title}
         </h2>
@@ -112,12 +116,14 @@ export function Dialog({
           type="button"
           onClick={onClose}
           aria-label="סגור"
-          // 32px box around a 16px glyph: the old bare "×" was roughly a
-          // 12px tap target, well under the ~24px minimum, and sat with no
-          // visible bounds so there was nothing to aim at. The 90° spin on
-          // hover is the cheapest way to confirm the target is live before
-          // the click lands.
-          className="-me-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-muted transition-[background-color,color,transform] duration-200 hover:rotate-90 hover:bg-surface hover:text-danger"
+          // 40px box around a 16px glyph. The old bare "×" was roughly a 12px
+          // tap target; the box brought that to 32px, which clears WCAG's
+          // 24px floor but not the ~40px this app builds its controls to —
+          // and on a phone this is the visible way out of every modal the
+          // customer and grower screens open. The 90° spin on hover is the
+          // cheapest way to confirm the target is live before the click
+          // lands.
+          className="-me-2.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-ink-muted transition-[background-color,color,transform] duration-200 hover:rotate-90 hover:bg-surface hover:text-danger"
         >
           <Icon name="close" className="h-4 w-4" />
         </button>

@@ -41,7 +41,11 @@ export function PasswordInput({
       <button
         type="button"
         onClick={() => setVisible((current) => !current)}
-        className="absolute inset-y-0 start-auto end-1.5 my-auto flex h-9 items-center rounded px-2.5 text-xs font-medium text-ink-muted transition-colors hover:bg-canvas hover:text-ink"
+        // h-10 (was h-9) and wider padding: at 38×36 this was under the
+        // touch-target floor, and it sits inside a 40px field where a miss
+        // lands in the password input instead — which on a phone means the
+        // keyboard opens and the toggle appears not to have worked.
+        className="absolute inset-y-0 start-auto end-1 my-auto flex h-10 items-center rounded px-3 text-xs font-medium text-ink-muted transition-colors hover:bg-canvas hover:text-ink"
       >
         {visible ? "הסתר" : "הצג"}
       </button>

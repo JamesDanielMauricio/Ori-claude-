@@ -193,12 +193,21 @@ function PhaseStepper({ phase }: { phase: TradingDayPhase | "none" }) {
   const current = order[phase];
 
   return (
-    <ol className="flex items-center" aria-label="שלבי יום המסחר">
+    // `flex-wrap` + a real `min-w` on each step, so the row breaks onto a
+    // second line instead of crushing its own labels. Four steps need about
+    // 24px of circle, 8px of gap and ~55px of label each, plus a connector —
+    // roughly 480px in total, which a phone does not have: measured at 375px,
+    // every label was squeezed to 5px of the 45–55px it needed, so the one
+    // thing this control exists to say (which phase the day is in) was
+    // invisible. With a 8rem floor the steps wrap two-by-two there, and on a
+    // desktop the four still sit on one line exactly as before, since 4×8rem
+    // is far less than the width available.
+    <ol className="flex flex-wrap items-center gap-y-2" aria-label="שלבי יום המסחר">
       {steps.map((step, index) => {
         const done = index < current;
         const active = index === current;
         return (
-          <li key={step.key} className="flex min-w-0 flex-1 items-center last:flex-none">
+          <li key={step.key} className="flex min-w-32 flex-1 items-center last:flex-none">
             <div className="flex min-w-0 items-center gap-2">
               <span
                 aria-hidden
@@ -260,7 +269,14 @@ function MetricCard({
     <div className="animate-rise-in rounded-xl bg-surface p-5 shadow-card ring-1 ring-inset ring-border/70">
       <div className="flex items-center gap-2 text-ink-subtle">
         <Icon name={icon} className="h-4 w-4 shrink-0" />
-        <p className="truncate text-xs font-medium">{label}</p>
+        {/* Wraps rather than truncates. This is the card's title — the only
+            thing saying what the big number underneath counts — and it was
+            being cut at every width, not just narrow ones: "WhatsApp בסגירת
+            סידור ללקוחות" needs 154px and had 148 at a 1280px viewport, 96 at
+            375px. A statistic whose label you cannot read is not a
+            statistic. Two lines is the cap so a long label can't push the
+            number out of the card. */}
+        <p className="line-clamp-2 text-xs font-medium">{label}</p>
       </div>
       {loading ? (
         <Skeleton className="mt-3 h-8 w-16" />
@@ -312,7 +328,10 @@ function ToggleCard({
     <div className="animate-rise-in rounded-xl bg-surface p-5 shadow-card ring-1 ring-inset ring-border/70">
       <div className="flex items-center gap-2 text-ink-subtle">
         <Icon name="bell" className="h-4 w-4 shrink-0" />
-        <p className="truncate text-xs font-medium">{label}</p>
+        {/* Wraps rather than truncates — same reason as MetricCard's title
+            above, and these are the longest labels on the screen
+            ("WhatsApp בסגירת סידור ללקוחות"). */}
+        <p className="line-clamp-2 text-xs font-medium">{label}</p>
       </div>
       {enabled === null && failed ? (
         // Never guess "off" here: this card reports whether WhatsApp dispatch

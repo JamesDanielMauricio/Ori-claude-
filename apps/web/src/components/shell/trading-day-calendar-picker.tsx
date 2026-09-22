@@ -21,6 +21,15 @@ const WEEKDAY_LABELS: string[] = (() => {
   });
 })();
 
+// The popover's own width, in px, matching the `w-[19rem]` on the panel
+// below — openPopover needs it as a number to clamp against the viewport,
+// and the two have to stay in step, so it is stated once here and the class
+// is the only other place 19rem appears.
+const PANEL_WIDTH = 304;
+// Breathing room kept between the panel and either viewport edge — the same
+// 8px ui/select.tsx and cell-popover.tsx use for their floating panels.
+const VIEWPORT_MARGIN = 8;
+
 const MONTH_YEAR_FORMAT = new Intl.DateTimeFormat("he-IL", { month: "long", year: "numeric" });
 const CELL_LABEL_FORMAT = new Intl.DateTimeFormat("he-IL", { dateStyle: "long" });
 
@@ -85,7 +94,22 @@ export function TradingDayCalendarPicker({
       // app): the rail this trigger lives in is itself pinned to the
       // viewport's right edge, so a right-anchored popover can never be
       // clipped by it the way a left-anchored one could.
-      setPosition({ top: rect.bottom + 8, right: Math.max(8, window.innerWidth - rect.right) });
+      //
+      // That holds only while the rail IS pinned to the right edge — which
+      // it stops being below `md`, where BackofficeNav collapses to a top
+      // strip and this trigger can sit anywhere along it. The panel has a
+      // fixed PANEL_WIDTH, so once `right` exceeds "viewport minus panel
+      // minus margin" its left edge goes negative and the calendar opens
+      // partly off-screen. Capping `right` at exactly that value slides it
+      // back on; because the width is a known constant here, the clamp is
+      // exact and the panel never has to shrink.
+      setPosition({
+        top: rect.bottom + 8,
+        right: Math.min(
+          Math.max(VIEWPORT_MARGIN, window.innerWidth - rect.right),
+          Math.max(VIEWPORT_MARGIN, window.innerWidth - VIEWPORT_MARGIN - PANEL_WIDTH),
+        ),
+      });
     }
     setOpen(true);
   }
@@ -150,7 +174,10 @@ export function TradingDayCalendarPicker({
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label="יום מסחר מוצג — בחר תאריך"
-        className="flex h-9 w-full items-center gap-2 rounded-md bg-surface-muted px-2.5 text-xs font-semibold text-ink ring-1 ring-inset ring-border-strong transition-colors duration-200 hover:bg-surface hover:ring-ink-subtle"
+        // h-10, matching the calendar's own day cells below: this is the way
+        // into the day picker, and on the phone layout it is reached through
+        // the hamburger menu where it is touched rather than clicked.
+        className="flex h-10 w-full items-center gap-2 rounded-md bg-surface-muted px-2.5 text-xs font-semibold text-ink ring-1 ring-inset ring-border-strong transition-colors duration-200 hover:bg-surface hover:ring-ink-subtle"
       >
         <Icon name="calendar" className="h-3.5 w-3.5 shrink-0 text-ink-subtle" />
         <span className="flex-1 truncate text-start">{triggerLabel}</span>
@@ -171,7 +198,9 @@ export function TradingDayCalendarPicker({
                 type="button"
                 onClick={() => setViewDate(new Date(year, month - 1, 1))}
                 aria-label="חודש קודם"
-                className="flex h-9 w-9 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-surface-muted hover:text-ink"
+                // h-10/w-10, same as the day cells this sits above — the
+                // month arrows were the two smallest targets in the popover.
+                className="flex h-10 w-10 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-surface-muted hover:text-ink"
               >
                 {/* chevronStart points visually right (inline-start); a 180°
                     spin makes it point left — inline-end, i.e. "forward" —
@@ -189,7 +218,8 @@ export function TradingDayCalendarPicker({
                 type="button"
                 onClick={() => setViewDate(new Date(year, month + 1, 1))}
                 aria-label="חודש הבא"
-                className="flex h-9 w-9 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-surface-muted hover:text-ink"
+                // See "חודש קודם" above.
+                className="flex h-10 w-10 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-surface-muted hover:text-ink"
               >
                 <Icon name="chevronStart" className="h-4 w-4" />
               </button>

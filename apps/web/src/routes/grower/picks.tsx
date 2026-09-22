@@ -378,7 +378,11 @@ function PickDetail({
         </div>
       </div>
 
-      <PickLinesEditor dailyPickId={pick.id} pickStatus={pick.status} />
+      {/* `sticky`: this screen is a grower's whole in-season list, which on a
+          phone runs several screens deep once a few families are open. Without
+          it, "שמור" sits under all of it — see PickLinesEditor's own note on
+          the prop. Matches what the customer's order editor already does. */}
+      <PickLinesEditor dailyPickId={pick.id} pickStatus={pick.status} sticky />
     </div>
   );
 }

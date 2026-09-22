@@ -13,6 +13,15 @@ import { Icon } from "@/components/ui/icon";
 // container, which clips any absolutely-positioned child. That's the same
 // reason the sidebar's calendar (trading-day-calendar-picker.tsx) portals
 // too, and this reuses its click-outside/Escape handling wholesale.
+
+// Breathing room kept between the panel and either edge of the viewport —
+// the same 8px ui/select.tsx uses for its own floating list.
+const VIEWPORT_MARGIN = 8;
+// The narrowest this panel is allowed to be squeezed to. Below about this,
+// the label/value rows inside stop being usable, so the panel slides along
+// the viewport instead of shrinking further. See openPanel.
+const MIN_PANEL_WIDTH = 240;
+
 export function CellPopover({
   label,
   summary,
@@ -27,7 +36,11 @@ export function CellPopover({
   panelClassName?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [position, setPosition] = useState<{ top: number; right: number } | null>(null);
+  const [position, setPosition] = useState<{
+    top: number;
+    right: number;
+    maxWidth: number;
+  } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -35,11 +48,29 @@ export function CellPopover({
     const rect = triggerRef.current?.getBoundingClientRect();
     if (rect) {
       // Anchored under the trigger and aligned to its inline start (the
-      // right edge, in this RTL app), then clamped so a trigger near the
-      // viewport's edge doesn't push the panel off-screen.
+      // right edge, in this RTL app), then clamped at BOTH edges.
+      //
+      // `Math.max(8, …)` alone only held the right edge. Nothing held the
+      // left: the panel's width is fixed by `panelClassName`, so on a narrow
+      // viewport its left edge is wherever `innerWidth − right − width`
+      // happens to land, and that goes negative — off-screen — as soon as
+      // the trigger sits any distance from the right edge. The products
+      // screen passes `w-[26rem]` (416px), which cannot fit a 375px phone at
+      // any offset at all.
+      //
+      // So: first cap `right` so at least MIN_PANEL_WIDTH of panel is always
+      // on screen, then hand the panel a `maxWidth` for the room that
+      // actually remains. A panel narrower than its class asks for is the
+      // correct outcome — its contents are flex rows that wrap — and it is
+      // strictly better than one positioned off the edge of the screen.
+      const right = Math.min(
+        Math.max(VIEWPORT_MARGIN, window.innerWidth - rect.right),
+        Math.max(VIEWPORT_MARGIN, window.innerWidth - VIEWPORT_MARGIN - MIN_PANEL_WIDTH),
+      );
       setPosition({
         top: Math.min(rect.bottom + 6, window.innerHeight - 24),
-        right: Math.max(8, window.innerWidth - rect.right),
+        right,
+        maxWidth: Math.max(MIN_PANEL_WIDTH, window.innerWidth - right - VIEWPORT_MARGIN),
       });
     }
     setOpen(true);
@@ -102,7 +133,12 @@ export function CellPopover({
             // list in here rather than in <body>, so picking an option isn't a
             // click "outside" this panel that closes it.
             data-portal-root=""
-            style={{ position: "fixed", top: position.top, right: position.right }}
+            style={{
+              position: "fixed",
+              top: position.top,
+              right: position.right,
+              maxWidth: position.maxWidth,
+            }}
             className={`z-50 max-h-[60dvh] overflow-y-auto rounded-xl border border-border bg-surface p-3 text-ink shadow-overlay ${panelClassName}`}
           >
             <div className="mb-2 flex items-center justify-between gap-2">

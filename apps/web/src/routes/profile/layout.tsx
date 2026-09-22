@@ -21,7 +21,12 @@ export default function ProfileLayout() {
     <div className="mx-auto flex min-h-dvh max-w-2xl flex-col gap-4 p-6">
       <Link
         to={profile ? resolveHomeRoute(profile.role) : "/"}
-        className="inline-flex w-fit items-center gap-1 rounded-md px-1 py-0.5 text-sm text-ink-muted transition-colors hover:text-ink"
+        // `min-h-10` plus real horizontal padding: this was a 55×24 target,
+        // and it is the only way off the profile screen on a phone, where
+        // there is no sidebar and no browser chrome to fall back on. The
+        // negative inline-start margin keeps the text optically aligned with
+        // the content below despite the added padding.
+        className="-ms-2 inline-flex min-h-10 w-fit items-center gap-1 rounded-md px-2 text-sm text-ink-muted transition-colors hover:text-ink"
       >
         <Icon name="chevronStart" className="h-4 w-4" />
         חזרה

@@ -67,7 +67,12 @@ export default function RequestPasswordResetPage() {
       <p className="mt-4 text-center text-sm">
         {/* <Link>, not <a href> — see login.tsx: a bare anchor full-reloads
             the SPA to reach a route the router already holds. */}
-        <Link to="/login" className="text-accent hover:underline">
+        {/* Same hit-area box as login.tsx's "שכחת סיסמה?" — see the note
+            there. As plain text this was 86×18. */}
+        <Link
+          to="/login"
+          className="inline-flex min-h-10 items-center justify-center rounded-md px-3 text-accent hover:underline"
+        >
           חזרה להתחברות
         </Link>
       </p>

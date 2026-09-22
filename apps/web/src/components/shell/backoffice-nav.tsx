@@ -106,8 +106,16 @@ function IdentityBlock({ bell = true }: { bell?: boolean }) {
       ) : (
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold">{profile?.displayName}</p>
+          {/* Wraps to a second line instead of truncating — same change, and
+              same reason, as RoleShell's copy of this block: the rail is
+              w-64, so once the bell and the padding are taken out this line
+              gets ~82px and a real company name ("א.ש. שמאי סחר ושיווק
+              בע\"מ", 123px) was cut mid-word. Capped at two lines so a long
+              name can't push the nav down the rail. */}
           {profile?.companyName && (
-            <p className="truncate text-xs text-ink-muted">{profile.companyName}</p>
+            <p className="line-clamp-2 break-words text-xs text-ink-muted">
+              {profile.companyName}
+            </p>
           )}
         </div>
       )}
@@ -181,7 +189,10 @@ export function BackofficeNav() {
               aria-label="תפריט"
               aria-expanded={menuOpen}
               onClick={() => setMenuOpen((open) => !open)}
-              className="flex h-9 w-9 items-center justify-center rounded-md text-ink-muted transition-[background-color,color,transform] duration-200 hover:bg-accent-soft hover:text-accent active:scale-95"
+              // 40px, matching the AlertsBell beside it and RoleShell's copy
+              // of this same button — it was 36, and it is the only way into
+              // navigation on the phone layout.
+              className="flex h-10 w-10 items-center justify-center rounded-md text-ink-muted transition-[background-color,color,transform] duration-200 hover:bg-accent-soft hover:text-accent active:scale-95"
             >
               <Icon name={menuOpen ? "close" : "menu"} />
             </button>

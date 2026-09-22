@@ -459,7 +459,21 @@ export function RecordTable<T>({
             <Icon name="columns" className="h-4 w-4" />
             עמודות
           </summary>
-          <div className="absolute end-0 top-[calc(100%+0.5rem)] z-20 max-h-80 w-56 overflow-y-auto rounded-lg border border-border bg-surface p-2 shadow-overlay">
+          {/* `start-0`, not `end-0`. The document is RTL, so `end` is the
+              LEFT side: pinning the panel's left edge to the button's left
+              edge made it grow rightwards, away from its own trigger, and
+              measured 169→393px on a 375px screen — 18px off the right of
+              the viewport (73px off at 320px). `start-0` pins it to the
+              button's right edge and grows it leftwards instead, which is
+              both the direction an RTL menu should open and the one that
+              stays on screen: measured 36→260px, inside every width down to
+              320. It also matches how the table's own cell popovers anchor
+              (cell-popover.tsx aligns to `rect.right`).
+
+              `max-w-` is the belt to that braces: the panel is positioned
+              against the button, not the pane, so it can outgrow a narrow
+              container regardless of which edge it is pinned to. */}
+          <div className="absolute start-0 top-[calc(100%+0.5rem)] z-20 max-h-80 w-56 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg border border-border bg-surface p-2 shadow-overlay">
             {columns.map((column) => (
               <label
                 key={column.key}

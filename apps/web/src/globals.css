@@ -782,6 +782,34 @@ input[type="number"] {
  * even though every field around them was themed.
  */
 
+/* 16px form text on touch devices — a functional rule, not a typographic
+   one. Mobile Safari zooms the whole page in whenever a focused form control
+   computes below 16px, and it does NOT zoom back out when the field blurs;
+   the user is left panning a magnified page by hand. The shared field skin
+   (form-field.tsx's `inputClassName`) is `text-sm` = 14px, so every field in
+   the app tripped it: a grower's daily pick screen alone is 39 of them, one
+   zoom per tap.
+
+   Keyed off `pointer: coarse` rather than a width breakpoint because the
+   zoom is a property of the input device, not of the viewport — an iPhone
+   held in landscape is ~930px wide and still zooms, so any `md:`-style rule
+   would keep the bug on exactly the devices it was written to fix. Desktop
+   (pointer: fine) keeps 14px, so the dense backoffice tables are untouched.
+
+   Element-qualified (`input.field-control`, 0-1-1) so it beats Tailwind's
+   `.text-sm` (0-1-0) on specificity rather than on source order, which the
+   utility layer is free to change. `button.field-control` is the custom
+   Select's trigger (ui/select.tsx) — it can't zoom, but it sits beside these
+   fields and has to match their text size. */
+@media (pointer: coarse) {
+  input.field-control,
+  textarea.field-control,
+  select.field-control,
+  button.field-control {
+    font-size: 1rem;
+  }
+}
+
 /* The select's own arrow, replaced with the same chevron the icon set draws
    (icon.tsx's `chevronDown`, identical path data) so a dropdown in a table
    cell matches the chevrons everywhere else in the app.

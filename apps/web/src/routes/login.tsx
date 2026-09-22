@@ -111,7 +111,15 @@ export default function LoginPage() {
         {/* <Link>, not <a href>: a bare anchor triggers a full document load,
             which in an SPA throws away the running app and re-downloads the
             bundle to move between two screens the router already has. */}
-        <Link to="/reset-password" className="text-accent hover:underline">
+        {/* `inline-flex min-h-10 px-3` rather than a bare inline link: as
+            plain text this was a 76×18 target — the recovery route for
+            someone who has already failed to sign in, usually on a phone,
+            usually in a hurry. The box only grows the hit area; the
+            centred paragraph keeps it looking the same. */}
+        <Link
+          to="/reset-password"
+          className="inline-flex min-h-10 items-center justify-center rounded-md px-3 text-accent hover:underline"
+        >
           שכחת סיסמה?
         </Link>
       </p>

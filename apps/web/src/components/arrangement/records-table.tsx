@@ -86,7 +86,13 @@ export function ArrangementRecordsSection({
           type="button"
           onClick={() => setOpen((current) => !current)}
           aria-expanded={open}
-          className="group flex items-center gap-2.5 text-start"
+          // `min-h-10` plus a negative inline-start margin to offset the
+          // padding: the button's content is a 16px chevron and a 14px
+          // heading, so its box measured 133×20 — under WCAG 2.2's 24px
+          // minimum target size, and the only control that opens this
+          // section. The padding grows the hit area without moving the
+          // heading, which still has to line up with the content below it.
+          className="group -ms-2 flex min-h-10 items-center gap-2.5 rounded-md px-2 text-start"
         >
           <Icon
             name="chevronDown"

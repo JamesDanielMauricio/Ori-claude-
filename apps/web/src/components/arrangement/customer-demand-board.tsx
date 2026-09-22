@@ -251,63 +251,93 @@ function CustomerCard({
       // Named, so the grid reads as a list of customers rather than as a run
       // of anonymous "article" landmarks.
       aria-label={customer.customerName}
+      // `@container`: the header below stacks or stays on one line depending
+      // on how wide THIS card is, which is not a function of the viewport.
       className={`animate-stagger-in flex flex-col overflow-hidden rounded-lg bg-surface shadow-card ring-1 ring-inset transition-shadow duration-200 ${
         customer.hasSelected || promoted ? "ring-accent/45" : "ring-border/70"
       }`}
       style={{ "--stagger-index": Math.min(index, 8) } as React.CSSProperties}
     >
+      {/* The two status pills sit on the fraction's line rather than beside
+          the name. They don't shrink, so on the name's own line they cost a
+          fixed ~108px, and the name — which is `flex-1 min-w-0` — absorbed
+          every shortfall: measured 86px for a name needing 195px at a 1280px
+          viewport. That is not a cosmetic truncation. `xl:grid-cols-2` splits
+          this board into two columns at 1280px, so cards get NARROWER as the
+          window gets wider (416px at a 768px viewport, 300px at 1024, 270px
+          at 1280) — and the board carries several companies sharing a first
+          word, so both "אחים כבביה שיווק פירות וירקות בע\"מ" and "אחים פשה
+          בע\"מ" rendered as the same cut-off string. Whose produce is being
+          allocated became a guess.
+
+          Moving them down rather than giving the name its own row is what
+          keeps this cheap. The two buttons are 36px and already span both
+          text lines, so a row holding only them wastes their height: a full
+          stack measured 59px → 101px of header on a 166px card, +34% on a
+          board whose whole value is seeing many customers at once. This costs
+          ~7px and still hands the name the width it needed.
+
+          `flex-wrap` on that line so a card narrow enough to need it adds a
+          row only then, instead of squeezing the pills. */}
       <header className="flex items-center gap-2 border-b border-border bg-surface-muted/40 px-3 py-2.5">
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold text-ink" title={customer.customerName}>
             {customer.customerName}
           </p>
-          {/* Only the fraction is forced LTR — the unit stays in the page's
-              RTL flow, so this reads "0/11 משטחים" right-to-left rather than
-              stranding the Hebrew word on the wrong side of the numbers. */}
-          <p className="mt-0.5 text-xs text-ink-subtle">
-            <span dir="ltr">
-              {formatPallets(customer.allocated)} / {formatPallets(customer.ordered)}
-            </span>{" "}
-            משטחים
-          </p>
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+            {/* Only the fraction is forced LTR — the unit stays in the page's
+                RTL flow, so this reads "0/11 משטחים" right-to-left rather than
+                stranding the Hebrew word on the wrong side of the numbers. */}
+            <p className="text-xs text-ink-subtle">
+              <span dir="ltr">
+                {formatPallets(customer.allocated)} / {formatPallets(customer.ordered)}
+              </span>{" "}
+              משטחים
+            </p>
+            {/* Only shown when something is still owed. A "0 חסר" chip on every
+                settled customer is noise on a grid of thirty cards; the absence
+                of the chip is the "done" signal. */}
+            {outstanding > 0 && (
+              <StatusPill tone="warning">חסר {formatPallets(outstanding)}</StatusPill>
+            )}
+            <StatusPill tone={status.tone}>{status.label}</StatusPill>
+          </div>
         </div>
 
-        {/* Only shown when something is still owed. A "0 חסר" chip on every
-            settled customer is noise on a grid of thirty cards; the absence
-            of the chip is the "done" signal. */}
-        {outstanding > 0 && (
-          <StatusPill tone="warning">חסר {formatPallets(outstanding)}</StatusPill>
-        )}
-        <StatusPill tone={status.tone}>{status.label}</StatusPill>
+        {/* The two buttons keep their place beside the name block, where they
+            span both of its lines — that overlap is exactly what a separate
+            controls row would have thrown away. */}
+        <div className="flex shrink-0 items-center gap-2">
 
-        {/* The lower section's + : offer this customer the selected product.
-            Client-side only — see the note at the top of this file. */}
-        {!inOrderingSection && selection && editable && (
+          {/* The lower section's + : offer this customer the selected product.
+              Client-side only — see the note at the top of this file. */}
+          {!inOrderingSection && selection && editable && (
+            <button
+              type="button"
+              onClick={() => onPromote(customer.customerId)}
+              aria-label={`הצע את המוצר הנבחר ל${customer.customerName}`}
+              title="הוסף את המוצר הנבחר ללקוח זה"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-accent-soft text-accent ring-1 ring-inset ring-accent/25 transition-colors duration-200 hover:bg-accent hover:text-accent-ink"
+            >
+              <Icon name="plusCircle" className="h-4 w-4" />
+            </button>
+          )}
+
+          {/* Card-level pencil: edits the customer's ORDER, in a popup. Not to
+              be confused with the pencil on a product row below, which edits
+              the ARRANGEMENT for that row. Different objects, so they sit at
+              different levels — this one beside the customer's name, that one
+              beside the product it belongs to. */}
           <button
             type="button"
-            onClick={() => onPromote(customer.customerId)}
-            aria-label={`הצע את המוצר הנבחר ל${customer.customerName}`}
-            title="הוסף את המוצר הנבחר ללקוח זה"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-accent-soft text-accent ring-1 ring-inset ring-accent/25 transition-colors duration-200 hover:bg-accent hover:text-accent-ink"
+            onClick={() => onEditOrders(customer.customerId)}
+            aria-label={`ערוך את הזמנת ${customer.customerName}`}
+            title="ערוך הזמנת לקוח"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-colors duration-200 hover:bg-accent-soft hover:text-accent"
           >
-            <Icon name="plusCircle" className="h-4 w-4" />
+            <Icon name="pencil" className="h-3.5 w-3.5" />
           </button>
-        )}
-
-        {/* Card-level pencil: edits the customer's ORDER, in a popup. Not to
-            be confused with the pencil on a product row below, which edits
-            the ARRANGEMENT for that row. Different objects, so they sit at
-            different levels — this one beside the customer's name, that one
-            beside the product it belongs to. */}
-        <button
-          type="button"
-          onClick={() => onEditOrders(customer.customerId)}
-          aria-label={`ערוך את הזמנת ${customer.customerName}`}
-          title="ערוך הזמנת לקוח"
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-colors duration-200 hover:bg-accent-soft hover:text-accent"
-        >
-          <Icon name="pencil" className="h-3.5 w-3.5" />
-        </button>
+        </div>
       </header>
 
       <ul className="flex-1">
@@ -654,8 +684,15 @@ function AllocationRow({
 
   return (
     <li className="flex items-center gap-2 rounded-md bg-surface px-2 py-1.5 ring-1 ring-inset ring-border/70">
+      {/* Wraps to two lines rather than truncating. This name is the row's
+          whole subject — the row says "this grower supplies N pallets of it"
+          — and beside a quantity box and two buttons that don't shrink it was
+          getting 82px of the 123px it needed even at a 1280px viewport, so
+          "א.ש. שמאי סחר ושיווק בע\"מ" rendered as "א.ש. שמאי סחר…". The
+          `title` stays as a hover fallback, but hover is not available on a
+          touch screen and should not be the only way to read a name. */}
       <span
-        className="min-w-0 flex-1 truncate text-xs text-ink-muted"
+        className="line-clamp-2 min-w-0 flex-1 break-words text-xs text-ink-muted"
         title={allocation.growerName}
       >
         {allocation.growerName}

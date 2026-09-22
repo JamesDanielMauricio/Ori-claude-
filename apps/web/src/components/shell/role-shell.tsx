@@ -67,7 +67,12 @@ export function RoleShell({ navItems, children }: RoleShellProps) {
               aria-label="תפריט"
               aria-expanded={menuOpen}
               onClick={() => setMenuOpen((open) => !open)}
-              className="flex h-9 w-9 items-center justify-center rounded-md text-ink-muted transition-[background-color,color,transform] duration-200 hover:bg-accent-soft hover:text-accent active:scale-95"
+              // 40px, matching the AlertsBell beside it — it was 36, the one
+              // control in the phone header under the touch-target floor, and
+              // it is the only way into navigation on that layout. The header
+              // row was already 40px tall because of the bell, so this costs
+              // no height.
+              className="flex h-10 w-10 items-center justify-center rounded-md text-ink-muted transition-[background-color,color,transform] duration-200 hover:bg-accent-soft hover:text-accent active:scale-95"
             >
               <Icon name={menuOpen ? "close" : "menu"} />
             </button>
@@ -172,7 +177,18 @@ function IdentityStrip({
       </div>
       <div className="min-w-0">
         <p className="truncate text-sm font-semibold">{displayName ?? ""}</p>
-        {companyName && <p className="truncate text-xs text-ink-muted">{companyName}</p>}
+        {/* Wraps to a second line instead of truncating. In the desktop
+            sidebar this line gets 97px — the rail is w-64, and the avatar,
+            the bell and their gaps take the rest — which cut a real company
+            name ("א.ש. שמאי סחר ושיווק בע\"מ", 123px) mid-word. Two lines
+            fit it whole. Still capped, so a long name can't push the nav
+            down the rail; `break-words` is what stops an unbroken string
+            overflowing the box rather than wrapping inside it. The display
+            name above keeps `truncate`: it is the identifying line and has
+            to stay one row, and it is short enough that it fits. */}
+        {companyName && (
+          <p className="line-clamp-2 break-words text-xs text-ink-muted">{companyName}</p>
+        )}
       </div>
     </div>
   );

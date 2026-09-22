@@ -330,7 +330,12 @@ export function Select({
                   aria-disabled={option.disabled || undefined}
                   onMouseEnter={() => !option.disabled && setHighlighted(index)}
                   onClick={() => commit(index)}
-                  className={`flex cursor-pointer items-center justify-between gap-2 rounded-md px-3 py-2 text-sm transition-colors duration-150 ${
+                  // `py-2.5` makes each option 40px tall rather than 36. This
+                  // list is how a customer picks every quantity on the order
+                  // screen, so on a phone it is one of the most-tapped
+                  // surfaces in the app, and its rows sit directly against
+                  // each other with no gap to absorb a near miss.
+                  className={`flex cursor-pointer items-center justify-between gap-2 rounded-md px-3 py-2.5 text-sm transition-colors duration-150 ${
                     option.disabled
                       ? "cursor-not-allowed text-ink-subtle opacity-50"
                       : isHighlighted

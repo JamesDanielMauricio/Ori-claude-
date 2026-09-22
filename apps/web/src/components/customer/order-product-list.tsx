@@ -99,7 +99,13 @@ export function OrderProductList({
   }
 
   return (
-    <ul>
+    // `@container`: the variety rows inside switch layout on THIS list's
+    // width, not the viewport's — the two diverge. The viewport gains a
+    // 256px sidebar at `md`, so a 768px screen leaves this list narrower
+    // than a 767px one does, and the same component also mounts inside the
+    // arrangement board's order dialog, where the viewport says nothing
+    // about the room available. See the row's own note for the threshold.
+    <ul className="@container">
       {families.map((family, familyIndex) => {
         const isOpen = expandedIds.has(family.familyId);
         // How many varieties in this family already carry a quantity. Shown
@@ -160,9 +166,28 @@ export function OrderProductList({
                   {family.varieties.map((variety) => (
                     <li
                       key={variety.varietyId}
-                      className="flex flex-wrap items-center gap-3 border-b border-border/70 px-4 py-3 transition-colors duration-150 last:border-b-0 hover:bg-surface"
+                      className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border/70 px-4 py-3 transition-colors duration-150 last:border-b-0 hover:bg-surface"
                     >
-                      <div className="min-w-0 flex-1">
+                      {/* `w-full` in the narrow layout takes a whole flex
+                          line, so the quantity control and comment button
+                          drop underneath the name instead of competing with
+                          it for the row. Neither of those two can shrink —
+                          the quantity pill is a fixed `w-32` and the button
+                          is `shrink-0` — so in a narrow container the name
+                          was the only flexible thing left and absorbed the
+                          entire shortfall. Measured across the real 133-row
+                          catalogue: this column came out 34px wide at 320px
+                          (46 rows overflowing their own box, names breaking
+                          into four and five lines) and 89px at 375px.
+
+                          `@md` (a 448px list) rather than the grower row's
+                          `@2xl`, because this row's controls are smaller:
+                          128 of quantity + 62 of button + 24 of gaps = 214,
+                          against the pick row's 388. At 448 this name still
+                          gets 202px, which is what it already had on a 768px
+                          tablet and reads fine — so the threshold is each
+                          row's own arithmetic, not a shared guess. */}
+                      <div className="w-full min-w-0 @md:w-auto @md:flex-1">
                         {/* A wrapping flex row, not an inline badge after the
                             name. Inline, a narrow row broke the badge's two
                             words across lines and turned the pill into a
@@ -183,6 +208,16 @@ export function OrderProductList({
                           type="button"
                           variant="ghost"
                           size="sm"
+                          // `min-h-10` lifts this one button from `sm`'s 36px
+                          // to 40px without touching the shared size scale.
+                          // Every other `sm` button in the app is an
+                          // occasional inline action; this one repeats once
+                          // per catalogue row — nine or more on screen at a
+                          // time on a phone — so it is the size that gets
+                          // mis-tapped. Width is fine at 62px: the miss that
+                          // matters here is vertical, between two stacked
+                          // rows.
+                          className="min-h-10"
                           onClick={() => onOpenComment?.(variety.varietyId)}
                         >
                           {variety.comment ? "✎ הערה" : "+ הערה"}

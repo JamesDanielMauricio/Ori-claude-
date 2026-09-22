@@ -116,6 +116,52 @@ function toSavedLines(lines: DraftLine[]) {
   }));
 }
 
+// One of the row's two numeric columns (נקטף / עודף), with the caption that
+// replaces the column header once the row stops being a four-column grid.
+//
+// The wrapper is `w-24` at EVERY size and the input fills it, so in the wide
+// layout this renders at exactly the width a bare `w-24` input did — the
+// column header above still lines up, pixel for pixel, and the desktop
+// screen is unchanged. In the narrow layout the wrapper stacks its caption
+// above the field.
+//
+// The caption is `aria-hidden` and the input keeps its own `aria-label`.
+// Assistive tech is already told "פלטות שנקטפו — <variety>", which names the
+// column AND the row; announcing a bare "נקטף" on top of that would be a
+// second, vaguer name for the same field. The caption exists for the eye
+// only, which is the sense that lost the information when the header hid.
+function NumberCell({
+  caption,
+  ariaLabel,
+  value,
+  disabled,
+  onChange,
+}: {
+  caption: string;
+  ariaLabel: string;
+  value: string;
+  disabled: boolean;
+  onChange: (next: string) => void;
+}) {
+  return (
+    <div className="flex w-24 shrink-0 flex-col gap-1">
+      <span aria-hidden className="text-[11px] font-medium text-ink-subtle @2xl:hidden">
+        {caption}
+      </span>
+      <input
+        type="number"
+        min="0"
+        step="0.01"
+        disabled={disabled}
+        aria-label={ariaLabel}
+        className={`${inputClassName} w-full`}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </div>
+  );
+}
+
 // The one place both the grower's own picking screen and the
 // distributor's Grower Inventory Status oversight screen edit a Daily
 // Pick's lines — same fields, same rules (save_pick_lines accepts "the
@@ -137,15 +183,21 @@ export function PickLinesEditor({
 }: {
   dailyPickId: string;
   pickStatus: "draft" | "submitted" | "closed";
-  // Pins the ActionBar to the bottom of GrowerPickDialog's popup instead of
-  // wherever the line table happens to end — that dialog is a fixed-height
-  // scroll area, so "שמור" sitting under the whole table was a scroll away
-  // from where the distributor was actually looking. The grower's own
-  // full-page screen leaves this false: the page itself scrolls, so a bar
-  // pinned partway down it would float over content instead of sitting at
-  // the bottom of anything. Same parameter OrderLinesEditor's ActionBar
-  // takes, just not hardcoded true here — that editor is sticky on every
-  // host, this one only on the one that's a popup.
+  // Pins the ActionBar to the bottom of the scroll area instead of leaving
+  // it wherever the line table happens to end. GrowerPickDialog needs it
+  // because that dialog is a fixed-height scroll area; the grower's own
+  // full-page screen needs it for the same reason the customer's order
+  // screen does, and now passes it too.
+  //
+  // It used to be false there, on the reasoning that "the page itself
+  // scrolls, so a bar pinned partway down it would float over content
+  // instead of sitting at the bottom of anything". Floating over content IS
+  // what a sticky bar does, and it is the point: measured on a phone, the
+  // save button sat at y=2168 of a 2228px document with only thirteen
+  // varieties expanded — about three and a half screens below a correction
+  // made at the top, with nothing on the way down to confirm the edit was
+  // still pending. A bar that is in flow only ever reaches the viewport
+  // when the user has already scrolled past everything.
   sticky?: boolean;
   // Forces the same locked-down rendering `pickStatus === "closed"` gets
   // (inputs disabled, no ActionBar), independent of the pick's own status.
@@ -375,7 +427,19 @@ export function PickLinesEditor({
           return (
             <div
               key={family.familyId}
-              className="overflow-hidden rounded-xl bg-surface shadow-card ring-1 ring-inset ring-border/70"
+              // `@container`: the variety rows below switch between a
+              // four-column grid and a stacked layout based on THIS card's
+              // width, not the viewport's. They are not the same number.
+              // The viewport gains a 256px sidebar at `md`, so a 768px
+              // screen gives this card 448px while a 767px one gives it 727
+              // — the content column gets narrower as the window gets wider,
+              // and doesn't recover until ~1040px. A viewport breakpoint
+              // cannot see that: `sm:` (640px) put the four-column layout on
+              // a 448px card and squeezed the variety name to 28px, which
+              // was worse on a tablet than on a phone. The same editor also
+              // mounts inside GrowerPickDialog, where the viewport says
+              // nothing at all about the space available.
+              className="@container overflow-hidden rounded-xl bg-surface shadow-card ring-1 ring-inset ring-border/70"
             >
               <button
                 type="button"
@@ -409,40 +473,59 @@ export function PickLinesEditor({
                       inside the panel it opens with means it's always right
                       there when the columns it names actually appear.
                       Reuses each row's own widths (w-24/w-24/w-40) so the
-                      labels line up with their inputs; hidden below sm: a
-                      row's own inputs wrap under the variety name at that
-                      width (flex-wrap on the li below), so a fixed header
-                      would stop lining up with them there. */}
-                  <div className="hidden items-center gap-3 border-b border-border/60 px-4 py-1.5 text-xs font-medium text-ink-subtle sm:flex">
+                      labels line up with their inputs.
+
+                      Shown at exactly the size the row below IS a
+                      four-column grid (`@2xl` = a 672px card — the row needs
+                      96+96+160 of controls plus 36 of gaps, so anything
+                      narrower leaves no readable name column and the row
+                      stacks instead). That is now one condition expressed
+                      once, rather than a header breakpoint guessing at a row
+                      layout it could drift from.
+
+                      It used to be `sm:flex`, and below 640px it simply
+                      vanished with nothing in its place — which left a
+                      grower on a phone looking at two identical unlabeled
+                      number boxes per variety with no way to tell picked
+                      from leftover. In the stacked layout the two numbers
+                      now carry their own captions instead; see NumberCell. */}
+                  <div className="hidden items-center gap-3 border-b border-border/60 px-4 py-1.5 text-xs font-medium text-ink-subtle @2xl:flex">
                     <span className="min-w-0 flex-1" />
                     <span className="w-24 text-center">נקטף</span>
                     <span className="w-24 text-center">עודף</span>
-                    <span className="w-40 flex-1 sm:flex-none" />
+                    <span className="w-40 flex-1 @2xl:flex-none" />
                   </div>
                   <ul inert={!expanded}>
                     {family.varieties.map((variety) => (
                       <li
                         key={variety.id}
-                        className="flex flex-wrap items-center gap-3 border-b border-border/60 px-4 py-3 last:border-b-0"
+                        className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border/60 px-4 py-3 last:border-b-0"
                       >
-                        <p className="min-w-0 flex-1 text-sm font-medium text-ink">
+                        {/* `w-full` in the narrow layout takes a whole flex
+                            line, which pushes the inputs down to their own
+                            row. Measured at 375px, sharing the line left this
+                            name 87px — and 32px at 320px, 28px on a 768px
+                            tablet — so a variety like "עגבניה אשכולות L"
+                            broke across three lines beside two full-width
+                            number boxes. The inputs don't shrink (they carry
+                            explicit widths), so the name was the only thing
+                            that could absorb a narrow container, and it
+                            absorbed all of it. At `@2xl` it goes back to
+                            sharing the line, which is where the column header
+                            above lines up. */}
+                        <p className="w-full min-w-0 text-sm font-medium text-ink @2xl:w-auto @2xl:flex-1">
                           {variety.varietyName}
                         </p>
                         {/* The shared header above labels these two columns
                             (נקטף/עודף) — this input carries its own
                             aria-label too, so it's still identified on its
                             own for anyone not reading the header visually. */}
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
+                        <NumberCell
+                          caption="נקטף"
                           disabled={locked}
-                          aria-label={`פלטות שנקטפו — ${variety.varietyName}`}
-                          className={`${inputClassName} w-24`}
+                          ariaLabel={`פלטות שנקטפו — ${variety.varietyName}`}
                           value={variety.pallets}
-                          onChange={(event) =>
-                            updateLine(variety.id, { pallets: event.target.value })
-                          }
+                          onChange={(next) => updateLine(variety.id, { pallets: next })}
                         />
                         {/* Carried forward from the grower's most recent prior
                             line for this variety (bootstrap_grower_pick /
@@ -454,24 +537,19 @@ export function PickLinesEditor({
                             real arrangeable supply either way: the save floor
                             (P0006) guards pallets + leftover combined, not
                             either field alone. */}
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
+                        <NumberCell
+                          caption="עודף"
                           disabled={locked}
-                          aria-label={`פלטות עודף — ${variety.varietyName}`}
-                          className={`${inputClassName} w-24`}
+                          ariaLabel={`פלטות עודף — ${variety.varietyName}`}
                           value={variety.leftover}
-                          onChange={(event) =>
-                            updateLine(variety.id, { leftover: event.target.value })
-                          }
+                          onChange={(next) => updateLine(variety.id, { leftover: next })}
                         />
                         <input
                           type="text"
                           disabled={locked}
                           placeholder="הערה"
                           aria-label={`הערה — ${variety.varietyName}`}
-                          className={`${inputClassName} w-40 flex-1 sm:flex-none`}
+                          className={`${inputClassName} w-40 flex-1 @2xl:flex-none`}
                           value={variety.comment}
                           onChange={(event) =>
                             updateLine(variety.id, { comment: event.target.value })

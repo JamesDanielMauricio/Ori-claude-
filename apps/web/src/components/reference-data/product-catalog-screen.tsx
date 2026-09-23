@@ -1126,6 +1126,9 @@ export function ProductCatalogScreen({
     searchText: `${family.name} ${family.category ?? ""}`,
     header: (expanded) =>
       renderFamilyHeader(family, varietyCountByFamily.get(family.id) ?? 0, expanded),
+    // Pressing anywhere on the family's row opens or closes it, not only the
+    // chevron. A draft family has nothing to open onto, so it gets none.
+    onToggle: family.id === NEW_FAMILY_ID ? undefined : () => toggleFamily(family.id),
   });
 
   // An empty family still earns a header on the catalog tab — it is a real
@@ -1200,6 +1203,12 @@ export function ProductCatalogScreen({
     // renaming a family and checking what's inside it are independent, and
     // taking the chevron away mid-edit would be a dead end. A draft family
     // has nothing to expand onto, so it gets a plain thumbnail instead.
+    //
+    // While the family is only being read, the rest of its row toggles too
+    // (the group's `onToggle`, in `toGroup`), so the chevron lights up when
+    // the pointer is anywhere on the row (`group-hover/section:`), not just
+    // over this button. Mid-edit only this button toggles, so there only its
+    // own hover (`group-hover:`) does.
     const toggle = isDraft ? (
       <ProductThumbnail imageUrl={familyForm.imageUrl} size="sm" />
     ) : (
@@ -1218,7 +1227,9 @@ export function ProductCatalogScreen({
           <Icon
             name="chevronDown"
             className={`h-4 w-4 shrink-0 transition-[transform,color] duration-300 ease-[cubic-bezier(0.22,0.61,0.36,1)] ${
-              expanded ? "rotate-180 text-accent" : "text-ink-muted group-hover:text-accent"
+              expanded
+                ? "rotate-180 text-accent"
+                : "text-ink-muted group-hover:text-accent group-hover/section:text-accent"
             }`}
           />
           <ProductThumbnail

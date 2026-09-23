@@ -1,4 +1,12 @@
-import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 
 import { checkboxClassName, inputClassName } from "@/components/reference-data/form-field";
 import { Button } from "@/components/ui/button";
@@ -83,6 +91,54 @@ export interface RecordTableGroup {
   // (see `grouping` below) — drawing the chevron from this argument is what
   // keeps it pointing the same way as the rows underneath it.
   header: (expanded: boolean) => RecordTableGroupContent;
+  // The group's expand/collapse action. Passing it makes the WHOLE header row
+  // a click target, not just the toggle the caller drew inside one cell: a
+  // family band is sixteen columns wide, and pressing its category or one of
+  // its empty cells should open it exactly as pressing the chevron does. It
+  // is a pointer convenience layered over the caller's own toggle button,
+  // which stays the control a keyboard or screen reader reaches — a <tr>
+  // can't be made into a button without breaking the table's semantics.
+  //
+  // Only a `cells` header gets it. A `band` holds a form, and a click that
+  // misses an input by a few pixels must not fold the group shut mid-edit.
+  //
+  // While it applies, the row is the named group `group/section`, so the
+  // caller's toggle can react to the row being hovered
+  // (`group-hover/section:`) and show that anywhere on the row will do.
+  //
+  // Written as an explicit `| undefined` for the same
+  // `exactOptionalPropertyTypes` reason `renderAddRow` below gives: a caller
+  // builds every group in one place and decides per group whether it has one.
+  onToggle?: (() => void) | undefined;
+}
+
+// Anything a click inside a group header row already belongs to.
+const INTERACTIVE_SELECTOR = "a, button, input, label, select, summary, textarea, [role='button']";
+
+// Turns a click on a group header row into that group's toggle, except where
+// the click already belongs to something else — each of these would otherwise
+// toggle when it shouldn't:
+//   - a control inside the row. Most importantly the caller's own toggle
+//     button: its onClick has already run by the time the click bubbles up
+//     here, so toggling again would open the group and shut it straight back.
+//   - the pinned actions cell, as a whole. Its buttons fill it, and a disabled
+//     one is `pointer-events-none` (RowIconButton), so a press on a greyed-out
+//     pencil lands on the cell behind it — which would fold the family instead
+//     of doing nothing.
+//   - the end of a drag that selected text, so copying a family's name
+//     doesn't also collapse it.
+//   - a click that isn't inside the row at all. React bubbles events along
+//     the component tree, not the DOM, so a click inside a dropdown or
+//     popover that a cell portals into <body> would still arrive here.
+function handleGroupRowClick(event: MouseEvent<HTMLTableRowElement>, toggle: () => void) {
+  const row = event.currentTarget;
+  const target = event.target as Element;
+  if (!row.contains(target)) return;
+  const control = target.closest(INTERACTIVE_SELECTOR);
+  if (control && row.contains(control)) return;
+  if (target.closest("[data-row-actions]")) return;
+  if (window.getSelection()?.isCollapsed === false) return;
+  toggle();
 }
 
 // The pinned first column. Frozen with `position: sticky` rather than left
@@ -365,9 +421,13 @@ export function RecordTable<T>({
       );
     }
 
+    // `data-row-actions` marks the cell a header row's click-to-toggle leaves
+    // alone — see handleGroupRowClick.
     return (
       <>
-        <TableCell className={pinnedClassName}>{content.actions}</TableCell>
+        <TableCell className={pinnedClassName} data-row-actions>
+          {content.actions}
+        </TableCell>
         {visibleColumns.map((column) => (
           <TableCell key={column.key}>{content.cells[column.key] ?? null}</TableCell>
         ))}
@@ -561,9 +621,14 @@ export function RecordTable<T>({
           <TableBody>
             {grouped
               ? [
-                  ...grouped.sections.map((section) => (
-                    <Fragment key={`group:${section.group.id}`}>
-                      {/* The band has to read as a SECTION, not as one more
+                  ...grouped.sections.map((section) => {
+                    const header = section.group.header(section.expanded);
+                    // Whole-row toggling, for a reading header only — see
+                    // RecordTableGroup.onToggle.
+                    const toggle = header.kind === "cells" ? section.group.onToggle : undefined;
+                    return (
+                      <Fragment key={`group:${section.group.id}`}>
+                        {/* The band has to read as a SECTION, not as one more
                           record: a collapsed group is a row whose cells are
                           all empty, so if it carries the same fill as the
                           rows around it the screen becomes a list of names
@@ -573,26 +638,38 @@ export function RecordTable<T>({
                           separation survives the dark theme (`surface-muted`
                           at 70% did not — see table.tsx). The rules top and
                           bottom close the band off from the rows above and
-                          below it. */}
-                      <tr
-                        className={`${GROUP_ROW_FILL} shadow-[inset_0_1px_0_var(--color-border-strong),inset_0_-1px_0_var(--color-border-strong)]`}
-                      >
-                        {renderGroupCells(section.group.header(section.expanded))}
-                      </tr>
-                      {/* Collapsed groups render no rows at all. The
+                          below it.
+
+                          The conditional class comes after a SPACE, never
+                          glued on as `…]${…}`: Tailwind finds class names by
+                          scanning this file's text, and read that as the one
+                          unknown token `shadow-[…]${`, so it never generated
+                          the rules at all. */}
+                        <tr
+                          className={`${GROUP_ROW_FILL} shadow-[inset_0_1px_0_var(--color-border-strong),inset_0_-1px_0_var(--color-border-strong)] ${
+                            toggle ? "group/section" : ""
+                          }`}
+                          onClick={
+                            toggle ? (event) => handleGroupRowClick(event, toggle) : undefined
+                          }
+                        >
+                          {renderGroupCells(header)}
+                        </tr>
+                        {/* Collapsed groups render no rows at all. The
                           height-animated `.accordion-panel` used elsewhere
                           in the app can't apply here — a <tbody> can't be a
                           CSS grid without destroying the column alignment
                           that is the entire point of a table — so the
                           motion budget goes on the chevron instead. */}
-                      {section.expanded && grouping?.renderAddRow && editingId === null && (
-                        <tr className="group/row transition-colors duration-150 hover:bg-accent-soft/40">
-                          {renderGroupCells(grouping.renderAddRow(section.group), PINNED_CELL)}
-                        </tr>
-                      )}
-                      {section.expanded && section.rows.map(renderRow)}
-                    </Fragment>
-                  )),
+                        {section.expanded && grouping?.renderAddRow && editingId === null && (
+                          <tr className="group/row transition-colors duration-150 hover:bg-accent-soft/40">
+                            {renderGroupCells(grouping.renderAddRow(section.group), PINNED_CELL)}
+                          </tr>
+                        )}
+                        {section.expanded && section.rows.map(renderRow)}
+                      </Fragment>
+                    );
+                  }),
                   ...grouped.orphans.map(renderRow),
                 ]
               : filtered.map(renderRow)}

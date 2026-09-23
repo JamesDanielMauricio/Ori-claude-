@@ -7,6 +7,7 @@ import {
 } from "react";
 
 import { Icon } from "@/components/ui/icon";
+import { stripDecimal } from "@/lib/integer-input";
 
 import { formatPallets } from "./board-data";
 import {
@@ -503,6 +504,12 @@ export function ArrangementMatrix({
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>, row: number, col: number) {
     const input = event.currentTarget;
 
+    // Whole pallets only — a decimal point or comma never reaches the field.
+    if (event.key === "." || event.key === ",") {
+      event.preventDefault();
+      return;
+    }
+
     if (event.key === "Escape") {
       event.preventDefault();
       setDraft(null);
@@ -916,7 +923,7 @@ function MatrixRowCells({
                 <input
                   data-cell={`${rowIndex}-${colIndex}`}
                   type="text"
-                  inputMode="decimal"
+                  inputMode="numeric"
                   // Digits read left-to-right inside an RTL page — the same
                   // rule globals.css applies to every number input.
                   dir="ltr"
@@ -943,7 +950,7 @@ function MatrixRowCells({
                       row: rowIndex,
                       col: colIndex,
                       key: row.key,
-                      value: event.target.value,
+                      value: stripDecimal(event.target.value),
                     })
                   }
                   onKeyDown={(event) => onKeyDown(event, rowIndex, colIndex)}

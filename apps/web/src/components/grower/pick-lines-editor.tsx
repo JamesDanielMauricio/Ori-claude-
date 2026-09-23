@@ -10,6 +10,7 @@ import { QueryError } from "@/components/ui/query-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { hasChanges } from "@/lib/has-changes";
+import { blockDecimalKey, stripDecimal } from "@/lib/integer-input";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
 import { formatVarietyName } from "@/lib/variety-label";
@@ -151,12 +152,13 @@ function NumberCell({
       <input
         type="number"
         min="0"
-        step="0.01"
+        step="1"
         disabled={disabled}
         aria-label={ariaLabel}
         className={`${inputClassName} w-full`}
         value={value}
-        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={blockDecimalKey}
+        onChange={(event) => onChange(stripDecimal(event.target.value))}
       />
     </div>
   );
@@ -544,17 +546,30 @@ export function PickLinesEditor({
                           value={variety.leftover}
                           onChange={(next) => updateLine(variety.id, { leftover: next })}
                         />
-                        <input
-                          type="text"
-                          disabled={locked}
-                          placeholder="הערה"
-                          aria-label={`הערה — ${variety.varietyName}`}
-                          className={`${inputClassName} w-40 flex-1 @2xl:flex-none`}
-                          value={variety.comment}
-                          onChange={(event) =>
-                            updateLine(variety.id, { comment: event.target.value })
-                          }
-                        />
+                        {/* Wrapped in the same caption-spacer shape as
+                            NumberCell, even though this field has no caption
+                            of its own (its placeholder already says "הערה").
+                            Without the spacer, this was the only item in the
+                            row shorter than the NumberCells' caption+input
+                            stack, so `items-center` on the row centered it
+                            against them instead of lining up its top edge —
+                            it sat visibly lower than the two number boxes. */}
+                        <div className="flex w-40 flex-1 flex-col gap-1 @2xl:w-auto @2xl:flex-none">
+                          <span aria-hidden className="invisible text-[11px] font-medium @2xl:hidden">
+                            הערה
+                          </span>
+                          <input
+                            type="text"
+                            disabled={locked}
+                            placeholder="הערה"
+                            aria-label={`הערה — ${variety.varietyName}`}
+                            className={`${inputClassName} w-full`}
+                            value={variety.comment}
+                            onChange={(event) =>
+                              updateLine(variety.id, { comment: event.target.value })
+                            }
+                          />
+                        </div>
                       </li>
                     ))}
                   </ul>

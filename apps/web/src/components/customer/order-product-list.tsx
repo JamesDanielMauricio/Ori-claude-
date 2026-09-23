@@ -6,6 +6,7 @@ import { StatusPill } from "@/components/ui/card";
 import { Icon } from "@/components/ui/icon";
 import { ProductThumbnail } from "@/components/ui/product-thumbnail";
 import { Select } from "@/components/ui/select";
+import { blockDecimalKey, stripDecimal } from "@/lib/integer-input";
 
 export interface OrderVarietyRow {
   varietyId: string;
@@ -264,8 +265,9 @@ export function OrderProductList({
                             aria-label={`כמות ${variety.packType ? PACK_TYPE_LABEL[variety.packType] : "פלטות"} — ${variety.varietyName}`}
                             className={`${inputClassName} w-32 ps-7 pe-14 font-semibold`}
                             value={variety.pallets}
+                            onKeyDown={blockDecimalKey}
                             onChange={(event) =>
-                              onChangePallets?.(variety.varietyId, event.target.value)
+                              onChangePallets?.(variety.varietyId, stripDecimal(event.target.value))
                             }
                           />
                         )}

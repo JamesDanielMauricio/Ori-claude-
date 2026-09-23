@@ -414,17 +414,19 @@ export interface CellTarget {
  * presentations (the desktop spreadsheet and the mobile card list) so a
  * quantity is accepted or rejected by the same rule wherever it's typed.
  *
- * A decimal comma is what a Hebrew keyboard produces on the numpad, and
- * half-pallets (5.5) are routine — so both separators are accepted. An empty
- * box means "nothing is arranged here", which is a deletion (quantity 0),
- * not a no-op or an invalid entry.
+ * Whole pallets only — the cell's own `onKeyDown` already blocks a decimal
+ * point or comma from being typed, and `stripDecimal` cleans up anything
+ * that lands via paste before it gets here; `Math.trunc` is a last line of
+ * defense against either being missed. An empty box means "nothing is
+ * arranged here", which is a deletion (quantity 0), not a no-op or an
+ * invalid entry.
  */
 export function parseMatrixQuantity(raw: string): number | null {
   const trimmed = raw.trim().replace(",", ".");
   if (trimmed === "") return 0;
   const value = Number(trimmed);
   if (!Number.isFinite(value) || value < 0) return null;
-  return value;
+  return Math.trunc(value);
 }
 
 /**

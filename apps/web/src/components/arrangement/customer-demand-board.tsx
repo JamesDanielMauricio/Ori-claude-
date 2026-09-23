@@ -3,6 +3,7 @@ import { useState } from "react";
 import { inputClassName } from "@/components/reference-data/form-field";
 import { StatusPill, type StatusTone } from "@/components/ui/card";
 import { Icon } from "@/components/ui/icon";
+import { blockDecimalKey, stripDecimal } from "@/lib/integer-input";
 
 import {
   allocationFor,
@@ -394,6 +395,59 @@ function OrderLineRow({
   const covered = line.allocated >= line.ordered && line.ordered > 0;
   const expandable = line.allocations.length > 0;
 
+  // The line's whole story: what we're giving them (allocated) and what
+  // they're asking for (ordered), always adjacent — arranged first, current
+  // order second, no arrow between the two. The arrow is reserved for order
+  // HISTORY: it only appears, with a third number, when the customer's
+  // current figure differs from their previous submission. Deliberately left
+  // in the page's RTL flow rather than forced dir="ltr" — DOM order is
+  // [before?, arrow?, ordered, allocated], which an RTL parent renders
+  // right-to-left as "before → current → allocated" and, read as pixels
+  // left-to-right, comes out "allocated current ← before" (arranged, current
+  // order, then what it changed from).
+  const stats = (
+    <span
+      className="shrink-0 text-xs tabular-nums"
+      title={
+        line.previousOrdered !== null
+          ? `הוזמן ${formatPallets(line.ordered)} (היה ${formatPallets(line.previousOrdered)}), חולק ${formatPallets(line.allocated)}`
+          : `הוזמן ${formatPallets(line.ordered)}, חולק ${formatPallets(line.allocated)}`
+      }
+    >
+      {line.previousOrdered !== null && (
+        <>
+          <span className="text-ink-subtle">{formatPallets(line.previousOrdered)}</span>
+          <span aria-hidden className="mx-1 text-ink-subtle">
+            &#8592;
+          </span>
+        </>
+      )}
+      <span className="font-semibold text-ink">{formatPallets(line.ordered)}</span>
+      <span aria-hidden className="whitespace-pre">   </span>
+      {/* Green only once this line is fully covered — the one status worth a
+          distinct color. Short of that, arranged and not-yet-arranged both
+          read as the same dark orange: still needs attention, whether that's
+          "partially done" or "not started" is a distinction this readout no
+          longer draws. */}
+      <span className={`font-semibold ${covered ? "text-accent" : "text-warning"}`}>
+        {formatPallets(line.allocated)}
+      </span>
+    </span>
+  );
+  const name = (
+    <span className="min-w-0 flex-1">
+      <span className="block truncate text-xs text-ink">
+        {line.familyName && <span className="text-ink-muted">{line.familyName} · </span>}
+        <span className="font-medium">{line.varietyName}</span>
+      </span>
+      {line.comment && (
+        <span className="mt-0.5 block truncate text-xs italic text-ink-subtle">
+          {line.comment}
+        </span>
+      )}
+    </span>
+  );
+
   return (
     <li
       className={`border-b border-border/60 last:border-b-0 ${
@@ -410,75 +464,36 @@ function OrderLineRow({
       }`}
     >
       <div className="flex flex-wrap items-center gap-2 px-3 py-2">
+        {/* The chevron, name and stats are one button — not just the chevron
+            — so the whole row is the toggle's hit target, the same as every
+            other expand/collapse row in the app (ExpandableEntityRow, the
+            grower supply column). A user pressing the variety name or the
+            ordered/allocated figures expects that to open the row exactly as
+            pressing the arrow does. */}
         {expandable ? (
           <button
             type="button"
             onClick={onToggle}
             aria-expanded={open}
             aria-label={`הצג שיוכים עבור ${line.varietyName}`}
-            className="group flex h-8 w-8 shrink-0 items-center justify-center"
+            className="group flex min-w-0 flex-1 items-center gap-2 text-start"
           >
             <Icon
               name="chevronDown"
-              className={`h-3.5 w-3.5 transition-[transform,color] duration-300 ease-[cubic-bezier(0.22,0.61,0.36,1)] ${
+              className={`h-3.5 w-3.5 shrink-0 transition-[transform,color] duration-300 ease-[cubic-bezier(0.22,0.61,0.36,1)] ${
                 open ? "rotate-180 text-accent" : "text-ink-subtle group-hover:text-accent"
               }`}
             />
+            {name}
+            {stats}
           </button>
         ) : (
-          <span aria-hidden className="w-3.5 shrink-0" />
+          <>
+            <span aria-hidden className="w-3.5 shrink-0" />
+            {name}
+            {stats}
+          </>
         )}
-
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-xs text-ink">
-            {line.familyName && <span className="text-ink-muted">{line.familyName} · </span>}
-            <span className="font-medium">{line.varietyName}</span>
-          </span>
-          {line.comment && (
-            <span className="mt-0.5 block truncate text-xs italic text-ink-subtle">
-              {line.comment}
-            </span>
-          )}
-        </span>
-
-        {/* The line's whole story: what we're giving them (allocated) and
-            what they're asking for (ordered), always adjacent — arranged
-            first, current order second, no arrow between the two. The arrow
-            is reserved for order HISTORY: it only appears, with a third
-            number, when the customer's current figure differs from their
-            previous submission. Deliberately left in the page's RTL flow
-            rather than forced dir="ltr" — DOM order is [before?, arrow?,
-            ordered, allocated], which an RTL parent renders right-to-left as
-            "before → current → allocated" and, read as pixels left-to-right,
-            comes out "allocated current ← before" (arranged, current order,
-            then what it changed from). */}
-        <span
-          className="shrink-0 text-xs tabular-nums"
-          title={
-            line.previousOrdered !== null
-              ? `הוזמן ${formatPallets(line.ordered)} (היה ${formatPallets(line.previousOrdered)}), חולק ${formatPallets(line.allocated)}`
-              : `הוזמן ${formatPallets(line.ordered)}, חולק ${formatPallets(line.allocated)}`
-          }
-        >
-          {line.previousOrdered !== null && (
-            <>
-              <span className="text-ink-subtle">{formatPallets(line.previousOrdered)}</span>
-              <span aria-hidden className="mx-1 text-ink-subtle">
-                &#8592;
-              </span>
-            </>
-          )}
-          <span className="font-semibold text-ink">{formatPallets(line.ordered)}</span>
-          <span aria-hidden className="whitespace-pre">   </span>
-          {/* Green only once this line is fully covered — the one status
-              worth a distinct color. Short of that, arranged and
-              not-yet-arranged both read as the same dark orange: still
-              needs attention, whether that's "partially done" or "not
-              started" is a distinction this readout no longer draws. */}
-          <span className={`font-semibold ${covered ? "text-accent" : "text-warning"}`}>
-            {formatPallets(line.allocated)}
-          </span>
-        </span>
 
         {/* The arrangement editor, and ONLY on the row whose product is the
             one selected in the growers column. Every other row on the card
@@ -592,8 +607,9 @@ function ArrangementCell({
           invalidDraft ? "ring-danger focus:ring-danger" : ""
         }`}
         value={draft}
-        onChange={(event) => setDraft(event.target.value)}
+        onChange={(event) => setDraft(stripDecimal(event.target.value))}
         onKeyDown={(event) => {
+          blockDecimalKey(event);
           if (event.key === "Enter") {
             event.preventDefault();
             void commit();
@@ -710,13 +726,14 @@ function AllocationRow({
               !valid ? "ring-danger focus:ring-danger" : ""
             }`}
             value={draft}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => setDraft(stripDecimal(event.target.value))}
             onKeyDown={(event) => {
               // Enter commits, Escape abandons. Never saved on blur: tabbing
               // between allocations while rebalancing them would fire a write
               // per stop, and each of those can be rejected for
               // over-allocation mid-way through a change that would have been
               // valid once finished.
+              blockDecimalKey(event);
               if (event.key === "Enter") {
                 event.preventDefault();
                 void commit();

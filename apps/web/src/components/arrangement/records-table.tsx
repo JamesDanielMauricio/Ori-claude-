@@ -12,6 +12,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { hasChanges } from "@/lib/has-changes";
+import { blockDecimalKey, stripDecimal } from "@/lib/integer-input";
 
 import { type FlatRecord } from "./board-data";
 import { type AllocationPatch } from "./customer-demand-board";
@@ -255,7 +256,8 @@ function ArrangementRecordRow({
           aria-label="כמות משטחים"
           className={`${inputClassName} w-24`}
           value={quantity}
-          onChange={(event) => setQuantity(event.target.value)}
+          onKeyDown={blockDecimalKey}
+          onChange={(event) => setQuantity(stripDecimal(event.target.value))}
         />
       </TableCell>
       <TableCell>

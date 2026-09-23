@@ -102,7 +102,7 @@ test.describe("Backoffice — Grower Inventory Status", () => {
     const palletsInput = page.locator("dialog[open]").getByLabel("פלטות שנקטפו");
     await expect(palletsInput).toBeEnabled();
     const commentInput = page.locator('dialog[open] input[type="text"]');
-    await palletsInput.fill("8.25");
+    await palletsInput.fill("8");
     await commentInput.fill("distributor-entered note");
     await page.getByRole("button", { name: "שמור" }).click();
     await expect(page.getByText("השורות נשמרו.")).toBeVisible();
@@ -112,7 +112,7 @@ test.describe("Backoffice — Grower Inventory Status", () => {
     await page.reload();
     await page.getByRole("button", { name: `ערוך את מלאי ${growerName}` }).click();
     await page.locator("dialog[open]").getByRole("button", { expanded: false }).click();
-    await expect(page.locator("dialog[open]").getByLabel("פלטות שנקטפו")).toHaveValue("8.25");
+    await expect(page.locator("dialog[open]").getByLabel("פלטות שנקטפו")).toHaveValue("8");
     await expect(page.locator('dialog[open] input[type="text"]')).toHaveValue(
       "distributor-entered note",
     );

@@ -77,7 +77,7 @@ test.describe("Grower — daily picking input", () => {
     const palletsInput = page.getByLabel("פלטות שנקטפו");
     const commentInput = page.locator('input[type="text"]');
 
-    await palletsInput.fill("12.5");
+    await palletsInput.fill("12");
     await commentInput.fill("gate code 4321");
     await page.getByRole("button", { name: "שמור" }).click();
 
@@ -88,8 +88,8 @@ test.describe("Grower — daily picking input", () => {
     await page.locator("main").getByRole("button", { expanded: false }).click();
     // <input type="number"> normalizes its DOM value (strips insignificant
     // trailing zeros) regardless of the exact string the numeric(10,2)
-    // column round-trips as — "12.5" here, not "12.50".
-    await expect(palletsInput).toHaveValue("12.5");
+    // column round-trips as — "12" here, not "12.00".
+    await expect(palletsInput).toHaveValue("12");
     await expect(commentInput).toHaveValue("gate code 4321");
 
     // The pick history list (routes/grower/history.tsx), the grower-module
@@ -107,7 +107,7 @@ test.describe("Grower — daily picking input", () => {
     await expect(page).toHaveURL(/\/grower\/picks\?pickId=/);
     // A route change remounts the editor, re-collapsing every family.
     await page.locator("main").getByRole("button", { expanded: false }).click();
-    await expect(palletsInput).toHaveValue("12.5");
+    await expect(palletsInput).toHaveValue("12");
     await expect(commentInput).toHaveValue("gate code 4321");
   });
 

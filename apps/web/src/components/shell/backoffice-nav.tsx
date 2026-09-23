@@ -11,7 +11,7 @@ import { SignOutButton } from "./sign-out-button";
 import { Skeleton } from "../ui/skeleton";
 
 // The `side_bar_v2` equivalent — rebuilt, not ported. The source mounted
-// all eleven of these as tabs inside one page; switching between them was
+// all of these as tabs inside one page; switching between them was
 // the single largest documented performance problem in the app (a full
 // condition sweep across 142 elements and up to 16 nested repeating groups
 // per tab switch — see the "Performance Issues" findings, Issue 2). Here
@@ -24,6 +24,13 @@ import { Skeleton } from "../ui/skeleton";
 // for the reference/admin screens.
 const OPERATIONAL_NAV: Array<{ href: string; label: string; icon: IconName }> = [
   { href: "/backoffice/shop", label: "ניהול חנות", icon: "cart" },
+  // Directly under the day's own screen, because it is a view OF that day:
+  // the catalog narrowed to the products growers actually have stock of on
+  // whichever trading day the picker above is pointing at. It sits here
+  // rather than beside "מוצרים" down in ניהול מערכת for the same reason
+  // "בשם מגדל" does — what it lists changes every day, so it is operational
+  // work on today, not reference-data upkeep.
+  { href: "/backoffice/picked-products", label: "מוצרים שנקטפו", icon: "calendar" },
   // Acting on behalf of a grower/customer sits right before the arrangement
   // screens rather than down in "ניהול מערכת": both are day-to-day work on
   // TODAY's picking and ordering, not reference-data upkeep, and they are
@@ -124,7 +131,7 @@ function IdentityBlock({ bell = true }: { bell?: boolean }) {
   );
 }
 
-// The eleven destinations, in their two groups. Shared verbatim by both
+// Every destination, in its two groups. Shared verbatim by both
 // presentations so a new screen is added in one place.
 function NavGroups() {
   return (
@@ -202,7 +209,7 @@ export function BackofficeNav() {
         {/* Mounted only while open, which also keeps BusinessDayPanel — a
             component with real lifecycle mutations behind it — from running a
             second copy of itself on every backoffice screen.
-            Capped and scrollable: eleven rows plus the day panel is taller
+            Capped and scrollable: the nav rows plus the day panel are taller
             than a phone, and a menu that pushes its own sign-out button off
             the bottom of the screen is the one row that has to stay
             reachable. */}

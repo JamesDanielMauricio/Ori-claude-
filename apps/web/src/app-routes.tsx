@@ -27,6 +27,7 @@ const Arrangement = lazy(() => import("@/routes/backoffice/arrangement"));
 const NewArrangement = lazy(() => import("@/routes/backoffice/new-arrangement"));
 const OrderHistory = lazy(() => import("@/routes/backoffice/order-history"));
 const Products = lazy(() => import("@/routes/backoffice/products"));
+const PickedProducts = lazy(() => import("@/routes/backoffice/picked-products"));
 const Growers = lazy(() => import("@/routes/backoffice/growers"));
 const Customers = lazy(() => import("@/routes/backoffice/customers"));
 const Transporters = lazy(() => import("@/routes/backoffice/transporters"));
@@ -70,6 +71,7 @@ export function AppRoutes() {
                 "self-correct to default tab" rule. */}
             <Route index element={<Navigate to="/backoffice/shop" replace />} />
             <Route path="shop" element={<Shop />} />
+            <Route path="picked-products" element={<PickedProducts />} />
             <Route path="arrangement" element={<Arrangement />} />
             <Route path="new-arrangement" element={<NewArrangement />} />
             <Route path="order-history" element={<OrderHistory />} />

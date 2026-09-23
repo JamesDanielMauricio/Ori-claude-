@@ -217,7 +217,10 @@ export function RecordTable<T>({
     // creates lands in this very position, so leaving a greyed-out copy of
     // the control directly above its own result reads as a second, broken
     // add row rather than as a locked one.
-    renderAddRow?: (group: RecordTableGroup) => RecordTableGroupContent;
+    // Written as an explicit `| undefined` (like `onAdd` above) because
+    // `exactOptionalPropertyTypes` is on: a caller that decides per-screen
+    // whether an add row exists has to be able to pass `undefined` for it.
+    renderAddRow?: ((group: RecordTableGroup) => RecordTableGroupContent) | undefined;
   };
   loading?: boolean;
   searchPlaceholder?: string;

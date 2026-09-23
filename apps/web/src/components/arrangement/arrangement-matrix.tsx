@@ -28,8 +28,8 @@ import {
 // ---------------------------------------------------------------------------
 // Three requirements the ordinary table component cannot meet at once:
 //
-//   1. FROZEN PANES. Three leading columns (product, in stock, available) and
-//      two trailing ones (ordered, allocated) stay put while the customers
+//   1. FROZEN PANES. Three leading columns (product, in stock, ordered) and
+//      two trailing ones (available, allocated) stay put while the customers
 //      between them scroll horizontally, and the header row stays put while
 //      the products scroll vertically. That needs per-cell `position: sticky`
 //      with hard-coded offsets, which in turn needs fixed column widths —
@@ -82,9 +82,9 @@ const W_CUSTOMER = 124;
 const W_ORDERED = 92;
 const W_ALLOCATED = 92;
 /** Total width of the pinned leading (right, in RTL) pane. */
-const LEAD_PANE = W_PRODUCT + W_STOCK + W_AVAILABLE;
+const LEAD_PANE = W_PRODUCT + W_STOCK + W_ORDERED;
 /** Total width of the pinned trailing (left, in RTL) pane. */
-const TRAIL_PANE = W_ORDERED + W_ALLOCATED;
+const TRAIL_PANE = W_AVAILABLE + W_ALLOCATED;
 /** Rows rendered beyond each edge of the viewport, so a flick doesn't blank. */
 const OVERSCAN = 6;
 
@@ -613,11 +613,11 @@ export function ArrangementMatrix({
           <colgroup>
             <col style={{ width: W_PRODUCT }} />
             <col style={{ width: W_STOCK }} />
-            <col style={{ width: W_AVAILABLE }} />
+            <col style={{ width: W_ORDERED }} />
             {columns.map((column) => (
               <col key={column.customerId} style={{ width: W_CUSTOMER }} />
             ))}
-            <col style={{ width: W_ORDERED }} />
+            <col style={{ width: W_AVAILABLE }} />
             <col style={{ width: W_ALLOCATED }} />
           </colgroup>
 
@@ -645,7 +645,7 @@ export function ArrangementMatrix({
                 style={{ right: W_PRODUCT + W_STOCK }}
                 className={`sticky top-0 ${Z_CORNER} ${CELL_BORDER} bg-surface-muted px-2 align-bottom pb-3 text-xs font-semibold leading-tight text-ink-subtle`}
               >
-                זמין
+                סה״כ הוזמן
               </th>
 
               {columns.map((column) => (
@@ -669,7 +669,7 @@ export function ArrangementMatrix({
                 style={{ left: W_ALLOCATED }}
                 className={`sticky top-0 ${Z_CORNER} ${CELL_BORDER} bg-surface-muted px-2 align-bottom pb-3 text-xs font-semibold leading-tight text-ink-subtle`}
               >
-                סה״כ הוזמן
+                זמין
               </th>
               <th
                 scope="col"
@@ -876,14 +876,13 @@ function MatrixRowCells({
         tint={stickyTint}
       />
       <TotalCell
-        value={formatPallets(row.available)}
+        // A grower row has no demand of its own — the order was placed
+        // against the product, not against one of its lots — so it shows a
+        // dash rather than a zero, which would claim nobody wanted it.
+        value={isProduct ? formatPallets(row.ordered) : "—"}
         offset={{ right: W_PRODUCT + W_STOCK }}
         tint={stickyTint}
-        // Negative available means the pick line is over-committed. The
-        // server refuses to create that, so it can only appear when a
-        // grower revises pallets_picked downwards after the fact — which is
-        // precisely when the distributor needs to see it shouting.
-        tone={row.available < 0 ? "danger" : row.available === 0 ? "muted" : "normal"}
+        tone={isProduct ? "normal" : "muted"}
       />
 
       {/* -- the customer cells -- */}
@@ -972,13 +971,14 @@ function MatrixRowCells({
 
       {/* -- frozen trailing pane (pinned left) -- */}
       <TotalCell
-        // A grower row has no demand of its own — the order was placed
-        // against the product, not against one of its lots — so it shows a
-        // dash rather than a zero, which would claim nobody wanted it.
-        value={isProduct ? formatPallets(row.ordered) : "—"}
+        value={formatPallets(row.available)}
         offset={{ left: W_ALLOCATED }}
         tint={stickyTint}
-        tone={isProduct ? "normal" : "muted"}
+        // Negative available means the pick line is over-committed. The
+        // server refuses to create that, so it can only appear when a
+        // grower revises pallets_picked downwards after the fact — which is
+        // precisely when the distributor needs to see it shouting.
+        tone={row.available < 0 ? "danger" : row.available === 0 ? "muted" : "normal"}
       />
       <TotalCell
         value={formatPallets(row.allocated)}

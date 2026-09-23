@@ -628,8 +628,32 @@ input[type="number"] {
   }
 }
 
+/* `backwards`, not `both` — here and on `page-in` and `stagger-in` below,
+   the three entrances that wrap whole screens, tables and lists.
+
+   `both` also fills FORWARDS: after the entrance has finished, the element
+   keeps `transform: translateY(0)` applied by a live animation, forever.
+   Chrome treats content under an animated transform as liable to move at any
+   moment, so it stops limiting painting to the part near the screen and
+   repaints the ENTIRE subtree whenever any of it is invalidated — which a
+   window resize does on every frame. `page-in` wraps every routed screen, so
+   every page paid it, in proportion to its size: on Products with every
+   family open (~40,000 elements), paint per resize frame measured ~63ms
+   before and ~6ms after. That was the "resizing the window lags" report.
+
+   Nothing visible changes. `backwards` still applies the first keyframe
+   during `stagger-in`'s delay, so a row can't flash in at full opacity before
+   its turn; and the last keyframe is exactly the element's own resting style,
+   so letting go of it when the animation ends is invisible. The one real
+   difference is that a finished entrance no longer holds a transform, so it
+   stops being a stacking context and a containing block for `position:
+   fixed`. Nothing relies on either: every fixed-position popover, dropdown
+   and dialog is portaled to <body>, and the only z-indexes inside a page that
+   reach the phone header's z-30 are the arrangement grid's sticky cells —
+   and that grid only mounts at 1024px and up, where there is no phone
+   header (new-arrangement.tsx's `useWide`). */
 .animate-rise-in {
-  animation: rise-in 0.34s var(--ease-settle) both;
+  animation: rise-in 0.34s var(--ease-settle) backwards;
 }
 
 /* Route transition. Deliberately shorter and smaller than `rise-in`: a whole
@@ -646,17 +670,22 @@ input[type="number"] {
   }
 }
 
+/* `backwards`: see `.animate-rise-in`. This is the one that mattered most —
+   it wraps every routed screen. */
 .animate-page-in {
-  animation: page-in 0.26s var(--ease-settle) both;
+  animation: page-in 0.26s var(--ease-settle) backwards;
 }
 
 /* Staggered list entrance. The delay is read from a custom property the
    component sets per row, so the cascade is data-driven rather than a wall of
    nth-child rules. Capped at ~8 rows' worth at the call sites: past that the
    last row arrives late enough to feel broken rather than choreographed, and
-   long tables would still be animating after the user starts scrolling. */
+   long tables would still be animating after the user starts scrolling.
+
+   `backwards`: see `.animate-rise-in` — it is also what holds each row at the
+   first keyframe while it waits out its delay. */
 .animate-stagger-in {
-  animation: rise-in 0.36s var(--ease-settle) both;
+  animation: rise-in 0.36s var(--ease-settle) backwards;
   animation-delay: calc(var(--stagger-index, 0) * 40ms);
 }
 

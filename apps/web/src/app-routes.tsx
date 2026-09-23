@@ -1,9 +1,10 @@
-import { lazy, Suspense } from "react";
+import { Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import { HomeRedirect } from "@/routes/home-redirect";
 import NotFound from "@/routes/not-found";
 
+import { lazyRoute } from "./lib/lazy-route";
 import { RequireAuth } from "./lib/require-role";
 
 // Every screen is lazily imported, which is what preserves the per-route
@@ -16,37 +17,43 @@ import { RequireAuth } from "./lib/require-role";
 // are now nested <Route> elements sharing a layout, and each group's guard
 // is declared once on the parent — the same "one gate per role area, not
 // per page" shape the old layouts had.
+//
+// They go through lazyRoute rather than React's lazy directly: code-split
+// chunks are named by content hash, so a deploy renames every one of them
+// and a tab left open across that deploy asks for files the live deployment
+// no longer has. lib/lazy-route.ts turns that into one silent reload instead
+// of a blank page. Change one, read the other.
 
-const Login = lazy(() => import("@/routes/login"));
-const ChangePassword = lazy(() => import("@/routes/change-password"));
-const ResetPassword = lazy(() => import("@/routes/reset-password"));
+const Login = lazyRoute(() => import("@/routes/login"));
+const ChangePassword = lazyRoute(() => import("@/routes/change-password"));
+const ResetPassword = lazyRoute(() => import("@/routes/reset-password"));
 
-const BackofficeLayout = lazy(() => import("@/routes/backoffice/layout"));
-const Shop = lazy(() => import("@/routes/backoffice/shop"));
-const Arrangement = lazy(() => import("@/routes/backoffice/arrangement"));
-const NewArrangement = lazy(() => import("@/routes/backoffice/new-arrangement"));
-const OrderHistory = lazy(() => import("@/routes/backoffice/order-history"));
-const Products = lazy(() => import("@/routes/backoffice/products"));
-const PickedProducts = lazy(() => import("@/routes/backoffice/picked-products"));
-const Growers = lazy(() => import("@/routes/backoffice/growers"));
-const Customers = lazy(() => import("@/routes/backoffice/customers"));
-const Transporters = lazy(() => import("@/routes/backoffice/transporters"));
-const Users = lazy(() => import("@/routes/backoffice/users"));
-const UsersImport = lazy(() => import("@/routes/backoffice/users-import"));
-const UsersReset = lazy(() => import("@/routes/backoffice/users-reset"));
-const DistributorGrower = lazy(() => import("@/routes/backoffice/distributor-grower"));
-const DistributorCustomer = lazy(() => import("@/routes/backoffice/distributor-customer"));
+const BackofficeLayout = lazyRoute(() => import("@/routes/backoffice/layout"));
+const Shop = lazyRoute(() => import("@/routes/backoffice/shop"));
+const Arrangement = lazyRoute(() => import("@/routes/backoffice/arrangement"));
+const NewArrangement = lazyRoute(() => import("@/routes/backoffice/new-arrangement"));
+const OrderHistory = lazyRoute(() => import("@/routes/backoffice/order-history"));
+const Products = lazyRoute(() => import("@/routes/backoffice/products"));
+const PickedProducts = lazyRoute(() => import("@/routes/backoffice/picked-products"));
+const Growers = lazyRoute(() => import("@/routes/backoffice/growers"));
+const Customers = lazyRoute(() => import("@/routes/backoffice/customers"));
+const Transporters = lazyRoute(() => import("@/routes/backoffice/transporters"));
+const Users = lazyRoute(() => import("@/routes/backoffice/users"));
+const UsersImport = lazyRoute(() => import("@/routes/backoffice/users-import"));
+const UsersReset = lazyRoute(() => import("@/routes/backoffice/users-reset"));
+const DistributorGrower = lazyRoute(() => import("@/routes/backoffice/distributor-grower"));
+const DistributorCustomer = lazyRoute(() => import("@/routes/backoffice/distributor-customer"));
 
-const CustomerLayout = lazy(() => import("@/routes/customer/layout"));
-const CustomerOrder = lazy(() => import("@/routes/customer/order"));
-const CustomerHistory = lazy(() => import("@/routes/customer/history"));
+const CustomerLayout = lazyRoute(() => import("@/routes/customer/layout"));
+const CustomerOrder = lazyRoute(() => import("@/routes/customer/order"));
+const CustomerHistory = lazyRoute(() => import("@/routes/customer/history"));
 
-const GrowerLayout = lazy(() => import("@/routes/grower/layout"));
-const GrowerPicks = lazy(() => import("@/routes/grower/picks"));
-const GrowerHistory = lazy(() => import("@/routes/grower/history"));
+const GrowerLayout = lazyRoute(() => import("@/routes/grower/layout"));
+const GrowerPicks = lazyRoute(() => import("@/routes/grower/picks"));
+const GrowerHistory = lazyRoute(() => import("@/routes/grower/history"));
 
-const ProfileLayout = lazy(() => import("@/routes/profile/layout"));
-const Profile = lazy(() => import("@/routes/profile/profile"));
+const ProfileLayout = lazyRoute(() => import("@/routes/profile/layout"));
+const Profile = lazyRoute(() => import("@/routes/profile/profile"));
 
 export function AppRoutes() {
   return (

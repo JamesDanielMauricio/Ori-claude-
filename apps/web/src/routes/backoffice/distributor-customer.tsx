@@ -17,6 +17,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { QueryError } from "@/components/ui/query-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
+import { errorMessage } from "@/lib/error-message";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { nudgeWhatsAppDispatch } from "@/lib/nudge-whatsapp-dispatch";
 import { createClient } from "@/lib/supabase/client";
@@ -234,7 +235,7 @@ export default function DistributorAsCustomerPage() {
       nudgeWhatsAppDispatch(supabase);
     },
     onError: mergeOnError(reminderOptimistic.onError, (error: { message?: string }) => {
-      showToast(`שליחת התזכורת נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
+      showToast(`שליחת התזכורת נכשלה: ${errorMessage(error)}`, "error");
     }),
   });
 
@@ -246,7 +247,10 @@ export default function DistributorAsCustomerPage() {
     });
   }
 
-  const isLoading = customersQuery.isLoading || (!!dayId && ordersForDayQuery.isLoading);
+  // The day comes first: until it's known, `dayId` is undefined and the
+  // screen would briefly claim there is no open trading day.
+  const isLoading =
+    dayView.isLoading || customersQuery.isLoading || (!!dayId && ordersForDayQuery.isLoading);
 
   const rows = sortedCustomers.map((customer) => {
     const order = orderByCustomerId.get(customer.id) ?? null;
@@ -325,14 +329,15 @@ export default function DistributorAsCustomerPage() {
           <Skeleton className="h-14 w-full" />
           <Skeleton className="h-14 w-full" />
         </div>
-      ) : customersQuery.isError || ordersForDayQuery.isError ? (
+      ) : dayView.isLoadError || customersQuery.isError || ordersForDayQuery.isError ? (
         <QueryError
           what="לקוחות"
           onRetry={() => {
+            void dayView.refetch();
             void customersQuery.refetch();
             void ordersForDayQuery.refetch();
           }}
-          retrying={customersQuery.isFetching || ordersForDayQuery.isFetching}
+          retrying={dayView.isFetching || customersQuery.isFetching || ordersForDayQuery.isFetching}
         />
       ) : !dayId ? (
         // Without a day, no customer has a `daily_orders` header — the

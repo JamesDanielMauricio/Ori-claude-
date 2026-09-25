@@ -10,6 +10,11 @@
 // growers who stopped being in season for anything.
 //
 // Pages explicitly instead, stopping on the first short page.
+//
+// The query each caller passes MUST be ordered by something unique — the
+// table's primary key. Pages are cut with OFFSET, and without an ORDER BY
+// Postgres may return rows in a different order on each request, so a row
+// can appear on two pages while another is skipped altogether.
 const PAGE_SIZE = 1000;
 
 export async function fetchAllRows<T>(

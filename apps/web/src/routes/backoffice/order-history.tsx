@@ -9,6 +9,7 @@ import { StatusPill } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Icon } from "@/components/ui/icon";
 import { PageHeader } from "@/components/ui/page-header";
+import { QueryError } from "@/components/ui/query-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   TableBody,
@@ -157,8 +158,17 @@ export default function ArrangedOrderHistoryPage() {
         }
       />
 
+      {/* A failed read is reported as a failure at every level here — this
+          is the dispute-resolution screen, and "no trading day", "no orders"
+          or "no lines" are answers someone acts on. */}
       {dayQuery.isLoading ? (
         <Skeleton className="h-40 w-full rounded-xl" />
+      ) : dayQuery.isError && dayQuery.data === undefined ? (
+        <QueryError
+          what="יום המסחר"
+          onRetry={() => void dayQuery.refetch()}
+          retrying={dayQuery.isFetching}
+        />
       ) : !dayId ? (
         <div className="rounded-xl bg-surface shadow-raised ring-1 ring-inset ring-border/70">
           <EmptyState
@@ -170,15 +180,23 @@ export default function ArrangedOrderHistoryPage() {
       ) : (
         <ListDetailLayout
           list={
-            <RecordList
-              icon="briefcase"
-              items={listItems}
-              selectedId={selectedOrderId}
-              onSelect={setSelectedOrderId}
-              loading={ordersQuery.isLoading}
-              searchPlaceholder="חיפוש לקוח"
-              emptyLabel="אין הזמנות ליום זה."
-            />
+            ordersQuery.isError && !ordersQuery.data ? (
+              <QueryError
+                what="ההזמנות של היום"
+                onRetry={() => void ordersQuery.refetch()}
+                retrying={ordersQuery.isFetching}
+              />
+            ) : (
+              <RecordList
+                icon="briefcase"
+                items={listItems}
+                selectedId={selectedOrderId}
+                onSelect={setSelectedOrderId}
+                loading={ordersQuery.isLoading}
+                searchPlaceholder="חיפוש לקוח"
+                emptyLabel="אין הזמנות ליום זה."
+              />
+            )
           }
           detail={
             !selected ? (
@@ -207,6 +225,12 @@ export default function ArrangedOrderHistoryPage() {
 
                 {linesQuery.isLoading ? (
                   <Skeleton className="h-40 w-full rounded-xl" />
+                ) : linesQuery.isError && !linesQuery.data ? (
+                  <QueryError
+                    what="שורות ההזמנה"
+                    onRetry={() => void linesQuery.refetch()}
+                    retrying={linesQuery.isFetching}
+                  />
                 ) : !linesQuery.data || linesQuery.data.length === 0 ? (
                   <EmptyState icon="package" title="אין שורות בהזמנה זו" />
                 ) : (

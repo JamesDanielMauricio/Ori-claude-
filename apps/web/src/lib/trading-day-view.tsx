@@ -187,6 +187,11 @@ export function useTradingDayView() {
     isLive,
     isLoading: active.isLoading,
     isError: active.isError,
+    // Failed before ever loading — unlike `isError`, false when only a
+    // background refetch failed and the day already on screen is still
+    // good. What a screen should check before replacing itself with an
+    // error rather than showing what it has.
+    isLoadError: active.isLoadingError,
     isFetching: active.isFetching,
     refetch: active.refetch,
     // For the picker's displayed value before the user has ever touched it,

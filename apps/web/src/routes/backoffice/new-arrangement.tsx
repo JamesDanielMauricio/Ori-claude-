@@ -27,6 +27,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { QueryError } from "@/components/ui/query-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
+import { errorMessage } from "@/lib/error-message";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
 import { useTradingDayView } from "@/lib/trading-day-view";
@@ -515,6 +516,6 @@ function describeRpcError(error: RpcError): string {
     case "PGRST202":
       return "פעולה זו דורשת מיגרציה שטרם הורצה (0040). הרץ pnpm db:migrate.";
     default:
-      return error.message ?? "שגיאה לא ידועה";
+      return errorMessage(error);
   }
 }

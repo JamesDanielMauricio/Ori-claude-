@@ -12,6 +12,7 @@ import { Icon } from "@/components/ui/icon";
 import { QueryError } from "@/components/ui/query-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
+import { errorMessage } from "@/lib/error-message";
 import { hasChanges } from "@/lib/has-changes";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
@@ -295,7 +296,7 @@ export function OrderLinesEditor({
       onSubmitted?.();
     },
     onError: mergeOnError(submitOptimistic.onError, (error: { message?: string }) => {
-      showToast(`השליחה נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
+      showToast(`השליחה נכשלה: ${errorMessage(error)}`, "error");
     }),
   });
 

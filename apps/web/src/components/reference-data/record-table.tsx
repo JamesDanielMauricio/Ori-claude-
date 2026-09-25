@@ -11,6 +11,7 @@ import {
 import { checkboxClassName, inputClassName } from "@/components/reference-data/form-field";
 import { Button } from "@/components/ui/button";
 import { Icon, type IconName } from "@/components/ui/icon";
+import { QueryError } from "@/components/ui/query-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   TableBody,
@@ -215,6 +216,7 @@ export function RecordTable<T>({
   toolbarExtra,
   grouping,
   loading = false,
+  loadError = null,
   searchPlaceholder = "חיפוש",
   emptyLabel = "אין רשומות עדיין.",
 }: {
@@ -279,6 +281,12 @@ export function RecordTable<T>({
     renderAddRow?: ((group: RecordTableGroup) => RecordTableGroupContent) | undefined;
   };
   loading?: boolean;
+  // Set when the rows couldn't be loaded at all. Without it a failed read
+  // fell through to the empty state and told the user "no records yet" — a
+  // confident, wrong answer (see ui/query-error.tsx). Callers pass it only
+  // while they have no data, so a background refetch that fails doesn't
+  // hide rows already on screen.
+  loadError?: { what: string; onRetry: () => void; retrying: boolean } | null;
   searchPlaceholder?: string;
   emptyLabel?: string;
 }) {
@@ -572,6 +580,12 @@ export function RecordTable<T>({
           <Skeleton className="h-12 w-full" />
           <Skeleton className="h-12 w-full" />
         </div>
+      ) : loadError ? (
+        <QueryError
+          what={loadError.what}
+          onRetry={loadError.onRetry}
+          retrying={loadError.retrying}
+        />
       ) : isEmpty ? (
         <div className="flex flex-col items-center gap-2 rounded-xl bg-surface px-6 py-14 text-center shadow-raised ring-1 ring-inset ring-border/70">
           <Icon name={query ? "search" : "clipboard"} className="h-6 w-6 text-ink-subtle" />

@@ -5,7 +5,9 @@ import { useEffect, useState } from "react";
 import { FormField, inputClassName } from "@/components/reference-data/form-field";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
+import { QueryError } from "@/components/ui/query-error";
 import { useToast } from "@/components/ui/toast";
+import { errorMessage } from "@/lib/error-message";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
 import { formatVarietyName } from "@/lib/variety-label";
@@ -128,7 +130,15 @@ export function PriceEditDialog({
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const row = varietyQuery.data!;
+      const row = varietyQuery.data;
+      const caps = capsQuery.data;
+      // save_product REPLACES the variety's per-customer caps with whatever
+      // list it is given, deleting any cap left out. Caps that haven't loaded
+      // (still fetching, or the read failed) are unknown, not empty — sending
+      // [] in their place would silently delete every cap on this product.
+      // The save button is disabled until both reads land; this is the
+      // backstop behind it.
+      if (!row || !caps) throw new Error("נתוני המוצר עדיין לא נטענו");
       const input = saveProductInputSchema.parse({
         id: row.id,
         familyId: row.family_id,
@@ -146,7 +156,7 @@ export function PriceEditDialog({
         // noOverbooking/isSeasonalAvailable above.
         numberOfOrdersPerCustomer: row.number_of_orders_per_customer,
         expectedVersion: row.version,
-        customerPalletCaps: capsQuery.data ?? [],
+        customerPalletCaps: caps,
       });
       const { error } = await supabase.rpc("save_product", toSaveProductRpcArgs(input));
       if (error) throw error;
@@ -158,7 +168,7 @@ export function PriceEditDialog({
       onClose();
     },
     onError: mergeOnError(saveOptimistic.onError, (error: { message?: string }) => {
-      showToast(`עדכון המחיר נכשל: ${error.message ?? "שגיאה לא ידועה"}`, "error");
+      showToast(`עדכון המחיר נכשל: ${errorMessage(error)}`, "error");
     }),
   });
 
@@ -170,8 +180,17 @@ export function PriceEditDialog({
 
   return (
     <Dialog open={!!varietyId} onClose={onClose} title={title}>
-      {varietyQuery.isLoading ? (
+      {varietyQuery.isLoading || capsQuery.isLoading ? (
         <p className="text-sm text-ink-muted">טוען…</p>
+      ) : varietyQuery.isError || capsQuery.isError ? (
+        <QueryError
+          what="נתוני המוצר"
+          onRetry={() => {
+            void varietyQuery.refetch();
+            void capsQuery.refetch();
+          }}
+          retrying={varietyQuery.isFetching || capsQuery.isFetching}
+        />
       ) : (
         <div className="flex flex-col gap-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -221,7 +240,7 @@ export function PriceEditDialog({
             <Button
               type="button"
               onClick={() => saveMutation.mutate()}
-              disabled={saveMutation.isPending}
+              disabled={saveMutation.isPending || !varietyQuery.data || !capsQuery.data}
             >
               {saveMutation.isPending ? "שומר…" : "שמור"}
             </Button>

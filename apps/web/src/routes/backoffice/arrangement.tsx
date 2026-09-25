@@ -45,6 +45,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { QueryError } from "@/components/ui/query-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
+import { errorMessage } from "@/lib/error-message";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
 import { useTradingDayView } from "@/lib/trading-day-view";
@@ -535,7 +536,7 @@ export default function ArrangementPage() {
           ? "סטטוס הליקוט כבר השתנה בינתיים. רענן את הדף."
           : error.code === LIFECYCLE_ERROR_CODES.FORBIDDEN
             ? "אין הרשאה לבצע פעולה זו."
-            : (error.message ?? "שגיאה לא ידועה");
+            : errorMessage(error);
       showToast(`העדכון נכשל: ${message}`, "error");
       void queryClient.invalidateQueries({ queryKey: boardDataQueryKey });
     }),
@@ -775,6 +776,6 @@ function describeRpcError(error: RpcError): string {
     case "PGRST202":
       return "פעולה זו דורשת מיגרציה שטרם הורצה (0040). הרץ pnpm db:migrate.";
     default:
-      return error.message ?? "שגיאה לא ידועה";
+      return errorMessage(error);
   }
 }

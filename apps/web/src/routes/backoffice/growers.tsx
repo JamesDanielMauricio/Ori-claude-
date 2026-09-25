@@ -12,6 +12,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { StatusPill } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
+import { errorMessage } from "@/lib/error-message";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { hasChanges } from "@/lib/has-changes";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
@@ -130,7 +131,12 @@ export default function GrowersPage() {
     queryFn: async () => {
       const rows = await fetchAllRows<{ company_id: string; product_variety_id: string }>(
         (from, to) =>
-          supabase.from("grower_products").select("company_id, product_variety_id").range(from, to),
+          supabase
+            .from("grower_products")
+            .select("company_id, product_variety_id")
+            .order("company_id")
+            .order("product_variety_id")
+            .range(from, to),
       );
       const byCompany = new Map<string, string[]>();
       for (const row of rows) {
@@ -273,7 +279,7 @@ export default function GrowersPage() {
     ) => {
       saveOptimistic.onError(error, variables, context?.rows);
       saveProductsOptimistic.onError(error, variables, context?.products);
-      showToast(`השמירה נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
+      showToast(`השמירה נכשלה: ${errorMessage(error)}`, "error");
     },
   });
 
@@ -296,7 +302,7 @@ export default function GrowersPage() {
       void queryClient.invalidateQueries({ queryKey: growersQueryKey });
     },
     onError: mergeOnError(deleteOptimistic.onError, (error: { message?: string }) => {
-      showToast(`המחיקה נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
+      showToast(`המחיקה נכשלה: ${errorMessage(error)}`, "error");
       setDeleteTargetId(null);
     }),
   });
@@ -490,6 +496,21 @@ export default function GrowersPage() {
         // table that paints rows before they arrive would show every grower
         // as having nothing in season for a moment.
         loading={growersQuery.isLoading || growerProductsQuery.isLoading}
+        // The in-season lists are a column too: without them every grower
+        // would read as having nothing in season.
+        loadError={
+          (growersQuery.isError && !growersQuery.data) ||
+          (growerProductsQuery.isError && !growerProductsQuery.data)
+            ? {
+                what: "רשימת המגדלים",
+                onRetry: () => {
+                  void growersQuery.refetch();
+                  void growerProductsQuery.refetch();
+                },
+                retrying: growersQuery.isFetching || growerProductsQuery.isFetching,
+              }
+            : null
+        }
         searchPlaceholder="חיפוש מגדל"
         emptyLabel="אין מגדלים עדיין."
       />

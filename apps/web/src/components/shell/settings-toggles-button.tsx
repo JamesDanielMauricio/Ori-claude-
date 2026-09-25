@@ -5,6 +5,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { Icon } from "@/components/ui/icon";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
+import { errorMessage } from "@/lib/error-message";
 import { useAuth } from "@/lib/auth-context";
 import { createClient } from "@/lib/supabase/client";
 
@@ -71,7 +72,7 @@ export function SettingsTogglesButton() {
       void queryClient.invalidateQueries({ queryKey: SETTINGS_QUERY_KEY });
     },
     onError: (error: { message?: string }) => {
-      showToast(`עדכון ההגדרה נכשל: ${error.message ?? "שגיאה לא ידועה"}`, "error");
+      showToast(`עדכון ההגדרה נכשל: ${errorMessage(error)}`, "error");
     },
   });
 

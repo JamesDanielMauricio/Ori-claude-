@@ -14,6 +14,7 @@ import { StatusPill } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
+import { errorMessage } from "@/lib/error-message";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { hasChanges } from "@/lib/has-changes";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
@@ -123,6 +124,8 @@ export default function UsersPage() {
         supabase
           .from("profile_blocked_products")
           .select("user_id, product_variety_id")
+          .order("user_id")
+          .order("product_variety_id")
           .range(from, to),
       );
       const byUser = new Map<string, string[]>();
@@ -258,7 +261,7 @@ export default function UsersPage() {
     ) => {
       saveOptimistic.onError(error, variables, context?.rows);
       saveBlockedOptimistic.onError(error, variables, context?.blocked);
-      showToast(`השמירה נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
+      showToast(`השמירה נכשלה: ${errorMessage(error)}`, "error");
     },
   });
 
@@ -276,7 +279,7 @@ export default function UsersPage() {
       void queryClient.invalidateQueries({ queryKey: usersQueryKey });
     },
     onError: mergeOnError(deleteOptimistic.onError, (error: { message?: string }) => {
-      showToast(`המחיקה נכשלה: ${error.message}`, "error");
+      showToast(`המחיקה נכשלה: ${errorMessage(error)}`, "error");
       setDeleteTargetId(null);
     }),
   });
@@ -479,6 +482,20 @@ export default function UsersPage() {
           </>
         }
         loading={usersQuery.isLoading || blockedQuery.isLoading}
+        // The blocked-product lists are a column too: without them every
+        // user would read as having nothing blocked.
+        loadError={
+          (usersQuery.isError && !usersQuery.data) || (blockedQuery.isError && !blockedQuery.data)
+            ? {
+                what: "רשימת המשתמשים",
+                onRetry: () => {
+                  void usersQuery.refetch();
+                  void blockedQuery.refetch();
+                },
+                retrying: usersQuery.isFetching || blockedQuery.isFetching,
+              }
+            : null
+        }
         searchPlaceholder="חיפוש משתמש"
         emptyLabel="אין משתמשים עדיין."
       />

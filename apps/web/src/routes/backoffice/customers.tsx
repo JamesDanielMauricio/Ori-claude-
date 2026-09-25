@@ -10,6 +10,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { StatusPill } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
+import { errorMessage } from "@/lib/error-message";
 import { hasChanges } from "@/lib/has-changes";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
@@ -143,7 +144,7 @@ export default function CustomersPage() {
       void queryClient.invalidateQueries({ queryKey: customersQueryKey });
     },
     onError: mergeOnError(saveOptimistic.onError, (error: { message?: string }) => {
-      showToast(`השמירה נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
+      showToast(`השמירה נכשלה: ${errorMessage(error)}`, "error");
     }),
   });
 
@@ -166,7 +167,7 @@ export default function CustomersPage() {
       void queryClient.invalidateQueries({ queryKey: customersQueryKey });
     },
     onError: mergeOnError(deleteOptimistic.onError, (error: { message?: string }) => {
-      showToast(`המחיקה נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
+      showToast(`המחיקה נכשלה: ${errorMessage(error)}`, "error");
       setDeleteTargetId(null);
     }),
   });
@@ -303,6 +304,15 @@ export default function CustomersPage() {
         onAdd={handleNew}
         addLabel="לקוח חדש"
         loading={customersQuery.isLoading}
+        loadError={
+          customersQuery.isError && !customersQuery.data
+            ? {
+                what: "רשימת הלקוחות",
+                onRetry: () => void customersQuery.refetch(),
+                retrying: customersQuery.isFetching,
+              }
+            : null
+        }
         searchPlaceholder="חיפוש לקוח"
         emptyLabel="אין לקוחות עדיין."
       />

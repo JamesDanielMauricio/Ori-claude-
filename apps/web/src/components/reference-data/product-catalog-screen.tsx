@@ -23,6 +23,7 @@ import { ProductThumbnail } from "@/components/ui/product-thumbnail";
 import { StatusPill } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
+import { errorMessage } from "@/lib/error-message";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { hasChanges } from "@/lib/has-changes";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
@@ -366,6 +367,8 @@ export function ProductCatalogScreen({
         supabase
           .from("product_customer_caps")
           .select("product_variety_id, customer_company_id, pallet_cap")
+          .order("product_variety_id")
+          .order("customer_company_id")
           .range(from, to),
       );
       const byVariety = new Map<string, PalletCap[]>();
@@ -476,7 +479,7 @@ export function ProductCatalogScreen({
       saveCapsOptimistic.onError(error, variables, context?.caps);
 
       if (error.code !== PRODUCT_VERSION_CONFLICT_ERROR_CODE) {
-        showToast(`השמירה נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
+        showToast(`השמירה נכשלה: ${errorMessage(error)}`, "error");
         return;
       }
 
@@ -521,7 +524,7 @@ export function ProductCatalogScreen({
       void queryClient.invalidateQueries({ queryKey: productsQueryKey });
     },
     onError: mergeOnError(deleteOptimistic.onError, (error: { message?: string }) => {
-      showToast(`המחיקה נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
+      showToast(`המחיקה נכשלה: ${errorMessage(error)}`, "error");
       setDeleteTargetId(null);
     }),
   });
@@ -585,7 +588,7 @@ export function ProductCatalogScreen({
       void queryClient.invalidateQueries({ queryKey: familiesQueryKey });
     },
     onError: mergeOnError(saveFamilyOptimistic.onError, (error: { message?: string }) => {
-      showToast(`שמירת המשפחה נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
+      showToast(`שמירת המשפחה נכשלה: ${errorMessage(error)}`, "error");
     }),
   });
 
@@ -611,7 +614,7 @@ export function ProductCatalogScreen({
       void queryClient.invalidateQueries({ queryKey: familiesQueryKey });
     },
     onError: mergeOnError(deleteFamilyOptimistic.onError, (error: { message?: string }) => {
-      showToast(`מחיקת המשפחה נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
+      showToast(`מחיקת המשפחה נכשלה: ${errorMessage(error)}`, "error");
       setDeleteFamilyTargetId(null);
     }),
   });
@@ -941,7 +944,9 @@ export function ProductCatalogScreen({
         <input
           type="number"
           step="1"
-          min={0}
+          // 1, not 0: saveProductInputSchema requires a positive cap, and
+          // "no cap" is the empty box, not zero.
+          min={1}
           placeholder="ללא הגבלה"
           aria-label="כמות מקסימלית להזמנה ללקוח (Number of Orders per Customer)"
           className={`${inputClassName} w-28`}
@@ -1415,6 +1420,23 @@ export function ProductCatalogScreen({
         }}
         loading={
           extraLoading || productsQuery.isLoading || capsQuery.isLoading || familiesQuery.isLoading
+        }
+        // Families are the table's groups and caps are a column, so any of
+        // the three missing leaves a table that misreports the catalog.
+        loadError={
+          (productsQuery.isError && !productsQuery.data) ||
+          (capsQuery.isError && !capsQuery.data) ||
+          (familiesQuery.isError && !familiesQuery.data)
+            ? {
+                what: "קטלוג המוצרים",
+                onRetry: () => {
+                  void productsQuery.refetch();
+                  void capsQuery.refetch();
+                  void familiesQuery.refetch();
+                },
+                retrying: productsQuery.isFetching || capsQuery.isFetching || familiesQuery.isFetching,
+              }
+            : null
         }
         searchPlaceholder="חיפוש מוצר, זן או משפחה"
         emptyLabel={emptyLabel}

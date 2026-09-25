@@ -14,6 +14,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { Icon } from "@/components/ui/icon";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
+import { errorMessage } from "@/lib/error-message";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -171,7 +172,7 @@ export function BusinessDayPanel() {
       invalidate();
     },
     onError: mergeOnError(initiateOptimistic.onError, (error: { message?: string }) => {
-      showToast(`פתיחת היום נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
+      showToast(`פתיחת היום נכשלה: ${errorMessage(error)}`, "error");
       setConfirmAction(null);
     }),
   });
@@ -201,7 +202,7 @@ export function BusinessDayPanel() {
       invalidate();
     },
     onError: mergeOnError(openShopPhaseOptimistic.onError, (error: { message?: string }) => {
-      showToast(`פתיחת החנות נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
+      showToast(`פתיחת החנות נכשלה: ${errorMessage(error)}`, "error");
       setConfirmAction(null);
     }),
   });
@@ -220,7 +221,7 @@ export function BusinessDayPanel() {
       invalidate();
     },
     onError: mergeOnError(closeShopPhaseOptimistic.onError, (error: { message?: string }) => {
-      showToast(`סגירת החנות נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
+      showToast(`סגירת החנות נכשלה: ${errorMessage(error)}`, "error");
       setConfirmAction(null);
     }),
   });
@@ -239,7 +240,7 @@ export function BusinessDayPanel() {
       invalidate();
     },
     onError: mergeOnError(closeDayPhaseOptimistic.onError, (error: { message?: string }) => {
-      showToast(`סגירת יום העסקים נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
+      showToast(`סגירת יום העסקים נכשלה: ${errorMessage(error)}`, "error");
       setConfirmAction(null);
     }),
   });
@@ -252,6 +253,31 @@ export function BusinessDayPanel() {
 
   if (openDayQuery.isLoading) {
     return <Skeleton className="mx-3 my-3 h-28" />;
+  }
+
+  // Never loaded at all. Without this the panel fell through to the "no day
+  // is open" state and offered "פתח יום עסקים" — an action the
+  // single-open-day index then refuses whenever a day is in fact open. A
+  // real "no open day" answer is `null`, not undefined, so it still gets
+  // that button.
+  if (openDayQuery.isError && openDayQuery.data === undefined) {
+    return (
+      <div className="flex flex-col gap-2 border-b border-border bg-surface-muted px-3 py-3">
+        <p role="alert" className="flex items-start gap-2 px-1 text-xs text-danger">
+          <Icon name="alertCircle" className="mt-px h-4 w-4 shrink-0" />
+          טעינת מצב יום המסחר נכשלה.
+        </p>
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={openDayQuery.isFetching}
+          onClick={() => void openDayQuery.refetch()}
+          className="w-full"
+        >
+          {openDayQuery.isFetching ? "מנסה שוב…" : "נסה שוב"}
+        </Button>
+      </div>
+    );
   }
 
   // The toggle slot: initiate (no day) -> open shop (day started) ->

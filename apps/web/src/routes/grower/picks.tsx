@@ -1,6 +1,6 @@
 import { submitPickInputSchema, toSubmitPickRpcArgs } from "@ori/domain/lifecycle-engine";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { PickLinesEditor } from "@/components/grower/pick-lines-editor";
@@ -12,6 +12,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { QueryError } from "@/components/ui/query-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
+import { errorMessage } from "@/lib/error-message";
 import { useAuth } from "@/lib/auth-context";
 import { createClient } from "@/lib/supabase/client";
 
@@ -316,9 +317,15 @@ function PickDetail({
 }) {
   const supabase = createClient();
   const { showToast } = useToast();
+  // Reported by PickLinesEditor below. submit_pick sends the pick exactly as
+  // SAVED, so "שלח ליקוט" waits until nothing on screen is unsaved —
+  // otherwise it sent the previous numbers while the ones just typed stayed
+  // on screen looking sent.
+  const [linesUnsaved, setLinesUnsaved] = useState(false);
 
   const submitMutation = useMutation({
     mutationFn: async () => {
+      if (linesUnsaved) throw new Error("יש לשמור את השינויים לפני השליחה.");
       const input = submitPickInputSchema.parse({ dailyPickId: pick.id });
       const { data, error } = await supabase.rpc("submit_pick", toSubmitPickRpcArgs(input));
       if (error) throw error;
@@ -329,7 +336,7 @@ function PickDetail({
       onSubmitted();
     },
     onError: (error: { message?: string }) => {
-      showToast(`השליחה נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
+      showToast(`השליחה נכשלה: ${errorMessage(error)}`, "error");
     },
   });
 
@@ -340,19 +347,28 @@ function PickDetail({
         subtitle="עדכן את הכמויות שנקטפו וההערות לכל מוצר, ושלח את הליקוט למפיץ."
         actions={
           pick.status === "draft" ? (
-            <Button
-              type="button"
-              onClick={() => submitMutation.mutate()}
-              disabled={submitMutation.isPending}
-            >
-              {submitMutation.isPending && (
-                <span
-                  aria-hidden
-                  className="animate-spin-loop h-3.5 w-3.5 rounded-full border-2 border-current border-t-transparent"
-                />
+            <div className="flex flex-col items-end gap-1.5">
+              <Button
+                type="button"
+                onClick={() => submitMutation.mutate()}
+                disabled={submitMutation.isPending || linesUnsaved}
+              >
+                {submitMutation.isPending && (
+                  <span
+                    aria-hidden
+                    className="animate-spin-loop h-3.5 w-3.5 rounded-full border-2 border-current border-t-transparent"
+                  />
+                )}
+                {submitMutation.isPending ? "שולח…" : "שלח ליקוט"}
+              </Button>
+              {/* Said in text, not in a tooltip on the disabled button:
+                  growers are mostly on phones, where a tooltip never shows. */}
+              {linesUnsaved && (
+                <p className="text-xs font-medium text-warning">
+                  יש שינויים שלא נשמרו — שמור אותם לפני השליחה.
+                </p>
               )}
-              {submitMutation.isPending ? "שולח…" : "שלח ליקוט"}
-            </Button>
+            </div>
           ) : undefined
         }
       />
@@ -382,7 +398,12 @@ function PickDetail({
           phone runs several screens deep once a few families are open. Without
           it, "שמור" sits under all of it — see PickLinesEditor's own note on
           the prop. Matches what the customer's order editor already does. */}
-      <PickLinesEditor dailyPickId={pick.id} pickStatus={pick.status} sticky />
+      <PickLinesEditor
+        dailyPickId={pick.id}
+        pickStatus={pick.status}
+        sticky
+        onUnsavedChange={setLinesUnsaved}
+      />
     </div>
   );
 }

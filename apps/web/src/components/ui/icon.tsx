@@ -13,7 +13,10 @@ import type { ReactNode } from "react";
 //
 // Every glyph is drawn on the same 24×24 grid at the same stroke width, which
 // is what makes a set look like a set rather than a pile of clip art.
-const PATHS: Record<string, ReactNode> = {
+// `satisfies`, not a `: Record<string, ReactNode>` annotation: the annotation
+// widened the keys to `string`, which made IconName below plain `string` too,
+// so a misspelled name type-checked and rendered an empty <svg>.
+const PATHS = {
   cart: (
     <>
       <circle cx="9" cy="20" r="1.4" />
@@ -183,7 +186,7 @@ const PATHS: Record<string, ReactNode> = {
   // A bare checkmark — the custom Select's "this is the chosen option"
   // marker, as opposed to checkCircle's status-confirmation use.
   check: <path d="m5 12.5 4.5 4.5L19 7" />,
-};
+} satisfies Record<string, ReactNode>;
 
 export type IconName = keyof typeof PATHS;
 

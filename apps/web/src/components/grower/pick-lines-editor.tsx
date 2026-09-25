@@ -9,6 +9,7 @@ import { ProductThumbnail } from "@/components/ui/product-thumbnail";
 import { QueryError } from "@/components/ui/query-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
+import { errorMessage } from "@/lib/error-message";
 import { hasChanges } from "@/lib/has-changes";
 import { blockDecimalKey, stripDecimal } from "@/lib/integer-input";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
@@ -180,6 +181,7 @@ export function PickLinesEditor({
   dailyPickId,
   pickStatus,
   onSaved,
+  onUnsavedChange,
   sticky = false,
   readOnly = false,
 }: {
@@ -218,6 +220,12 @@ export function PickLinesEditor({
   // still refreshes its own query either way. Mirrors OrderLinesEditor's
   // `onSubmitted`.
   onSaved?: () => void;
+  // Told whether the screen holds changes that aren't saved yet (edited, or
+  // still being saved). The grower's own screen needs it because its
+  // "שלח ליקוט" submits the pick as SAVED — submit_pick only changes the
+  // status — so pressing it over unsaved numbers would send the old ones
+  // while the new ones sat on screen looking sent.
+  onUnsavedChange?: (unsaved: boolean) => void;
 }) {
   const supabase = createClient();
   const queryClient = useQueryClient();
@@ -361,7 +369,7 @@ export function PickLinesEditor({
       onSaved?.();
     },
     onError: mergeOnError(saveOptimistic.onError, (error: { message?: string }) => {
-      showToast(`השמירה נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
+      showToast(`השמירה נכשלה: ${errorMessage(error)}`, "error");
     }),
   });
 
@@ -394,6 +402,12 @@ export function PickLinesEditor({
   }
 
   const locked = pickStatus === "closed" || readOnly;
+
+  // Before the early returns below, so it runs on every render.
+  const unsaved = !locked && (dirty || saving);
+  useEffect(() => {
+    onUnsavedChange?.(unsaved);
+  }, [unsaved, onUnsavedChange]);
 
   if (linesQuery.isLoading) {
     return (

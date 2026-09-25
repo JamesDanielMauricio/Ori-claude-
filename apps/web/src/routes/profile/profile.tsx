@@ -8,6 +8,7 @@ import { QueryError } from "@/components/ui/query-error";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
+import { errorMessage } from "@/lib/error-message";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
 
@@ -89,7 +90,7 @@ export default function UserProfilePage() {
       void queryClient.invalidateQueries({ queryKey: profileQueryKey });
     },
     onError: mergeOnError(saveOptimistic.onError, (error: { message?: string }) => {
-      showToast(`השמירה נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
+      showToast(`השמירה נכשלה: ${errorMessage(error)}`, "error");
     }),
   });
 

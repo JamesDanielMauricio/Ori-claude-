@@ -26,6 +26,8 @@ import { PageHeader } from "@/components/ui/page-header";
 import { QueryError } from "@/components/ui/query-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
+import { errorMessage } from "@/lib/error-message";
+import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { nudgeWhatsAppDispatch } from "@/lib/nudge-whatsapp-dispatch";
 import { createClient } from "@/lib/supabase/client";
@@ -238,12 +240,22 @@ export default function DistributorAsGrowerPage() {
   // Only the second case needs a distributor to act somewhere other than the
   // pick editor, so it gets called out on the row instead of looking
   // identical to the first until the pencil is clicked.
+  //
+  // Paged (fetchAllRows) because grower_products is the table that outgrows
+  // PostgREST's 1000-row cap, which truncates silently: past it, the growers
+  // whose rows fell off the end would read as "no products in season" here.
   const growersWithProductsQuery = useQuery({
     queryKey: ["grower-oversight", "growers-with-products"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("grower_products").select("company_id");
-      if (error) throw error;
-      return new Set(data.map((row) => row.company_id));
+      const rows = await fetchAllRows<{ company_id: string }>((from, to) =>
+        supabase
+          .from("grower_products")
+          .select("company_id")
+          .order("company_id")
+          .order("product_variety_id")
+          .range(from, to),
+      );
+      return new Set(rows.map((row) => row.company_id));
     },
   });
 
@@ -260,11 +272,27 @@ export default function DistributorAsGrowerPage() {
     },
   });
 
+  // Seeded once per opening, from THIS grower's own list — and until that
+  // has happened the dialog shows no checkboxes and "שמור" stays disabled.
+  // save_grower replaces the grower's whole in-season list with whatever it
+  // is sent, and `productDraft` otherwise still holds the previously opened
+  // grower's selection while the new one loads (or forever, if the read
+  // fails), so saving in that window would have written one grower's
+  // products onto another. Seeding once, rather than on every change of the
+  // query's data, also stops a background refetch from overwriting ticks the
+  // distributor is in the middle of making.
+  const [draftGrowerId, setDraftGrowerId] = useState<string | null>(null);
   useEffect(() => {
-    if (productsDialogGrower && growerProductsQuery.data) {
-      setProductDraft(new Set(growerProductsQuery.data));
+    if (!productsDialogGrower) {
+      setDraftGrowerId(null);
+      return;
     }
-  }, [productsDialogGrower, growerProductsQuery.data]);
+    if (!growerProductsQuery.data || draftGrowerId === productsDialogGrower.id) return;
+    setProductDraft(new Set(growerProductsQuery.data));
+    setDraftGrowerId(productsDialogGrower.id);
+  }, [productsDialogGrower, growerProductsQuery.data, draftGrowerId]);
+  const productDraftReady =
+    productsDialogGrower !== null && draftGrowerId === productsDialogGrower.id;
 
   const catalogOptions = useMemo(
     () =>
@@ -293,6 +321,8 @@ export default function DistributorAsGrowerPage() {
     mutationFn: async () => {
       const grower = productsDialogGrower;
       if (!grower) throw new Error("no grower selected");
+      // Backstop behind the disabled button — see `draftGrowerId` above.
+      if (draftGrowerId !== grower.id) throw new Error("רשימת המוצרים של המגדל עדיין לא נטענה");
       const saveInput = saveGrowerInputSchema.parse({
         id: grower.id,
         name: grower.name,
@@ -335,7 +365,7 @@ export default function DistributorAsGrowerPage() {
       });
     },
     onError: (error: { message?: string }) => {
-      showToast(`העדכון נכשל: ${error.message ?? "שגיאה לא ידועה"}`, "error");
+      showToast(`העדכון נכשל: ${errorMessage(error)}`, "error");
     },
   });
 
@@ -373,7 +403,7 @@ export default function DistributorAsGrowerPage() {
       nudgeWhatsAppDispatch(supabase);
     },
     onError: mergeOnError(reminderOptimistic.onError, (error: { message?: string }) => {
-      showToast(`שליחת התזכורת נכשלה: ${error.message ?? "שגיאה לא ידועה"}`, "error");
+      showToast(`שליחת התזכורת נכשלה: ${errorMessage(error)}`, "error");
     }),
   });
 
@@ -399,7 +429,10 @@ export default function DistributorAsGrowerPage() {
     saveProductsMutation.mutate(undefined, { onSettled: () => setSavingProducts(false) });
   }
 
+  // The day comes first: until it's known, `dayId` is undefined and every
+  // grower would briefly render as having no pick at all.
   const isLoading =
+    dayView.isLoading ||
     growersQuery.isLoading ||
     (!!dayId && picksForDayQuery.isLoading) ||
     growersWithProductsQuery.isLoading;
@@ -518,15 +551,20 @@ export default function DistributorAsGrowerPage() {
           <Skeleton className="h-14 w-full" />
           <Skeleton className="h-14 w-full" />
         </div>
-      ) : growersQuery.isError || picksForDayQuery.isError || growersWithProductsQuery.isError ? (
+      ) : dayView.isLoadError ||
+        growersQuery.isError ||
+        picksForDayQuery.isError ||
+        growersWithProductsQuery.isError ? (
         <QueryError
           what="מגדלים"
           onRetry={() => {
+            void dayView.refetch();
             void growersQuery.refetch();
             void picksForDayQuery.refetch();
             void growersWithProductsQuery.refetch();
           }}
           retrying={
+            dayView.isFetching ||
             growersQuery.isFetching ||
             picksForDayQuery.isFetching ||
             growersWithProductsQuery.isFetching
@@ -563,16 +601,30 @@ export default function DistributorAsGrowerPage() {
         }
       >
         <div className="flex flex-col gap-4">
-          <CheckboxList
-            options={catalogOptions}
-            selectedIds={productDraft}
-            onToggle={toggleProduct}
-          />
+          {growerProductsQuery.isError ? (
+            <QueryError
+              what="המוצרים בעונה"
+              onRetry={() => void growerProductsQuery.refetch()}
+              retrying={growerProductsQuery.isFetching}
+            />
+          ) : productDraftReady ? (
+            <CheckboxList
+              options={catalogOptions}
+              selectedIds={productDraft}
+              onToggle={toggleProduct}
+            />
+          ) : (
+            <p className="text-sm text-ink-muted">טוען…</p>
+          )}
           <div className="flex justify-end gap-2">
             <Button type="button" variant="secondary" onClick={() => setProductsDialogGrower(null)}>
               ביטול
             </Button>
-            <Button type="button" onClick={handleSaveProducts} disabled={savingProducts}>
+            <Button
+              type="button"
+              onClick={handleSaveProducts}
+              disabled={savingProducts || !productDraftReady}
+            >
               {savingProducts ? "שומר…" : "שמור"}
             </Button>
           </div>

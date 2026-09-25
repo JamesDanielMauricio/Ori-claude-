@@ -291,16 +291,18 @@ function NoOrderView({ tradingDayId }: { tradingDayId: string }) {
   );
 }
 
+// One row of get_customer_order_lines (migration 0056) — the order's lines
+// with their names, read through that function because customers can't read
+// product_varieties (and its prices) directly.
 interface HistoricalLineRow {
   id: string;
   pallets_ordered: number;
   comment: string | null;
-  product_varieties: {
-    name: string;
-    family_id: string;
-    pack_type: "pallets" | "crates" | null;
-    product_families: { name: string; image_url: string | null } | null;
-  } | null;
+  variety_name: string;
+  family_id: string;
+  family_name: string;
+  image_url: string | null;
+  pack_type: "pallets" | "crates" | null;
 }
 
 const STATUS_LABEL: Record<SpecificOrder["status"], string> = {
@@ -315,22 +317,21 @@ const STATUS_LABEL: Record<SpecificOrder["status"], string> = {
 function groupHistoricalLines(lines: HistoricalLineRow[]): OrderFamilyRow[] {
   const groups = new Map<string, OrderFamilyRow>();
   for (const line of lines) {
-    const familyId = line.product_varieties?.family_id ?? "";
-    let group = groups.get(familyId);
+    let group = groups.get(line.family_id);
     if (!group) {
       group = {
-        familyId,
-        familyName: line.product_varieties?.product_families?.name ?? "",
-        imageUrl: line.product_varieties?.product_families?.image_url ?? null,
+        familyId: line.family_id,
+        familyName: line.family_name,
+        imageUrl: line.image_url,
         varieties: [],
       };
-      groups.set(familyId, group);
+      groups.set(line.family_id, group);
     }
     group.varieties.push({
       varietyId: line.id,
-      varietyName: line.product_varieties?.name ?? "",
+      varietyName: line.variety_name,
       priceLabel: null,
-      packType: line.product_varieties?.pack_type ?? null,
+      packType: line.pack_type,
       pallets: String(line.pallets_ordered),
       comment: line.comment ?? "",
     });
@@ -348,15 +349,11 @@ function ClosedOrderView({ order }: { order: SpecificOrder }) {
   const linesQuery = useQuery({
     queryKey: ["customer", "order-lines-readonly", order.id],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("daily_order_products")
-        .select(
-          "id, pallets_ordered, comment, product_varieties(name, family_id, pack_type, product_families(name, image_url))",
-        )
-        .eq("daily_order_id", order.id)
-        .order("product_variety_id");
+      const { data, error } = await supabase.rpc("get_customer_order_lines", {
+        p_daily_order_id: order.id,
+      });
       if (error) throw error;
-      return data as unknown as HistoricalLineRow[];
+      return data as HistoricalLineRow[];
     },
   });
 
@@ -386,6 +383,14 @@ function ClosedOrderView({ order }: { order: SpecificOrder }) {
           <div className="space-y-2 p-3">
             <Skeleton className="h-10 w-full" />
             <Skeleton className="h-10 w-full" />
+          </div>
+        ) : linesQuery.isError && !linesQuery.data ? (
+          <div className="p-3">
+            <QueryError
+              what="שורות ההזמנה"
+              onRetry={() => void linesQuery.refetch()}
+              retrying={linesQuery.isFetching}
+            />
           </div>
         ) : families.length === 0 ? (
           <p className="p-4 text-sm text-ink-muted">אין שורות בהזמנה זו.</p>

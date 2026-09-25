@@ -1176,6 +1176,25 @@ export type Database = {
           max_orderable_for_customer: number;
         }[];
       };
+      // One order's lines with their variety/family names and no price
+      // (migration 0056) — how a customer's closed-order screen reads them,
+      // since customers can no longer read product_varieties directly.
+      // Returns rows only to the order's own customer and to backoffice.
+      get_customer_order_lines: {
+        Args: {
+          p_daily_order_id: string;
+        };
+        Returns: {
+          id: string;
+          pallets_ordered: number;
+          comment: string | null;
+          variety_name: string;
+          family_id: string;
+          family_name: string;
+          image_url: string | null;
+          pack_type: Database["public"]["Enums"]["pack_type"] | null;
+        }[];
+      };
       // The customer order screen's per-line ceiling (migration 0042):
       // least(the variety's number_of_orders_per_customer, remaining stock
       // excluding p_customer_company_id's own demand), floored at 0. Not

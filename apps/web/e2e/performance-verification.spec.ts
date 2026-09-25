@@ -138,11 +138,12 @@ test.describe("Performance verification — measured against the source's docume
       .insert(dailyOrderProducts)
       .values({ dailyOrderId: orderB.id, productVarietyId: grower.varietyId, palletsOrdered: "3" });
 
-    const lineRequestUrls: string[] = [];
+    // A closed order's lines come from the get_customer_order_lines RPC
+    // (migration 0056) — a POST whose body, not URL, names the order.
+    const lineRequestBodies: string[] = [];
     page.on("request", (request) => {
-      const url = request.url();
-      if (url.includes("/rest/v1/daily_order_products") && url.includes("daily_order_id=")) {
-        lineRequestUrls.push(url);
+      if (request.url().includes("/rest/v1/rpc/get_customer_order_lines")) {
+        lineRequestBodies.push(request.postData() ?? "");
       }
     });
 
@@ -171,7 +172,7 @@ test.describe("Performance verification — measured against the source's docume
     await expect(page).toHaveURL(new RegExp(`orderId=${orderA.id}`));
     await page.locator("main").getByRole("button", { expanded: false }).click();
     await expect(page.locator('input[type="number"]')).toHaveValue("2");
-    const countAfterFirstA = lineRequestUrls.filter((url) => url.includes(orderA.id)).length;
+    const countAfterFirstA = lineRequestBodies.filter((body) => body.includes(orderA.id)).length;
 
     // Back via the shell's own nav link, NOT page.goto: a goto is a full
     // browser load, which tears down the QueryClient and takes its cache with
@@ -194,10 +195,10 @@ test.describe("Performance verification — measured against the source's docume
     await expect(page).toHaveURL(new RegExp(`orderId=${orderA.id}`));
     await page.locator("main").getByRole("button", { expanded: false }).click();
     await expect(page.locator('input[type="number"]')).toHaveValue("2");
-    const countAfterRevisitA = lineRequestUrls.filter((url) => url.includes(orderA.id)).length;
+    const countAfterRevisitA = lineRequestBodies.filter((body) => body.includes(orderA.id)).length;
 
     console.log(
-      `[perf] daily_order_products requests for order A: ${countAfterFirstA} on first view, ${countAfterRevisitA} after revisiting`,
+      `[perf] get_customer_order_lines requests for order A: ${countAfterFirstA} on first view, ${countAfterRevisitA} after revisiting`,
     );
     expect(countAfterFirstA).toBe(1);
     expect(countAfterRevisitA).toBe(1);

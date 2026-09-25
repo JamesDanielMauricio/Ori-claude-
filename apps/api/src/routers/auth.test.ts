@@ -72,7 +72,14 @@ describe("auth router — role guards", () => {
       cleanupFns.push(() => deleteTestUser(firstResult.userId));
     }
 
-    const resetResult = await trpcCaller.auth.adminResetPassword({ targetUserId: admin.userId });
-    expect(resetResult).toEqual({ ok: true });
+    // Resetting your OWN account is refused by the procedure itself — which
+    // is exactly what proves the role guard let a backoffice caller through
+    // (a guard refusal would be FORBIDDEN/UNAUTHORIZED), without this test
+    // sending a real WhatsApp message. The refusal happens before anything
+    // is changed. The reset's own effects are covered by
+    // packages/domain/src/auth/admin-reset-password.test.ts.
+    await expect(
+      trpcCaller.auth.adminResetPassword({ targetUserId: admin.userId }),
+    ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
   });
 });

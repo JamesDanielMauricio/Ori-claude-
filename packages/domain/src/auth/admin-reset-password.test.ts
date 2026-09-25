@@ -1,11 +1,20 @@
+import { randomUUID } from "node:crypto";
+
 import { db } from "@ori/db";
 import { profiles } from "@ori/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { adminResetPassword } from "./admin-reset-password";
-import { UserNotFoundError } from "./errors";
-import { createTestCompany, createTestProfile, deleteTestCompany, deleteTestUser, runCleanup } from "./test-helpers";
+import { adminResetPassword, type RecoveryLinkDelivery } from "./admin-reset-password";
+import { RecoveryLinkUndeliverableError, UserNotFoundError } from "./errors";
+import {
+  createTestCompany,
+  createTestProfile,
+  deleteTestCompany,
+  deleteTestUser,
+  runCleanup,
+  signInTestUser,
+} from "./test-helpers";
 
 // reference/prd/reset-password-admin-mediated.md's actual point: an admin
 // resets another user's password, the target ends up with usable new
@@ -21,6 +30,36 @@ import { createTestCompany, createTestProfile, deleteTestCompany, deleteTestUser
 // requireRole("backoffice") — IS the authorization). These tests confirm
 // the actual effect, not just the role guard apps/api's own router tests
 // already cover.
+
+// Stands in for WhatsApp: records the link instead of sending it.
+function recordingDelivery(delivered: string[]): RecoveryLinkDelivery {
+  return {
+    prepare: async () => async (actionLink) => {
+      delivered.push(actionLink);
+      return { lastDigits: "0000", devRedirected: false };
+    },
+  };
+}
+
+// Refuses the way the WhatsApp delivery does for a user with no phone.
+const refusingDelivery: RecoveryLinkDelivery = {
+  prepare: async () => {
+    throw new RecoveryLinkUndeliverableError("no_phone");
+  },
+};
+
+async function sessionCount(userId: string): Promise<number> {
+  const rows = await db.execute<{ n: number }>(
+    sql`select count(*)::int as n from auth.sessions where user_id = ${userId}`,
+  );
+  return rows[0]?.n ?? 0;
+}
+
+async function mustChangePassword(userId: string): Promise<boolean | undefined> {
+  const [profile] = await db.select().from(profiles).where(eq(profiles.userId, userId));
+  return profile?.mustChangePassword;
+}
+
 describe("adminResetPassword", () => {
   const cleanupFns: Array<() => Promise<void>> = [];
 
@@ -28,43 +67,82 @@ describe("adminResetPassword", () => {
     await runCleanup(cleanupFns);
   });
 
-  it("flags the target for a forced password change and generates a real, deliverable recovery link", async () => {
+  async function signedInTarget() {
     const company = await createTestCompany();
     cleanupFns.push(() => deleteTestCompany(company.id));
     const target = await createTestProfile({ companyId: company.id, role: "grower" });
     cleanupFns.push(() => deleteTestUser(target.userId));
+    const targetClient = await signInTestUser(target.email, target.password);
+    return { target, targetClient };
+  }
 
-    const delivered: Array<{ email: string; actionLink: string }> = [];
-    await adminResetPassword({
+  it("delivers a real recovery link, flags a forced password change and ends every existing login", async () => {
+    const { target, targetClient } = await signedInTarget();
+    expect(await sessionCount(target.userId)).toBeGreaterThan(0);
+
+    const delivered: string[] = [];
+    const receipt = await adminResetPassword({
       targetUserId: target.userId,
-      deliverRecoveryLink: (params) => {
-        delivered.push(params);
-      },
+      actorUserId: randomUUID(),
+      delivery: recordingDelivery(delivered),
     });
 
     // A real Supabase-issued recovery link, not a placeholder — proves
     // the target's password is genuinely resettable, without this test
     // needing to drive the full "click the link, set a password" flow
-    // (that's the recovery-link redemption Supabase itself owns; e2e's
-    // own reset-password.spec.ts already exercises the primary
-    // self-service variant of that same redemption path).
+    // (that's the recovery-link redemption Supabase itself owns).
     expect(delivered).toHaveLength(1);
-    expect(delivered[0]!.email).toBe(target.email);
-    expect(delivered[0]!.actionLink).toMatch(/^https?:\/\//);
+    expect(delivered[0]).toMatch(/^https?:\/\//);
+    expect(receipt).toEqual({ lastDigits: "0000", devRedirected: false });
 
-    const [profileAfter] = await db.select().from(profiles).where(eq(profiles.userId, target.userId));
-    expect(profileAfter?.mustChangePassword).toBe(true);
+    expect(await mustChangePassword(target.userId)).toBe(true);
 
-    // The one thing the source's session-juggling risked getting wrong —
-    // the admin's OWN credentials — is structurally not in play here at
-    // all: adminResetPassword's signature has no admin-credential
-    // parameter for a caller to get wrong, and this call ran without
-    // ever touching a second identity's session.
+    // "Signed out everywhere": the session is gone, so the device that was
+    // logged in can no longer renew its login.
+    expect(await sessionCount(target.userId)).toBe(0);
+    const { error: refreshError } = await targetClient.auth.refreshSession();
+    expect(refreshError).not.toBeNull();
+  }, 30000);
+
+  it("changes nothing when the link can't be delivered", async () => {
+    const { target } = await signedInTarget();
+    const sessionsBefore = await sessionCount(target.userId);
+
+    await expect(
+      adminResetPassword({
+        targetUserId: target.userId,
+        actorUserId: randomUUID(),
+        delivery: refusingDelivery,
+      }),
+    ).rejects.toMatchObject({ reason: "no_phone" });
+
+    expect(await mustChangePassword(target.userId)).toBe(false);
+    expect(await sessionCount(target.userId)).toBe(sessionsBefore);
+  }, 30000);
+
+  it("refuses an admin resetting their own account, and changes nothing", async () => {
+    const { target } = await signedInTarget();
+    const delivered: string[] = [];
+
+    await expect(
+      adminResetPassword({
+        targetUserId: target.userId,
+        actorUserId: target.userId,
+        delivery: recordingDelivery(delivered),
+      }),
+    ).rejects.toMatchObject({ reason: "self_reset" });
+
+    expect(delivered).toHaveLength(0);
+    expect(await mustChangePassword(target.userId)).toBe(false);
   }, 30000);
 
   it("rejects a target user that doesn't exist, and leaves no partial state behind", async () => {
     await expect(
-      adminResetPassword({ targetUserId: "00000000-0000-0000-0000-000000000000" }),
+      adminResetPassword({
+        targetUserId: "00000000-0000-0000-0000-000000000000",
+        actorUserId: randomUUID(),
+        delivery: recordingDelivery([]),
+      }),
     ).rejects.toBeInstanceOf(UserNotFoundError);
   });
 });

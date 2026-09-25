@@ -109,17 +109,21 @@ here.
 
 ## 5. Admin-Mediated Reset (`reference/prd/reset-password-admin-mediated.md`)
 
-- [ ] From `/backoffice/users/reset`, entering a target user's ID and submitting shows a success
-      confirmation — the recovery link itself is **never displayed to the admin**, only sent to
-      the target.
+- [ ] From `/backoffice/users/reset`, picking a user by name and submitting shows a success
+      confirmation naming the last four digits of their phone — the recovery link itself is
+      **never displayed to the admin**; it is sent to the target's own WhatsApp (the phone on
+      their profile).
+- [ ] With `WHATSAPP_ENV` other than `live`, the confirmation says the link went to the test
+      phone (`notification_settings.whatsapp_dev_override_phone`) instead of the user.
+- [ ] A user with no phone number on their profile cannot be submitted, and the screen says to add
+      one on the Users screen.
+- [ ] The target is signed out of every device they were logged in on, and at their next sign-in
+      (or via the link) must set a new password.
 - [ ] The target user can complete the recovery flow and sign in with their new password
       afterward.
 - [ ] The admin who performed the reset remains signed in as themselves throughout — no session
-      hand-off, no re-entering their own password mid-flow.
-- [ ] ⚠️ **Known UX gap**: the reset form takes a raw user UUID, not a name/email picker — a real
-      admin would need to already know the target's ID from elsewhere (e.g. the Users list) before
-      using this screen. Not a functional bug, but worth deciding whether it's acceptable for
-      launch or needs a picker before cutover.
+      hand-off, no re-entering their own password mid-flow. The admin's own account isn't offered
+      in the picker.
 
 ## 6. The Full Daily Lifecycle (`reference/prd/daily-trading-lifecycle.md`, `lifecycle-invariants.md`)
 

@@ -1,5 +1,5 @@
 // The NotificationService: a swappable NotificationChannel behind a
-// single WhatsApp adapter (createWhatsAppChannel), a drain orchestrator
+// single WhatsApp adapter (createGreenApiChannel), a drain orchestrator
 // (drainNotificationOutbox) that any Node-hosted caller can use, and the
 // input schemas for create_alert — the one general "notify this user
 // in-app" entry point any backoffice-triggered flow can call. The actual
@@ -8,7 +8,14 @@
 // tested there directly, not reimplemented here. See
 // docs/ARCHITECTURE.md § Module boundaries.
 export type { NotificationChannel, OutboundMessage, SendResult } from "./channel";
-export { createWhatsAppChannel, type WhatsAppChannelConfig } from "./whatsapp-channel";
+export {
+  createGreenApiChannel,
+  readGreenApiCredentials,
+  selectWhatsAppEnv,
+  toWhatsAppNumber,
+  type GreenApiCredentials,
+  type WhatsAppEnv,
+} from "./whatsapp-channel";
 export {
   drainNotificationOutbox,
   type DrainDeps,

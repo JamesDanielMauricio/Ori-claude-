@@ -84,7 +84,10 @@ test.describe("Backoffice — Users", () => {
     await page.getByLabel("אימייל").fill(newUserEmail);
     await page.getByLabel("שם תצוגה").fill(newUserDisplayName);
     await chooseOption(page.getByRole("combobox", { name: "תפקיד", exact: true }), "מגדל");
-    await page.getByLabel("מזהה חברה").fill(targetCompany.id);
+    await chooseOption(
+      page.getByRole("combobox", { name: "חברה", exact: true }),
+      targetCompany.name,
+    );
     await page.getByRole("button", { name: "צור משתמשים" }).click();
 
     await expect(page.getByText("נוצר", { exact: true })).toBeVisible();

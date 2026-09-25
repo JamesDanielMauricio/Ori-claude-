@@ -1,9 +1,36 @@
-import { adminResetPassword, bulkCreateUsers, deleteUser, listUserEmails } from "@ori/domain/auth";
+import {
+  adminResetPassword,
+  bulkCreateUsers,
+  createWhatsAppRecoveryDelivery,
+  deleteUser,
+  listUserEmails,
+} from "@ori/domain/auth";
 import { userRoleSchema } from "@ori/shared/roles";
 import { z } from "zod";
 
 import { backofficeProcedure, router } from "../trpc";
 import { toTRPCError } from "../trpc-errors";
+
+// Where a reset link lands after Supabase verifies it: /change-password on
+// the site the admin is using, taken from the request's Origin header — the
+// same page the self-service reset (reset-password.tsx) sends people to.
+//
+// SECURITY: this only chooses a redirect target, and Supabase itself ignores
+// any target not on the project's redirect allow-list (falling back to the
+// Site URL), so a forged Origin can't send the link's session anywhere
+// unapproved. Anything that isn't a plain http(s) origin is dropped here
+// rather than passed along.
+function changePasswordUrl(origin: string | undefined): string | undefined {
+  if (!origin) return undefined;
+  try {
+    const url = new URL(origin);
+    return url.protocol === "https:" || url.protocol === "http:"
+      ? `${url.origin}/change-password`
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 // Everything else (sign-in, sign-out, session, forced/voluntary password
 // change, self-service reset) is pure supabase-js calls made directly from
@@ -37,12 +64,25 @@ export const authRouter = router({
       }
     }),
 
+  // Sends the target a one-time recovery link on WhatsApp, to the phone on
+  // their own profile, and signs them out everywhere — see
+  // packages/domain/src/auth/admin-reset-password.ts. The admin gets back
+  // only whether it went out and the number's last four digits.
   adminResetPassword: backofficeProcedure
     .input(z.object({ targetUserId: z.string().uuid() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       try {
-        await adminResetPassword({ targetUserId: input.targetUserId });
-        return { ok: true as const };
+        const receipt = await adminResetPassword({
+          targetUserId: input.targetUserId,
+          actorUserId: ctx.caller.userId,
+          delivery: createWhatsAppRecoveryDelivery(),
+          redirectTo: changePasswordUrl(ctx.req?.headers?.origin),
+        });
+        return {
+          ok: true as const,
+          lastDigits: receipt.lastDigits,
+          devRedirected: receipt.devRedirected,
+        };
       } catch (error) {
         throw toTRPCError(error);
       }

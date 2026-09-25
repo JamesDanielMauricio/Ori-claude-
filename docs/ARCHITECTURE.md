@@ -580,10 +580,13 @@ transaction has already committed. Three things were the explicit point of this 
   tested once, not reimplemented untested. `drain.ts` itself (a Node-side, fully-tested
   orchestrator using only a type-only `SupabaseClient` import plus the dependency-free
   `NotificationChannel` contract) exists as the swappable-channel demonstration the task asked
-  for, and as a reusable orchestrator for any future Node-hosted caller — a real WhatsApp API
-  provider was never available in this environment to exercise end to end, so
-  `createWhatsAppChannel` is exercised only by construction/interface tests, while
-  `drainNotificationOutbox`'s retry/toggle-gating logic is exercised fully via a
+  for, and as a reusable orchestrator for any future Node-hosted caller. The Node-side channel,
+  `createGreenApiChannel`, mirrors the Edge Function's own Green API send exactly and is used
+  by apps/api for the one message that must go out synchronously — the admin-mediated password
+  reset's recovery link, sent to the user's own WhatsApp
+  (`packages/domain/src/auth/whatsapp-recovery-delivery.ts`); it is exercised by pure tests with
+  a stubbed `fetch`, while `drainNotificationOutbox`'s retry/toggle-gating logic is exercised
+  fully via a
   `FakeNotificationChannel` test double. This is the "real retry/observability" this module
   replaces the source's single-hardcoded-email dead-letter with (see `whatsapp-messaging.md`'s
   own documented operational risk): `notification_outbox.attempt_count`/`last_error`/
@@ -648,7 +651,7 @@ only happens once the RLS-scoped update round-trips and the list is refetched, n
 optimistic state, so a silently-rejected write would leave the badge showing 1, not 0.
 
 See `packages/db/migrations/0023`-`0025`, `packages/domain/src/notifications/` (schemas, the
-`NotificationChannel`/`createWhatsAppChannel` adapter, `drainNotificationOutbox`, test fixtures
+`NotificationChannel`/`createGreenApiChannel` adapter, `drainNotificationOutbox`, test fixtures
 including `FakeNotificationChannel`, and the full test suite), `supabase/functions/
 whatsapp-dispatch/` (the actual Edge Function), and `apps/web/src/components/shell/alerts-bell.tsx`.
 

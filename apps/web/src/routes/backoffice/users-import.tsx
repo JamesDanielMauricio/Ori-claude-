@@ -1,11 +1,14 @@
-import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
 
 import { inputClassName } from "@/components/reference-data/form-field";
 import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/card";
 import { Icon } from "@/components/ui/icon";
 import { PageHeader } from "@/components/ui/page-header";
-import { Select } from "@/components/ui/select";
+import { QueryError } from "@/components/ui/query-error";
+import { Select, type SelectOption } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   TableBody,
   TableCell,
@@ -14,7 +17,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { createClient } from "@/lib/supabase/client";
 import { trpc } from "@/lib/trpc-client";
+
+interface CompanyOption {
+  id: string;
+  name: string;
+  type: string;
+  status: "active" | "inactive";
+}
 
 interface DraftRow {
   email: string;
@@ -37,11 +48,69 @@ const ROLE_LABEL: Record<DraftRow["role"], string> = {
 };
 
 export default function BulkImportUsersPage() {
+  const supabase = createClient();
   const [rows, setRows] = useState<DraftRow[]>([emptyRow()]);
+  const [missingCompany, setMissingCompany] = useState(false);
   const bulkCreate = trpc.auth.bulkCreateUsers.useMutation();
 
+  // Picked by name rather than typed in as a UUID, which no screen shows.
+  // Readable by backoffice through the companies RLS policies.
+  const companiesQuery = useQuery({
+    queryKey: ["users-import", "companies"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("companies")
+        .select("id, name, type, status")
+        .order("name");
+      if (error) throw error;
+      return data as CompanyOption[];
+    },
+  });
+
+  // A user's company is always of the type matching their role (every
+  // existing account is), so each row only offers those.
+  const companyOptionsByRole = useMemo(() => {
+    const byRole = new Map<string, SelectOption[]>();
+    for (const role of Object.keys(ROLE_LABEL)) {
+      byRole.set(role, [
+        { value: "", label: "בחר חברה", disabled: true },
+        ...(companiesQuery.data ?? [])
+          .filter((company) => company.type === role)
+          .map((company) => ({
+            value: company.id,
+            label: company.status === "active" ? company.name : `${company.name} (לא פעילה)`,
+          })),
+      ]);
+    }
+    return byRole;
+  }, [companiesQuery.data]);
+
   function updateRow(index: number, patch: Partial<DraftRow>) {
-    setRows((current) => current.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+    setMissingCompany(false);
+    setRows((current) =>
+      current.map((row, i) => {
+        if (i !== index) return row;
+        const next = { ...row, ...patch };
+        // Changing the role empties a company that no longer fits it,
+        // rather than leaving a grower company on a customer.
+        const company = companiesQuery.data?.find((option) => option.id === next.companyId);
+        if (company && company.type !== next.role) next.companyId = "";
+        return next;
+      }),
+    );
+  }
+
+  if (companiesQuery.isLoading) {
+    return <Skeleton className="h-40 w-full rounded-xl" />;
+  }
+  if (companiesQuery.isError) {
+    return (
+      <QueryError
+        what="רשימת החברות"
+        onRetry={() => void companiesQuery.refetch()}
+        retrying={companiesQuery.isFetching}
+      />
+    );
   }
 
   return (
@@ -54,6 +123,12 @@ export default function BulkImportUsersPage() {
       <form
         onSubmit={(event) => {
           event.preventDefault();
+          // The email and name boxes are checked by the browser (`required`);
+          // the company is a custom dropdown, so it's checked here.
+          if (rows.some((row) => !row.companyId)) {
+            setMissingCompany(true);
+            return;
+          }
           bulkCreate.mutate({
             rows: rows.map((row) => ({
               email: row.email,
@@ -71,7 +146,7 @@ export default function BulkImportUsersPage() {
               <TableHead>אימייל</TableHead>
               <TableHead>שם תצוגה</TableHead>
               <TableHead>תפקיד</TableHead>
-              <TableHead>מזהה חברה</TableHead>
+              <TableHead>חברה</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -108,14 +183,12 @@ export default function BulkImportUsersPage() {
                   />
                 </TableCell>
                 <TableCell>
-                  <input
-                    required
-                    aria-label="מזהה חברה"
-                    placeholder="UUID של החברה"
-                    dir="ltr"
-                    className={`${inputClassName} w-full min-w-72 text-left font-mono text-xs`}
+                  <Select
+                    aria-label="חברה"
+                    className="w-full min-w-56"
                     value={row.companyId}
-                    onChange={(event) => updateRow(index, { companyId: event.target.value })}
+                    onChange={(next) => updateRow(index, { companyId: next })}
+                    options={companyOptionsByRole.get(row.role) ?? []}
                   />
                 </TableCell>
               </TableRow>
@@ -141,6 +214,11 @@ export default function BulkImportUsersPage() {
             {bulkCreate.isPending ? "יוצר…" : "צור משתמשים"}
           </Button>
         </div>
+        {missingCompany && (
+          <p role="alert" className="text-sm text-danger">
+            יש לבחור חברה בכל שורה.
+          </p>
+        )}
       </form>
 
       {/* A failed import used to report nothing at all: the spinner stopped,

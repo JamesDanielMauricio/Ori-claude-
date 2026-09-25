@@ -9,7 +9,10 @@ export {
 export {
   adminResetPassword,
   type AdminResetPasswordInput,
-  type DeliverRecoveryLink,
+  type RecoveryLinkDelivery,
+  type RecoveryLinkReceipt,
+  type SendRecoveryLink,
 } from "./admin-reset-password";
+export { createWhatsAppRecoveryDelivery } from "./whatsapp-recovery-delivery";
 export { deleteUser, type DeleteUserInput } from "./delete-user";
 export { listUserEmails } from "./list-user-emails";

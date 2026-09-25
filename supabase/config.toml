@@ -388,6 +388,16 @@ deno_version = 2
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 
+# SECURITY: the Supabase gateway checks every request to whatsapp-dispatch
+# for a valid JWT before the function runs. It ALLOWS the pg_cron safety net
+# (service-role key) and a signed-in backoffice user's nudge through, and
+# PROTECTS AGAINST anyone on the internet triggering a drain with no key at
+# all. The function's own forceEnv check trusts a token's `role` claim
+# because of this setting, so it must stay true. `supabase functions deploy`
+# applies it — it is written here so a redeploy can't silently turn it off.
+[functions.whatsapp-dispatch]
+verify_jwt = true
+
 [analytics]
 enabled = true
 port = 54327

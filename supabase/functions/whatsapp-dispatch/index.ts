@@ -159,6 +159,32 @@ function toChatId(target: string, isGroup: boolean): string {
   return `${target}@${isGroup ? "g" : "c"}.us`;
 }
 
+// Whether the request was made with the service-role key — the one caller
+// allowed to force live credentials (see the forceEnv check in Deno.serve).
+// Two accepted proofs, because a caller may hold the key in either form:
+//   - the exact SUPABASE_SERVICE_ROLE_KEY this function itself is given;
+//   - a JWT whose `role` claim is "service_role". Reading the claim without
+//     re-checking the signature is safe ONLY because the Supabase gateway
+//     verifies every token before this code runs (verify_jwt, pinned on in
+//     supabase/config.toml) — a forged token never reaches this line.
+// Everyone else — a signed-in user's session token, the anon key — is not.
+function callerIsServiceRole(req: Request): boolean {
+  const token = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
+  if (!token) return false;
+  if (SERVICE_ROLE_KEY && token === SERVICE_ROLE_KEY) return true;
+  const payload = token.split(".")[1];
+  if (!payload) return false;
+  try {
+    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), "=");
+    const json = new TextDecoder().decode(Uint8Array.from(atob(padded), (char) => char.charCodeAt(0)));
+    const claims = JSON.parse(json) as { role?: unknown };
+    return claims.role === "service_role";
+  } catch {
+    return false;
+  }
+}
+
 async function sendWhatsAppMessage(
   to: string,
   isGroup: boolean,
@@ -205,6 +231,21 @@ Deno.serve(async (req) => {
     // No body, empty body, or non-JSON body — exactly what a scheduled/
     // cron trigger sends. Falls through to the WHATSAPP_ENV-based default
     // below, same as before this override existed.
+  }
+
+  // SECURITY: forcing live credentials is refused unless the request carries
+  // the service-role key. It ALLOWS the manual go-live verification call this
+  // override exists for (made by hand with that key), and every ordinary
+  // drain — the cron's and the backoffice nudge's empty body never ask for
+  // it. It PROTECTS AGAINST anyone else who can pass the gateway's JWT check
+  // — any signed-in customer or grower, whose session token is a valid JWT —
+  // switching a dev-mode project onto the live number and sending every
+  // queued message to real customers and growers instead of the test phone.
+  if (forcedEnv && !callerIsServiceRole(req)) {
+    return Response.json(
+      { error: "forceEnv requires the service-role key" },
+      { status: 403, headers: CORS_HEADERS },
+    );
   }
 
   const whatsappEnv = forcedEnv ?? selectWhatsAppEnv();

@@ -68,9 +68,17 @@ test.describe("Backoffice — arrangement workspace", () => {
     await growerCard.locator("button[aria-pressed]").first().click();
   }
 
+  // Longer than the 30s default: this walks the board, the matrix, the
+  // records table, both pencils and the close, and deliberately sits out one
+  // toast's full lifetime (see the "+ pushes surplus" section). Against the
+  // hosted project from a developer machine every round trip is a real
+  // network hop, which left the run already close to 30s before that wait
+  // was added. The extra budget is for those round trips, not for hiding a
+  // hang; each individual assertion keeps its own (much shorter) timeout.
   test("selects a grower's product, allocates to an ordering and a non-ordering customer, and closes the arrangement", async ({
     page,
   }) => {
+    test.slow();
     const adminCompany = await createTestCompany();
     cleanupFns.push(() => deleteTestCompany(adminCompany.id));
     const admin = await createTestProfile({ companyId: adminCompany.id, role: "backoffice" });
@@ -269,6 +277,15 @@ test.describe("Backoffice — arrangement workspace", () => {
     // The + writes nothing on its own: it moves the card above the rule and
     // offers a box. The order line only comes into existence on ✓, at zero
     // pallets, which is what makes the row below read "ordered 0, got 2".
+    //
+    // The ✓ save above raised this section's "הסידור נשמר." toast well under
+    // its 4s lifetime ago (toast.tsx's TOAST_DURATION_MS), so it is still on
+    // screen. Waiting for it to clear first is what makes the toast assertion
+    // below prove THIS save: without it, the stale toast satisfied it before
+    // this save's response arrived — and when the response was fast enough
+    // that both were up at once, CI failed on a strict-mode "resolved to 2
+    // elements" instead.
+    await expect(page.getByText("הסידור נשמר.")).toHaveCount(0);
     const surplusCard = page.getByRole("article", { name: "Surplus Customer" });
     await surplusCard.getByRole("button", { name: /הצע את המוצר הנבחר/ }).click();
 

@@ -599,8 +599,18 @@ export function ArrangementMatrix({
         // backoffice <main> is a stretched flex child with no definite
         // height for a percentage to resolve against; the floor keeps it
         // usable on a short window.
+        //
+        // `isolate` keeps the sticky cells' z-20…z-40 layering INSIDE this
+        // box. Without it those z-indexes compete with the two thumbs below
+        // (siblings, no z-index) and win: the frozen columns paint over the
+        // horizontal thumb at either end of its travel, and over the vertical
+        // thumb entirely, since its `left: 4` sits under the pinned סה״כ חולק
+        // column. `animate-rise-in` used to provide this layer by accident —
+        // a lingering transform is a stacking context — until its fill mode
+        // became `backwards` (see globals.css), after which it only exists
+        // for the 0.34s entrance.
         style={{ height: "calc(100dvh - 15rem)", minHeight: "22rem", scrollbarWidth: "none" }}
-        className="animate-rise-in relative overflow-auto rounded-xl bg-surface shadow-raised ring-1 ring-inset ring-border/70 [&::-webkit-scrollbar]:hidden"
+        className="animate-rise-in relative isolate overflow-auto rounded-xl bg-surface shadow-raised ring-1 ring-inset ring-border/70 [&::-webkit-scrollbar]:hidden"
       >
         <table
           className="table-fixed border-collapse text-sm"

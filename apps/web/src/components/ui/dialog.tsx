@@ -1,5 +1,14 @@
-import { useEffect, useId, useRef, type MouseEvent, type ReactNode } from "react";
+import {
+  useId,
+  useLayoutEffect,
+  useRef,
+  type MouseEvent,
+  type ReactNode,
+  type SyntheticEvent,
+} from "react";
 import { createPortal } from "react-dom";
+
+import { useExitAnimation } from "@/lib/use-exit-animation";
 
 import { Icon } from "./icon";
 
@@ -39,15 +48,52 @@ export function Dialog({
   // address it by what it says it is (a test included).
   const titleId = useId();
 
-  useEffect(() => {
+  // `open` turning false no longer closes the dialog outright: it stays up,
+  // marked `data-closing`, while globals.css plays its exit, and only then
+  // is it really closed — see lib/use-exit-animation.ts.
+  const { present, closing } = useExitAnimation(open, ref);
+
+  // What the dialog was showing the last time it was open, replayed while it
+  // animates out. Most callers close a dialog by clearing the very state it
+  // displays (`open={pickId !== null}`, then `setPickId(null)`), so without
+  // this the content would blank out — or drop to a loading state, or the
+  // delete confirmation lose the name it was asking about — halfway through
+  // the fade. Updated after each commit, so it only ever holds content that
+  // actually made it to the screen.
+  const lastShown = useRef({ title, children });
+  useLayoutEffect(() => {
+    if (open) lastShown.current = { title, children };
+  });
+  const shown = closing ? lastShown.current : { title, children };
+
+  // A layout effect, so showModal()/close() land before the browser paints.
+  // The render that ends the exit animation also removes `data-closing`, and
+  // an ordinary effect could let one frame through in between: a still-open
+  // dialog that has just lost its exit animation, and so starts its entrance
+  // over again.
+  useLayoutEffect(() => {
     const element = ref.current;
     if (!element) return;
-    if (open && !element.open) {
+    if (present && !element.open) {
       element.showModal();
-    } else if (!open && element.open) {
+    } else if (!present && element.open) {
       element.close();
     }
-  }, [open]);
+  }, [present]);
+
+  // Escape. Left alone, the browser closes the dialog on the spot, skipping
+  // the exit animation. Cancelling that and asking the caller to close
+  // instead routes Escape through the same animated path as the × button.
+  //
+  // Chrome only lets a page cancel this if the user has clicked or typed
+  // since the last time it did (so a page can't trap you in a dialog). When
+  // it refuses, preventDefault() does nothing, the dialog closes
+  // instantly, and the native `close` event below still tells the caller —
+  // it just goes without the animation.
+  function handleCancel(event: SyntheticEvent<HTMLDialogElement>) {
+    event.preventDefault();
+    onClose();
+  }
 
   function handleBackdropClick(event: MouseEvent<HTMLDialogElement>) {
     if (event.target === ref.current) {
@@ -71,9 +117,10 @@ export function Dialog({
     <dialog
       ref={ref}
       onClose={onClose}
-      onCancel={onClose}
+      onCancel={handleCancel}
       onClick={handleBackdropClick}
       aria-labelledby={titleId}
+      data-closing={closing || undefined}
       // `m-auto` restores the browser default a modal <dialog> relies on to
       // center itself. Tailwind preflight zeroes `margin` on every element,
       // which silently overrides the UA stylesheet rule and left every modal
@@ -110,7 +157,7 @@ export function Dialog({
           so no dialog in the app changes height. */}
       <div className="flex shrink-0 items-center justify-between gap-4 border-b border-border bg-surface-muted px-6 py-3">
         <h2 id={titleId} className="text-sm font-semibold">
-          {title}
+          {shown.title}
         </h2>
         <button
           type="button"
@@ -132,7 +179,7 @@ export function Dialog({
           flex child defaults to `min-height: auto`, which refuses to go below
           its content's height and would push the overflow back outside the
           dialog no matter what the cap above says. */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">{children}</div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">{shown.children}</div>
     </dialog>,
     document.body,
   );

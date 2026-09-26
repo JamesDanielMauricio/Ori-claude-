@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 
 import { inputClassName } from "@/components/reference-data/form-field";
 import { Icon } from "@/components/ui/icon";
+import { useExitAnimation } from "@/lib/use-exit-animation";
 
 // A trigger button plus a panel that opens over the page, for the one kind
 // of field a table cell can't hold inline: a list (a grower's in-season
@@ -43,6 +44,10 @@ export function CellPopover({
   } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  // Kept mounted, marked `data-closing`, while it animates out — see
+  // lib/use-exit-animation.ts. The outside-click and Escape listeners below
+  // still key off `open`, so they're already gone by then.
+  const { present, closing } = useExitAnimation(open, panelRef);
 
   function openPanel() {
     const rect = triggerRef.current?.getBoundingClientRect();
@@ -122,7 +127,7 @@ export function CellPopover({
         <Icon name="chevronDown" className="h-3.5 w-3.5 shrink-0 text-ink-subtle" />
       </button>
 
-      {open &&
+      {present &&
         position &&
         createPortal(
           <div
@@ -133,13 +138,16 @@ export function CellPopover({
             // list in here rather than in <body>, so picking an option isn't a
             // click "outside" this panel that closes it.
             data-portal-root=""
+            data-closing={closing || undefined}
             style={{
               position: "fixed",
               top: position.top,
               right: position.right,
               maxWidth: position.maxWidth,
             }}
-            className={`z-50 max-h-[60dvh] overflow-y-auto rounded-xl border border-border bg-surface p-3 text-ink shadow-overlay ${panelClassName}`}
+            // `origin-top-right`: the corner pinned under the trigger (see
+            // openPanel), which the open/close animation scales from.
+            className={`animate-popover origin-top-right z-50 max-h-[60dvh] overflow-y-auto rounded-xl border border-border bg-surface p-3 text-ink shadow-overlay ${panelClassName}`}
           >
             <div className="mb-2 flex items-center justify-between gap-2">
               <span className="text-xs font-semibold tracking-[0.08em] text-ink-subtle">

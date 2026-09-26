@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 
 import { Icon } from "@/components/ui/icon";
 import { useTradingDaysInRange } from "@/lib/trading-day-view";
+import { useExitAnimation } from "@/lib/use-exit-animation";
 
 // Sunday..Saturday, narrow Hebrew labels (א׳ ב׳ …) — generated rather than
 // hardcoded so it can't drift from what Intl actually renders for this
@@ -85,6 +86,10 @@ export function TradingDayCalendarPicker({
 
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+  // Kept mounted, marked `data-closing`, while it animates out — see
+  // lib/use-exit-animation.ts. The outside-click and Escape listeners below
+  // still key off `open`, so they're already gone by then.
+  const { present, closing } = useExitAnimation(open, popoverRef);
 
   function openPopover() {
     setViewDate(parseIsoDate(selectedDate ?? liveDate ?? todayIsoDate()));
@@ -183,15 +188,18 @@ export function TradingDayCalendarPicker({
         <span className="flex-1 truncate text-start">{triggerLabel}</span>
       </button>
 
-      {open &&
+      {present &&
         position &&
         createPortal(
           <div
             ref={popoverRef}
             role="dialog"
             aria-label="בחירת יום מסחר"
+            data-closing={closing || undefined}
             style={{ position: "fixed", top: position.top, right: position.right }}
-            className="z-50 w-[19rem] overflow-hidden rounded-xl border border-border bg-surface p-3 text-ink shadow-overlay"
+            // `origin-top-right`: the corner pinned under the trigger (see
+            // openPopover), which the open/close animation scales from.
+            className="animate-popover origin-top-right z-50 w-[19rem] overflow-hidden rounded-xl border border-border bg-surface p-3 text-ink shadow-overlay"
           >
             <div className="mb-2 flex items-center justify-between gap-2">
               <button

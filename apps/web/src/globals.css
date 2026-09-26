@@ -647,11 +647,12 @@ input[type="number"] {
    so letting go of it when the animation ends is invisible. The one real
    difference is that a finished entrance no longer holds a transform, so it
    stops being a stacking context and a containing block for `position:
-   fixed`. Nothing relies on either: every fixed-position popover, dropdown
-   and dialog is portaled to <body>, and the only z-indexes inside a page that
-   reach the phone header's z-30 are the arrangement grid's sticky cells —
-   and that grid only mounts at 1024px and up, where there is no phone
-   header (new-arrangement.tsx's `useWide`). */
+   fixed`. Nothing should rely on either: every fixed-position popover,
+   dropdown and dialog is portaled to <body>. One thing DID rely on the
+   stacking context, silently — the arrangement grid's custom scrollbars,
+   which the grid's own sticky cells then painted over. That grid now says
+   `isolate` itself (arrangement-matrix.tsx), which also keeps those sticky
+   cells' z-indexes from ever reaching the phone header's z-30. */
 .animate-rise-in {
   animation: rise-in 0.34s var(--ease-settle) backwards;
 }
@@ -978,6 +979,90 @@ dialog[open]::backdrop {
   /* Blur behind the modal so a dense table underneath stops competing with
      the dialog's own content for attention. */
   backdrop-filter: blur(4px) saturate(0.85);
+}
+
+/*
+ * Modal exit — the entrance run backwards, only quicker: closing is the user
+ * finishing with something, and it should get out of their way.
+ *
+ * A native <dialog> vanishes the instant close() is called, so this can't
+ * run on close; it runs before it. ui/dialog.tsx keeps the dialog open,
+ * marked `data-closing`, for as long as this animation lasts, and calls
+ * close() when it ends (lib/use-exit-animation.ts). `forwards` holds the
+ * last, invisible frame for the moment between the animation ending and
+ * close() landing — without it the dialog would flash back to full opacity.
+ * That fill can't linger: close() removes `[open]`, which ends the rule.
+ *
+ * The backdrop fades on the same clock. Only the dialog's OWN animation is
+ * waited on (the dialog's getAnimations() doesn't include its ::backdrop's),
+ * so the backdrop must never outlast it.
+ *
+ * `pointer-events: none` stops a second click on a button that is already
+ * on its way out from firing it again.
+ */
+@keyframes dialog-out {
+  to {
+    transform: translateY(0.5rem) scale(0.97);
+    opacity: 0;
+  }
+}
+
+@keyframes backdrop-out {
+  to {
+    opacity: 0;
+  }
+}
+
+dialog[open][data-closing] {
+  animation: dialog-out 0.18s var(--ease-exit) forwards;
+  pointer-events: none;
+}
+
+dialog[open][data-closing]::backdrop {
+  animation: backdrop-out 0.18s var(--ease-exit) forwards;
+}
+
+/*
+ * Floating panels — the dropdown list (ui/select.tsx), the table-cell
+ * popover (cell-popover.tsx) and the sidebar calendar. Each grows out of the
+ * edge it is attached to and shrinks back into it: the component sets
+ * `transform-origin` to that edge, so one pair of keyframes serves a list
+ * that drops down and one that opens upward.
+ *
+ * Scale and fade only, no slide — a panel is small and sits right against
+ * its trigger, and a travelling panel reads as detaching from it. Faster
+ * than a dialog for the same reason: these open on every click of a field.
+ *
+ * The entrance has no fill mode at all, so a finished one leaves no
+ * transform behind (see `.animate-rise-in` for why that matters). The exit's
+ * `forwards` is the same as the dialog's above, and ends when the panel
+ * unmounts.
+ */
+@keyframes popover-in {
+  from {
+    transform: scale(0.95);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes popover-out {
+  to {
+    transform: scale(0.95);
+    opacity: 0;
+  }
+}
+
+.animate-popover {
+  animation: popover-in 0.16s var(--ease-settle);
+}
+
+.animate-popover[data-closing] {
+  animation: popover-out 0.12s var(--ease-exit) forwards;
+  pointer-events: none;
 }
 
 /*

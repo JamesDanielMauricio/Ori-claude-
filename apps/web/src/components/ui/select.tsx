@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 
 import { inputClassName } from "@/components/reference-data/form-field";
 import { Icon } from "@/components/ui/icon";
+import { useExitAnimation } from "@/lib/use-exit-animation";
 
 export interface SelectOption {
   value: string;
@@ -70,6 +71,11 @@ export function Select({
   // into one search term, the same window a native <select> uses, instead of
   // each keystroke restarting the search from scratch.
   const typeaheadRef = useRef({ text: "", timer: 0 as unknown as ReturnType<typeof setTimeout> });
+  // The list stays mounted, marked `data-closing`, while it animates out —
+  // see lib/use-exit-animation.ts. Everything else here still keys off
+  // `open`, so a closing list has already stopped listening for keys,
+  // outside clicks and scrolling: it just finishes fading where it was.
+  const { present, closing } = useExitAnimation(open, panelRef);
 
   const selectedIndex = options.findIndex((option) => option.value === value);
   const selectedOption = selectedIndex === -1 ? undefined : options[selectedIndex];
@@ -136,6 +142,10 @@ export function Select({
       panel.style.left = `${Math.max(VIEWPORT_MARGIN, Math.min(rect.left, window.innerWidth - VIEWPORT_MARGIN - rect.width))}px`;
       panel.style.top = `${upward ? rect.top - PANEL_GAP - height : rect.bottom + PANEL_GAP}px`;
       panel.style.maxHeight = `${maxHeight}px`;
+      // The open/close animation scales from here — the edge touching the
+      // trigger, so the list grows out of the field and shrinks back into it
+      // whichever way it opened.
+      panel.style.transformOrigin = upward ? "bottom" : "top";
     };
 
     // Follows the trigger when anything scrolls — the page, the record table's
@@ -308,7 +318,7 @@ export function Select({
         )}
       </button>
 
-      {open &&
+      {present &&
         portalRoot &&
         createPortal(
           <div
@@ -316,7 +326,8 @@ export function Select({
             role="listbox"
             id={listId}
             aria-label={ariaLabel}
-            className="fixed z-50 overflow-y-auto rounded-xl border border-border bg-surface p-1.5 text-ink shadow-overlay"
+            data-closing={closing || undefined}
+            className="animate-popover fixed z-50 overflow-y-auto rounded-xl border border-border bg-surface p-1.5 text-ink shadow-overlay"
           >
             {options.map((option, index) => {
               const isSelected = option.value === value;

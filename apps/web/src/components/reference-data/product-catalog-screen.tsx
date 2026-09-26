@@ -4,7 +4,7 @@ import {
   toSaveProductRpcArgs,
 } from "@ori/domain/reference-data";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 
 import { CellChipList, CellPopover } from "@/components/reference-data/cell-popover";
 import { checkboxClassName, inputClassName } from "@/components/reference-data/form-field";
@@ -101,6 +101,30 @@ const NEW_ROW_ID = "__new__";
 const NEW_FAMILY_ID = "__new_family__";
 
 const CREATED_AT_FORMAT = new Intl.DateTimeFormat("he-IL", { dateStyle: "short" });
+
+// Storage backing for a family's photo (0058_product-photo-storage-bucket.sql).
+// Mirrors that migration's `allowed_mime_types` / `file_size_limit` so a
+// rejected file gets a Hebrew toast here rather than a raw Storage API error
+// — Storage itself is still the real enforcement, since a client-side-only
+// check can always be bypassed by calling the API directly.
+const PRODUCT_PHOTOS_BUCKET = "product-photos";
+const PHOTO_MIME_EXTENSIONS: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+};
+const PHOTO_MAX_BYTES = 5 * 1024 * 1024;
+
+// Only a URL this app itself uploaded (via getPublicUrl, below) is ever
+// eligible for deletion — anything else, such as a URL pasted before this
+// feature existed or one carried over from the Bubble import, is left alone
+// because we don't own it and can't tell whether something else still reads
+// it.
+function productPhotoPathFromUrl(url: string): string | null {
+  const marker = `/storage/v1/object/public/${PRODUCT_PHOTOS_BUCKET}/`;
+  const index = url.indexOf(marker);
+  return index === -1 ? null : url.slice(index + marker.length);
+}
 
 const PACK_TYPE_LABEL: Record<PackType, string> = { pallets: "משטחים", crates: "ארגזים" };
 
@@ -290,6 +314,28 @@ export function ProductCatalogScreen({
   const [familyForm, setFamilyForm] = useState<FamilyFormState>(blankFamilyForm);
   const [savingFamily, setSavingFamily] = useState(false);
   const [deleteFamilyTargetId, setDeleteFamilyTargetId] = useState<string | null>(null);
+
+  // A picked-but-not-yet-saved photo. Nothing is uploaded to Storage until
+  // the family is actually saved (handleSaveFamily) — the same "nothing
+  // touches the server until שמור" rule every other field on this form
+  // already follows — so cancelling an edit after picking a file uploads
+  // nothing and leaves no orphaned object behind.
+  const [pendingPhotoFile, setPendingPhotoFile] = useState<File | null>(null);
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+
+  // Local preview only, via a blob: URL. Revoked on every change and on
+  // unmount so switching photos (or switching away without saving) never
+  // leaks memory.
+  useEffect(() => {
+    if (!pendingPhotoFile) {
+      setPhotoPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(pendingPhotoFile);
+    setPhotoPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [pendingPhotoFile]);
 
   // Which families are open. Everything starts collapsed: the catalog runs
   // to ~78 families and ~600 varieties, and a screen that opens every one of
@@ -568,10 +614,28 @@ export function ProductCatalogScreen({
   const saveFamilyMutation = useMutation({
     mutationFn: async () => {
       if (!editingFamilyId) return;
+      const previousImageUrl =
+        editingFamilyId === NEW_FAMILY_ID ? null : (editingFamily?.image_url ?? null);
+
+      let imageUrl = familyForm.imageUrl.trim() || null;
+      if (pendingPhotoFile) {
+        const extension = PHOTO_MIME_EXTENSIONS[pendingPhotoFile.type];
+        // A fresh random filename every time, never the family's own id:
+        // reusing one path across re-uploads would risk a CDN still serving
+        // the OLD photo's cached bytes from that same URL after a
+        // replacement is saved.
+        const path = `${crypto.randomUUID()}.${extension}`;
+        const { error: uploadError } = await supabase.storage
+          .from(PRODUCT_PHOTOS_BUCKET)
+          .upload(path, pendingPhotoFile, { contentType: pendingPhotoFile.type });
+        if (uploadError) throw uploadError;
+        imageUrl = supabase.storage.from(PRODUCT_PHOTOS_BUCKET).getPublicUrl(path).data.publicUrl;
+      }
+
       const values = {
         name: familyForm.name.trim(),
         category: familyForm.category.trim() || null,
-        image_url: familyForm.imageUrl.trim() || null,
+        image_url: imageUrl,
       };
       // Create and update are the same three columns, so they're the same
       // form and the same button — only the verb differs, exactly as the
@@ -581,11 +645,32 @@ export function ProductCatalogScreen({
           ? await supabase.from("product_families").insert(values)
           : await supabase.from("product_families").update(values).eq("id", editingFamilyId);
       if (error) throw error;
+
+      // Best-effort cleanup of whatever photo this one just replaced. The row
+      // is already saved with the new photo at this point, so a failed
+      // removal here only leaves one unreferenced file in Storage rather than
+      // losing or blocking anything the user asked for — same reasoning as
+      // nudgeWhatsAppDispatch's fire-and-forget calls. productPhotoPathFromUrl
+      // guards against ever touching a URL this app didn't itself upload.
+      if (previousImageUrl && previousImageUrl !== imageUrl) {
+        const oldPath = productPhotoPathFromUrl(previousImageUrl);
+        if (oldPath) {
+          void supabase.storage
+            .from(PRODUCT_PHOTOS_BUCKET)
+            .remove([oldPath])
+            .then(({ error: removeError }) => {
+              if (removeError) {
+                console.warn("[product-photos] failed to remove replaced photo", removeError);
+              }
+            });
+        }
+      }
     },
     onMutate: saveFamilyOptimistic.onMutate,
     onSuccess: () => {
       showToast(editingFamilyId === NEW_FAMILY_ID ? "המשפחה נוצרה." : "המשפחה נשמרה.", "success");
       setEditingFamilyId(null);
+      setPendingPhotoFile(null);
       void queryClient.invalidateQueries({ queryKey: familiesQueryKey });
     },
     onError: mergeOnError(saveFamilyOptimistic.onError, (error: { message?: string }) => {
@@ -602,11 +687,27 @@ export function ProductCatalogScreen({
   const deleteFamilyMutation = useMutation({
     mutationFn: async () => {
       if (!deleteFamilyTargetId) return;
+      const photoUrl = familyById.get(deleteFamilyTargetId)?.image_url ?? null;
       const { error } = await supabase
         .from("product_families")
         .delete()
         .eq("id", deleteFamilyTargetId);
       if (error) throw error;
+
+      // Best-effort, same reasoning as the replace-on-save cleanup above: the
+      // family is already gone, so nothing but one unreferenced Storage file
+      // is at stake if this fails.
+      const photoPath = photoUrl ? productPhotoPathFromUrl(photoUrl) : null;
+      if (photoPath) {
+        void supabase.storage
+          .from(PRODUCT_PHOTOS_BUCKET)
+          .remove([photoPath])
+          .then(({ error: removeError }) => {
+            if (removeError) {
+              console.warn("[product-photos] failed to remove deleted family's photo", removeError);
+            }
+          });
+      }
     },
     onMutate: deleteFamilyOptimistic.onMutate,
     onSuccess: () => {
@@ -628,7 +729,12 @@ export function ProductCatalogScreen({
       : editingFamily
         ? toFamilyForm(editingFamily)
         : null;
-  const familyDirty = familyBaseline ? hasChanges(familyForm, familyBaseline) : false;
+  // A picked-but-unsaved photo doesn't touch familyForm.imageUrl until the
+  // upload actually completes inside saveFamilyMutation (see its comment),
+  // so hasChanges alone can't see it — checked separately here or picking a
+  // new photo and nothing else would leave "שמור" disabled.
+  const familyDirty =
+    (familyBaseline ? hasChanges(familyForm, familyBaseline) : false) || pendingPhotoFile !== null;
 
   function openFamily(familyId: string) {
     setExpandedFamilyIds((current) => {
@@ -651,21 +757,50 @@ export function ProductCatalogScreen({
   function handleEditFamily(family: ProductFamily) {
     setEditingFamilyId(family.id);
     setFamilyForm(toFamilyForm(family));
+    setPendingPhotoFile(null);
   }
 
   function handleNewFamily() {
     setEditingId(null);
     setEditingFamilyId(NEW_FAMILY_ID);
     setFamilyForm(blankFamilyForm());
+    setPendingPhotoFile(null);
   }
 
   function handleCancelFamily() {
     setEditingFamilyId(null);
+    setPendingPhotoFile(null);
   }
 
   function handleSaveFamily() {
     setSavingFamily(true);
     saveFamilyMutation.mutate(undefined, { onSettled: () => setSavingFamily(false) });
+  }
+
+  // Validated against the same limits Storage itself enforces
+  // (0058_product-photo-storage-bucket.sql) so a rejected file gets a Hebrew
+  // toast here rather than a raw API error after an upload attempt.
+  function handlePhotoFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+    // Clears the input's own value so picking the exact same file again
+    // still fires this handler (a file input otherwise treats an unchanged
+    // selection as a no-op change).
+    event.target.value = "";
+    if (!file) return;
+    if (!(file.type in PHOTO_MIME_EXTENSIONS)) {
+      showToast("ניתן להעלות תמונות מסוג JPEG, PNG או WebP בלבד.", "error");
+      return;
+    }
+    if (file.size > PHOTO_MAX_BYTES) {
+      showToast("התמונה גדולה מדי (עד 5MB).", "error");
+      return;
+    }
+    setPendingPhotoFile(file);
+  }
+
+  function handleRemovePhoto() {
+    setPendingPhotoFile(null);
+    setFamilyForm((current) => ({ ...current, imageUrl: "" }));
   }
 
   // Seeded synchronously from data the table already has — the caps are
@@ -1200,6 +1335,46 @@ export function ProductCatalogScreen({
     };
   }
 
+  // The family's photo control, live only while its own edit form is open.
+  // Clicking the picture itself opens the file picker (handlePhotoFileChange)
+  // — one control on the thing it acts on, rather than a separate "add
+  // photo" / "remove photo" pair of icon buttons sitting elsewhere in the
+  // row. The × badge only appears once a photo actually exists, so an empty
+  // slot shows nothing to remove.
+  function renderPhotoButton() {
+    const hasPhoto = Boolean(pendingPhotoFile || familyForm.imageUrl.trim());
+    return (
+      <span className="group/photo relative inline-flex shrink-0">
+        <button
+          type="button"
+          onClick={() => photoInputRef.current?.click()}
+          disabled={savingFamily}
+          aria-label={hasPhoto ? "החלפת תמונת המשפחה" : "העלאת תמונת המשפחה"}
+          className="block rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:pointer-events-none disabled:opacity-40"
+        >
+          <ProductThumbnail imageUrl={photoPreviewUrl ?? familyForm.imageUrl} size="sm" />
+        </button>
+        {hasPhoto && (
+          <button
+            type="button"
+            onClick={(event) => {
+              // Otherwise this click bubbles up through the photo button
+              // above and reopens the file picker the same instant the
+              // photo clears.
+              event.stopPropagation();
+              handleRemovePhoto();
+            }}
+            disabled={savingFamily}
+            aria-label="הסרת תמונה"
+            className="absolute -end-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-danger text-danger-ink opacity-0 shadow-sm ring-1 ring-inset ring-border transition-opacity duration-150 group-hover/photo:opacity-100 focus-visible:opacity-100 disabled:pointer-events-none"
+          >
+            <Icon name="close" className="h-2.5 w-2.5" />
+          </button>
+        )}
+      </span>
+    );
+  }
+
   function renderFamilyHeader(
     family: ProductFamily,
     varietyCount: number,
@@ -1214,15 +1389,38 @@ export function ProductCatalogScreen({
     // puts it. It stays available while the family is being edited —
     // renaming a family and checking what's inside it are independent, and
     // taking the chevron away mid-edit would be a dead end. A draft family
-    // has nothing to expand onto, so it gets a plain thumbnail instead.
+    // has nothing to expand onto, so it gets a plain photo control instead.
     //
     // While the family is only being read, the rest of its row toggles too
     // (the group's `onToggle`, in `toGroup`), so the chevron lights up when
     // the pointer is anywhere on the row (`group-hover/section:`), not just
-    // over this button. Mid-edit only this button toggles, so there only its
-    // own hover (`group-hover:`) does.
+    // over this button.
+    //
+    // Mid-edit, the chevron and the photo split into two independent
+    // controls (renderPhotoButton) instead of sharing one button: the
+    // chevron still toggles expand/collapse, but the photo itself now needs
+    // its own click target to open the file picker, and one <button> can't
+    // do both jobs at once.
     const toggle = isDraft ? (
-      <ProductThumbnail imageUrl={familyForm.imageUrl} size="sm" />
+      renderPhotoButton()
+    ) : isEditing ? (
+      <span className={`flex ${NAME_GUTTER} shrink-0 items-center gap-2`}>
+        <button
+          type="button"
+          onClick={() => toggleFamily(family.id)}
+          aria-expanded={expanded}
+          aria-label={`${expanded ? "כווץ" : "הרחב"} ${family.name}`}
+          className="group flex shrink-0 items-center rounded-md p-1"
+        >
+          <Icon
+            name="chevronDown"
+            className={`h-4 w-4 shrink-0 transition-[transform,color] duration-300 ease-[cubic-bezier(0.22,0.61,0.36,1)] ${
+              expanded ? "rotate-180 text-accent" : "text-ink-muted group-hover:text-accent"
+            }`}
+          />
+        </button>
+        {renderPhotoButton()}
+      </span>
     ) : (
       <button
         type="button"
@@ -1244,28 +1442,23 @@ export function ProductCatalogScreen({
                 : "text-ink-muted group-hover:text-accent group-hover/section:text-accent"
             }`}
           />
-          <ProductThumbnail
-            imageUrl={isEditing ? familyForm.imageUrl : family.image_url}
-            size="sm"
-          />
+          <ProductThumbnail imageUrl={family.image_url} size="sm" />
         </span>
         {/* A shade larger than a row's own text: this is a section title, and
             the band it sits on reads as a section, so the name should lead it
             rather than match the varieties listed underneath. */}
-        {!isEditing && (
-          <span className="truncate text-[0.9375rem] font-semibold text-ink">{family.name}</span>
-        )}
+        <span className="truncate text-[0.9375rem] font-semibold text-ink">{family.name}</span>
       </button>
     );
 
     // Editing falls back to one full-width band rather than the column grid
-    // the read state uses. The image-URL field is the reason: it needs ~14rem
-    // to show a URL at all, against a `גודל` column that is barely 4rem, so
-    // sitting it in a cell would re-measure every column in the table and
-    // shove the variety rows sideways on each keystroke. `sticky start-0`
-    // keeps the form parked at the frozen edge while the table scrolls under
-    // it; `px-4` matches the padding a row's own cells carry (table.tsx), so
-    // the controls stay in line with the varieties' edit/delete.
+    // the read state uses. The category and photo fields are the reason: they
+    // need more room than a `גודל` column that is barely 4rem, so sitting them
+    // in a cell would re-measure every column in the table and shove the
+    // variety rows sideways on each keystroke. `sticky start-0` keeps the form
+    // parked at the frozen edge while the table scrolls under it; `px-4`
+    // matches the padding a row's own cells carry (table.tsx), so the
+    // controls stay in line with the varieties' edit/delete.
     if (isEditing) {
       return {
         kind: "band",
@@ -1306,16 +1499,19 @@ export function ProductCatalogScreen({
                 setFamilyForm((current) => ({ ...current, category: event.target.value }))
               }
             />
+            {/* File picker for the family's photo, opened by clicking the
+                thumbnail itself (renderPhotoButton, inside `toggle` above) —
+                uploaded to Storage only on שמור (see saveFamilyMutation), not
+                the moment it's picked, so cancelling this edit uploads
+                nothing. Replaces what used to be a raw "paste a URL" box:
+                nothing else in this app hosts an image anywhere else a URL
+                could sensibly come from. */}
             <input
-              type="url"
-              dir="ltr"
-              aria-label="קישור לתמונת המשפחה"
-              placeholder="https://…"
-              className={`${inputClassName} w-56`}
-              value={familyForm.imageUrl}
-              onChange={(event) =>
-                setFamilyForm((current) => ({ ...current, imageUrl: event.target.value }))
-              }
+              ref={photoInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={handlePhotoFileChange}
             />
           </div>
         ),

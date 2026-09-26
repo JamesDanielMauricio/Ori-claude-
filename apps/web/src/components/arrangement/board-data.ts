@@ -214,6 +214,8 @@ export interface CustomerDemand {
   customerName: string;
   status: string;
   ordered: number;
+  /** Per line, capped at that line's own `ordered` — surplus given on a line
+   * the customer didn't order (ordered=0) doesn't count as progress here. */
   allocated: number;
   lines: CustomerOrderLine[];
   hasSelected: boolean;
@@ -477,7 +479,13 @@ export function buildBoard({
         const lineOrdered = num(line.pallets_ordered);
         const lineAllocated = allocatedByOrderLine.get(line.id) ?? 0;
         ordered += lineOrdered;
-        allocated += lineAllocated;
+        // Capped at what this line ordered — a promoted line is created with
+        // ordered=0 (see the CustomerDemandBoard comment on `+`), so pallets
+        // arranged onto surplus a customer never asked for must not count as
+        // progress on what they did. Uncapped, this total (and the "חסר"
+        // outstanding pill derived from it) would read as more fulfilled than
+        // the customer's actual order is.
+        allocated += Math.min(lineAllocated, lineOrdered);
         // Absent from the previous submission reads as 0 pallets — the same
         // "not included means not ordered" rule submit_order itself applies
         // when pruning — rather than as "no history," which is reserved for

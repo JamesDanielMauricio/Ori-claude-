@@ -118,11 +118,13 @@ export interface BoardProduct {
   /** נותר — (picked + leftover) minus allocated: what is still free to arrange. */
   remaining: number;
   /**
-   * The PRD's OOS flag: demand exceeds supply for this variety. Note it
-   * compares against `picked` alone, not `picked + leftover` or `remaining`
-   * — a variety whose whole supply is already allocated is fully committed,
-   * not oversold, and this deliberately doesn't (yet) treat leftover as
-   * covering demand for this flag's purposes.
+   * The PRD's OOS flag: demand exceeds supply for this variety, where supply
+   * is `picked + leftover` — leftover is carried-forward stock, not a
+   * separate pool, so it counts the same as a fresh pick (matches
+   * `remaining` above and the DB's shop_variety_orderability, which decides
+   * this the same way for the customer-facing catalog). Compares against raw
+   * supply, not `remaining` (supply minus allocated) — a variety whose whole
+   * supply is already allocated is fully committed, not oversold.
    */
   outOfStock: boolean;
 }
@@ -368,7 +370,7 @@ export function buildBoard({
         ordered,
         allocated,
         remaining: picked + leftover - allocated,
-        outOfStock: ordered > picked,
+        outOfStock: ordered > picked + leftover,
       };
     })
     // Family first, then variety — so the picker reads as a catalog rather

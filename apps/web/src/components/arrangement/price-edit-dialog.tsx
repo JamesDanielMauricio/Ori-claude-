@@ -8,6 +8,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { QueryError } from "@/components/ui/query-error";
 import { useToast } from "@/components/ui/toast";
 import { errorMessage } from "@/lib/error-message";
+import { blockWheel } from "@/lib/integer-input";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
 import { formatVarietyName } from "@/lib/variety-label";
@@ -201,6 +202,7 @@ export function PriceEditDialog({
                 step="0.01"
                 className={inputClassName}
                 value={price}
+                onWheel={blockWheel}
                 onChange={(event) => setPrice(event.target.value)}
               />
             </FormField>
@@ -211,6 +213,7 @@ export function PriceEditDialog({
                 step="0.01"
                 className={inputClassName}
                 value={priceRangeFrom}
+                onWheel={blockWheel}
                 onChange={(event) => setPriceRangeFrom(event.target.value)}
               />
             </FormField>
@@ -221,6 +224,7 @@ export function PriceEditDialog({
                 step="0.01"
                 className={inputClassName}
                 value={priceRangeTo}
+                onWheel={blockWheel}
                 onChange={(event) => setPriceRangeTo(event.target.value)}
               />
             </FormField>

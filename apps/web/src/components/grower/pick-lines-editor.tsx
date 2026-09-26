@@ -11,7 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { errorMessage } from "@/lib/error-message";
 import { hasChanges } from "@/lib/has-changes";
-import { blockDecimalKey, stripDecimal } from "@/lib/integer-input";
+import { blockDecimalKey, blockWheel, stripDecimal } from "@/lib/integer-input";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
 import { formatVarietyName } from "@/lib/variety-label";
@@ -159,6 +159,7 @@ function NumberCell({
         className={`${inputClassName} w-full`}
         value={value}
         onKeyDown={blockDecimalKey}
+        onWheel={blockWheel}
         onChange={(event) => onChange(stripDecimal(event.target.value))}
       />
     </div>

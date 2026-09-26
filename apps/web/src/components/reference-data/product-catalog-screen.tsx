@@ -26,6 +26,7 @@ import { useToast } from "@/components/ui/toast";
 import { errorMessage } from "@/lib/error-message";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { hasChanges } from "@/lib/has-changes";
+import { blockWheel } from "@/lib/integer-input";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
 import { formatVarietyName } from "@/lib/variety-label";
@@ -859,6 +860,7 @@ export function ProductCatalogScreen({
           aria-label="מחיר"
           className={`${inputClassName} w-24`}
           value={form.price}
+          onWheel={blockWheel}
           onChange={(event) => setForm((current) => ({ ...current, price: event.target.value }))}
         />
       ),
@@ -874,6 +876,7 @@ export function ProductCatalogScreen({
           aria-label="טווח מ-"
           className={`${inputClassName} w-24`}
           value={form.priceRangeFrom}
+          onWheel={blockWheel}
           onChange={(event) =>
             setForm((current) => ({ ...current, priceRangeFrom: event.target.value }))
           }
@@ -891,6 +894,7 @@ export function ProductCatalogScreen({
           aria-label="טווח עד"
           className={`${inputClassName} w-24`}
           value={form.priceRangeTo}
+          onWheel={blockWheel}
           onChange={(event) =>
             setForm((current) => ({ ...current, priceRangeTo: event.target.value }))
           }
@@ -924,6 +928,7 @@ export function ProductCatalogScreen({
           aria-label="חריגת הזמנה מותרת (No Overbooking)"
           className={`${inputClassName} w-24`}
           value={form.noOverbooking}
+          onWheel={blockWheel}
           onChange={(event) =>
             setForm((current) => ({ ...current, noOverbooking: event.target.value }))
           }
@@ -951,6 +956,7 @@ export function ProductCatalogScreen({
           aria-label="כמות מקסימלית להזמנה ללקוח (Number of Orders per Customer)"
           className={`${inputClassName} w-28`}
           value={form.numberOfOrdersPerCustomer}
+          onWheel={blockWheel}
           onChange={(event) =>
             setForm((current) => ({ ...current, numberOfOrdersPerCustomer: event.target.value }))
           }
@@ -996,6 +1002,7 @@ export function ProductCatalogScreen({
                   aria-label="תקרת משטחים"
                   className={`${inputClassName} w-20`}
                   value={cap.palletCap}
+                  onWheel={blockWheel}
                   onChange={(event) => updateCap(index, { palletCap: Number(event.target.value) })}
                 />
                 <Button type="button" variant="ghost" size="sm" onClick={() => removeCap(index)}>

@@ -3,7 +3,7 @@ import { useState } from "react";
 import { inputClassName } from "@/components/reference-data/form-field";
 import { StatusPill, type StatusTone } from "@/components/ui/card";
 import { Icon } from "@/components/ui/icon";
-import { blockDecimalKey, stripDecimal } from "@/lib/integer-input";
+import { blockDecimalKey, blockWheel, stripDecimal } from "@/lib/integer-input";
 
 import {
   allocationFor,
@@ -640,6 +640,7 @@ function ArrangementCell({
         }`}
         value={draft}
         onChange={(event) => setDraft(stripDecimal(event.target.value))}
+        onWheel={blockWheel}
         onKeyDown={(event) => {
           blockDecimalKey(event);
           if (event.key === "Enter") {
@@ -759,6 +760,7 @@ function AllocationRow({
             }`}
             value={draft}
             onChange={(event) => setDraft(stripDecimal(event.target.value))}
+            onWheel={blockWheel}
             onKeyDown={(event) => {
               // Enter commits, Escape abandons. Never saved on blur: tabbing
               // between allocations while rebalancing them would fire a write

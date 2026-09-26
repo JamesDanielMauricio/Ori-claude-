@@ -1,4 +1,4 @@
-import type { KeyboardEvent } from "react";
+import type { KeyboardEvent, WheelEvent } from "react";
 
 // Shared by every pallet/quantity number input in the app (grower picks,
 // customer orders, arrangement records, the arrangement board's allocation
@@ -22,4 +22,22 @@ export function blockDecimalKey(event: KeyboardEvent<HTMLInputElement>) {
 export function stripDecimal(value: string): string {
   const separatorIndex = value.search(/[.,]/);
   return separatorIndex === -1 ? value : value.slice(0, separatorIndex);
+}
+
+// Chrome, Firefox and Edge all change a focused number input's value on
+// mouse-wheel scroll — and this app hides the spinner buttons that would
+// normally hint at that (globals.css), so there's no visible affordance
+// telling anyone the field even responds to scrolling. A cursor that happens
+// to rest on a price or quantity field while the page (or a long list, or a
+// dialog) scrolls past it silently edits that field's value.
+//
+// Blurring on wheel is the fix, not `preventDefault`: the browser's
+// scroll-to-increment isn't reliably stopped by it (Chrome applies it before
+// a non-passive listener would run), but an unfocused input has nothing for
+// the wheel to increment, and the scroll then falls through to the page like
+// it would over any other element. Shared by every number input in the app,
+// price fields included — this has nothing to do with the decimal-blocking
+// above, which only applies to whole-pallet counts.
+export function blockWheel(event: WheelEvent<HTMLInputElement>) {
+  event.currentTarget.blur();
 }

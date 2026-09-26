@@ -6,7 +6,7 @@ import { StatusPill } from "@/components/ui/card";
 import { Icon } from "@/components/ui/icon";
 import { ProductThumbnail } from "@/components/ui/product-thumbnail";
 import { Select } from "@/components/ui/select";
-import { blockDecimalKey, stripDecimal } from "@/lib/integer-input";
+import { blockDecimalKey, blockWheel, stripDecimal } from "@/lib/integer-input";
 
 export interface OrderVarietyRow {
   varietyId: string;
@@ -231,18 +231,21 @@ export function OrderProductList({
                         )
                       )}
                       {/* Quantity + pack type together, matching the reference
-                          design's single pill-shaped control — pack_type is
-                          fixed per product (set by backoffice, never chosen
-                          per order line), so the leading chevron is always
-                          decorative. On the customer's own order screen
-                          (quantityMode="dropdown") the quantity itself is now
-                          the shared Select (ui/select.tsx), capped at this
-                          row's own remaining stock — see dropdownOptions
-                          above, and `showChevron={false}` since its own
-                          affordance would sit on top of the decorative one
-                          this pill already draws. Every other caller
-                          (backoffice on-behalf-of, the read-only historical
-                          view) keeps the free-typed number input. */}
+                          design's single pill-shaped control. On the
+                          customer's own order screen (quantityMode="dropdown")
+                          the quantity itself is the shared Select
+                          (ui/select.tsx), capped at this row's own remaining
+                          stock — see dropdownOptions above, with
+                          `showChevron={false}` and the leading chevron drawn
+                          here instead, so it sits centered against the pack-
+                          type label rather than off to the Select's own edge.
+                          Every other caller (backoffice on-behalf-of, the
+                          read-only historical view) keeps the free-typed
+                          number input — which does NOT draw that chevron: a
+                          plain number field with a select-style affordance on
+                          it reads as a dropdown it isn't, and backoffice staff
+                          need to see they can type any value, not just pick
+                          from a capped list. */}
                       <div className="relative">
                         {quantityMode === "dropdown" ? (
                           <Select
@@ -263,18 +266,21 @@ export function OrderProductList({
                             step="1"
                             disabled={!editable}
                             aria-label={`כמות ${variety.packType ? PACK_TYPE_LABEL[variety.packType] : "פלטות"} — ${variety.varietyName}`}
-                            className={`${inputClassName} w-32 ps-7 pe-14 font-semibold`}
+                            className={`${inputClassName} w-32 ps-3 pe-14 font-semibold`}
                             value={variety.pallets}
                             onKeyDown={blockDecimalKey}
+                            onWheel={blockWheel}
                             onChange={(event) =>
                               onChangePallets?.(variety.varietyId, stripDecimal(event.target.value))
                             }
                           />
                         )}
-                        <Icon
-                          name="chevronDown"
-                          className="pointer-events-none absolute inset-y-0 start-2 my-auto h-3.5 w-3.5 text-ink-subtle"
-                        />
+                        {quantityMode === "dropdown" && (
+                          <Icon
+                            name="chevronDown"
+                            className="pointer-events-none absolute inset-y-0 start-2 my-auto h-3.5 w-3.5 text-ink-subtle"
+                          />
+                        )}
                         {variety.packType && (
                           <span className="pointer-events-none absolute inset-y-0 end-3 my-auto flex items-center text-xs font-medium text-ink-subtle">
                             {PACK_TYPE_LABEL[variety.packType]}

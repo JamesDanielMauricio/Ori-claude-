@@ -12,7 +12,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { hasChanges } from "@/lib/has-changes";
-import { blockDecimalKey, stripDecimal } from "@/lib/integer-input";
+import { blockDecimalKey, blockWheel, stripDecimal } from "@/lib/integer-input";
 
 import { type FlatRecord } from "./board-data";
 import { type AllocationPatch } from "./customer-demand-board";
@@ -257,6 +257,7 @@ function ArrangementRecordRow({
           className={`${inputClassName} w-24`}
           value={quantity}
           onKeyDown={blockDecimalKey}
+          onWheel={blockWheel}
           onChange={(event) => setQuantity(stripDecimal(event.target.value))}
         />
       </TableCell>
@@ -269,6 +270,7 @@ function ArrangementRecordRow({
           aria-label="מחיר"
           className={`${inputClassName} w-24`}
           value={price}
+          onWheel={blockWheel}
           onChange={(event) => setPrice(event.target.value)}
         />
       </TableCell>

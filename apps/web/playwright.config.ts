@@ -43,7 +43,12 @@ export default defineConfig({
   },
   use: {
     baseURL: "http://localhost:3000",
-    trace: "on-first-retry",
+    // CI keeps a full trace (every network request and response, console
+    // output, DOM snapshots) for each failed test, since there is no retry
+    // there to trigger "on-first-retry" and a CI-only failure is otherwise
+    // undiagnosable. It lands in test-results, which ci.yml uploads on
+    // failure — see that step's comment for why publishing it is safe.
+    trace: process.env.CI ? "retain-on-failure" : "on-first-retry",
   },
   webServer: [
     {

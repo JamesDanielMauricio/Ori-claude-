@@ -61,6 +61,26 @@ jobs:
       - name: End-to-end test
         run: pnpm test:e2e
 
+      # Keeps Playwright's failure evidence (each failed test's
+      # error-context.md, a snapshot of what the page showed) — without it
+      # a CI-only failure can't be diagnosed, since the runner and its
+      # test-results folder are thrown away when the job ends.
+      #
+      # SECURITY: this repo is public, so anyone signed in to GitHub can
+      # download the artifact. That is acceptable because everything in it
+      # comes from this job's own throwaway local Supabase stack (random
+      # test users, the well-known demo keys above) — no real account or
+      # production data ever reaches this runner. Revisit if e2e is ever
+      # pointed at the hosted project here.
+      - name: Upload Playwright results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: apps/web/test-results
+          retention-days: 7
+          if-no-files-found: ignore
+
       - name: Stop local Supabase stack
         if: always()
         run: pnpm supabase stop

@@ -22,7 +22,12 @@ export function useContactPersonDirectory() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("profiles")
-        .select("user_id, display_name, phone_number, companies(name)")
+        // `companies!company_id(...)`, not the bare embed: profiles has two
+        // FK paths to companies since this feature's own migration (0057
+        // added companies.contact_person_id, a second FK back to profiles)
+        // — see auth-context.tsx's loadProfile for the fuller note on why
+        // the bare form 300s.
+        .select("user_id, display_name, phone_number, companies!company_id(name)")
         .order("display_name");
       if (error) throw error;
       return data as unknown as Array<{

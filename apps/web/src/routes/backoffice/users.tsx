@@ -101,7 +101,13 @@ export default function UsersPage() {
       const { data, error } = await supabase
         .from("profiles")
         .select(
-          "user_id, display_name, role, company_id, phone_number, must_change_password, created_at, companies(name)",
+          // `companies!company_id(...)`: profiles now has two FK paths to
+          // companies (company_id, and the reverse via
+          // companies.contact_person_id since migration 0057), so the bare
+          // embed PostgREST used to infer on its own is ambiguous and
+          // returns 300 — see auth-context.tsx's loadProfile for the fuller
+          // note.
+          "user_id, display_name, role, company_id, phone_number, must_change_password, created_at, companies!company_id(name)",
         )
         .order("display_name");
       if (error) throw error;

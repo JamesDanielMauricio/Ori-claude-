@@ -107,9 +107,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // RLS-protected read: the "profiles_select_own" policy is what permits
     // this — there's no app-level check standing in for it here.
+    //
+    // `companies!company_id(...)`, not the bare `companies(...)` this used
+    // before migration 0057: once `companies.contact_person_id` added a
+    // SECOND foreign key back to `profiles`, PostgREST could no longer infer
+    // which relationship this embed meant and started rejecting the query
+    // with 300 Multiple Choices — silently, from this component's point of
+    // view, since `data` just came back undefined. That left the guard
+    // treating every freshly signed-in user as profile-less and bouncing
+    // them straight back to /login with no error shown. The `!company_id`
+    // hint pins it to the `profiles.company_id -> companies.id` relationship
+    // explicitly.
     const { data } = await createClient()
       .from("profiles")
-      .select("role, display_name, company_id, must_change_password, companies(name)")
+      .select("role, display_name, company_id, must_change_password, companies!company_id(name)")
       .eq("user_id", user.id)
       .single();
 

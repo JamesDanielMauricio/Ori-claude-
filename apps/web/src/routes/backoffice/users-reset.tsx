@@ -43,7 +43,11 @@ export default function AdminResetPasswordPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("profiles")
-        .select("user_id, display_name, phone_number, companies(name)")
+        // `companies!company_id(...)`, not the bare embed: profiles has two
+        // FK paths to companies since migration 0057 (company_id, and the
+        // reverse via companies.contact_person_id) — see auth-context.tsx's
+        // loadProfile for the fuller note on why the bare form 300s.
+        .select("user_id, display_name, phone_number, companies!company_id(name)")
         .order("display_name");
       if (error) throw error;
       return data as unknown as ResettableUser[];

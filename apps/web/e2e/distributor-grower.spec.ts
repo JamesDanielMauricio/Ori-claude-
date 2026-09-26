@@ -106,7 +106,9 @@ test.describe("Backoffice — Grower Inventory Status", () => {
     await commentInput.fill("distributor-entered note");
     await page.getByRole("button", { name: "שמור" }).click();
     await expect(page.getByText("השורות נשמרו.")).toBeVisible();
-    await page.locator("dialog[open]").getByRole("button", { name: "סגור" }).click();
+    // No explicit close here: a successful save closes this dialog itself
+    // (distributor-grower.tsx's onSaved clears pickDialogGrower), so waiting
+    // to click "סגור" waits for a button that is already gone.
     await expect(page.locator("dialog[open]")).toHaveCount(0);
 
     await page.reload();

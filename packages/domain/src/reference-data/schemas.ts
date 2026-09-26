@@ -35,6 +35,10 @@ export const saveGrowerInputSchema = z.object({
   // packages/db/migrations/0031/0033). Nullable: most growers may have no
   // transporter assigned.
   transporterCompanyId: z.string().uuid().nullable(),
+  // The distributor's point of contact for this company — any profile in
+  // the system (see packages/db/migrations/0057). Nullable: most companies
+  // have none set.
+  contactPersonId: z.string().uuid().nullable(),
 });
 export type SaveGrowerInput = z.infer<typeof saveGrowerInputSchema>;
 
@@ -47,6 +51,7 @@ export function toSaveGrowerRpcArgs(input: SaveGrowerInput) {
     p_whatsapp_group_id: input.whatsappGroupId,
     p_product_variety_ids: input.productVarietyIds,
     p_transporter_company_id: input.transporterCompanyId,
+    p_contact_person_id: input.contactPersonId,
   };
 }
 
@@ -56,6 +61,7 @@ export const saveCustomerInputSchema = z.object({
   status: companyStatusSchema,
   canSeeProductPrices: z.boolean().nullable(),
   whatsappGroupId: whatsappGroupIdSchema,
+  contactPersonId: z.string().uuid().nullable(),
 });
 export type SaveCustomerInput = z.infer<typeof saveCustomerInputSchema>;
 
@@ -66,6 +72,7 @@ export function toSaveCustomerRpcArgs(input: SaveCustomerInput) {
     p_status: input.status,
     p_can_see_product_prices: input.canSeeProductPrices,
     p_whatsapp_group_id: input.whatsappGroupId,
+    p_contact_person_id: input.contactPersonId,
   };
 }
 
@@ -74,6 +81,7 @@ export const saveTransporterInputSchema = z.object({
   name: z.string().min(1),
   status: companyStatusSchema,
   whatsappGroupId: whatsappGroupIdSchema,
+  contactPersonId: z.string().uuid().nullable(),
 });
 export type SaveTransporterInput = z.infer<typeof saveTransporterInputSchema>;
 
@@ -83,6 +91,7 @@ export function toSaveTransporterRpcArgs(input: SaveTransporterInput) {
     p_name: input.name,
     p_status: input.status,
     p_whatsapp_group_id: input.whatsappGroupId,
+    p_contact_person_id: input.contactPersonId,
   };
 }
 

@@ -2,6 +2,7 @@ import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { boolean, pgTable, text, time, timestamp, uuid } from "drizzle-orm/pg-core";
 
 import { companyStatusEnum, companyTypeEnum } from "./enums";
+import { profiles } from "./profile";
 
 // The full Company aggregate — growers, customers, transporters, and the
 // distributor's own backoffice company are all rows here, discriminated by
@@ -38,6 +39,17 @@ export const companies = pgTable("companies", {
   // notifications module falls back to per-user dispatch (a later
   // module's concern, not this table's).
   whatsappGroupId: text("whatsapp_group_id"),
+  // The distributor's point of contact for this company — ANY profile in
+  // the system, not necessarily one belonging to this company itself. A
+  // Transporter company never has profiles of its own (userRoleEnum's
+  // comment: transporters never sign in), so restricting this to "this
+  // company's users" would make a transporter's contact unsettable. Set
+  // null (not RESTRICT, unlike transporterCompanyId) if that user's
+  // account is deleted — a routine admin action that must not be blocked
+  // by a stale contact reference.
+  contactPersonId: uuid("contact_person_id").references((): AnyPgColumn => profiles.userId, {
+    onDelete: "set null",
+  }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

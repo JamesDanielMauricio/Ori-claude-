@@ -2,6 +2,7 @@ import { saveCustomerInputSchema, toSaveCustomerRpcArgs } from "@ori/domain/refe
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { ContactPersonEditCell, ContactPersonSummary } from "@/components/reference-data/contact-person-cell";
 import { checkboxClassName, inputClassName } from "@/components/reference-data/form-field";
 import { RecordTable, type RecordTableColumn } from "@/components/reference-data/record-table";
 import { PageHeader } from "@/components/ui/page-header";
@@ -14,6 +15,7 @@ import { errorMessage } from "@/lib/error-message";
 import { hasChanges } from "@/lib/has-changes";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
+import { useContactPersonDirectory } from "@/lib/use-contact-person-directory";
 
 interface CustomerCompany {
   id: string;
@@ -21,6 +23,7 @@ interface CustomerCompany {
   status: "active" | "inactive";
   can_see_product_prices: boolean | null;
   whatsapp_group_id: string | null;
+  contact_person_id: string | null;
   created_at: string;
 }
 
@@ -29,6 +32,7 @@ interface FormState {
   status: "active" | "inactive";
   canSeeProductPrices: boolean;
   whatsappGroupId: string;
+  contactPersonId: string;
 }
 
 // Sentinel row id for a not-yet-created record: the draft row prepended to
@@ -44,6 +48,7 @@ const BLANK_FORM: FormState = {
   status: "active",
   canSeeProductPrices: false,
   whatsappGroupId: "",
+  contactPersonId: "",
 };
 
 // Field values here are never actually read — every column has a
@@ -56,6 +61,7 @@ function blankRow(): CustomerCompany {
     status: "active",
     can_see_product_prices: false,
     whatsapp_group_id: null,
+    contact_person_id: null,
     created_at: "",
   };
 }
@@ -66,6 +72,7 @@ function toFormState(row: CustomerCompany): FormState {
     status: row.status,
     canSeeProductPrices: row.can_see_product_prices ?? false,
     whatsappGroupId: row.whatsapp_group_id ?? "",
+    contactPersonId: row.contact_person_id ?? "",
   };
 }
 
@@ -95,13 +102,17 @@ export default function CustomersPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("companies")
-        .select("id, name, status, can_see_product_prices, whatsapp_group_id, created_at")
+        .select(
+          "id, name, status, can_see_product_prices, whatsapp_group_id, contact_person_id, created_at",
+        )
         .eq("type", "customer")
         .order("name");
       if (error) throw error;
       return data as CustomerCompany[];
     },
   });
+
+  const contactDirectory = useContactPersonDirectory();
 
   const editingRowId = editingId === NEW_ROW_ID ? null : editingId;
   const selected = customersQuery.data?.find((row) => row.id === editingRowId) ?? null;
@@ -119,6 +130,7 @@ export default function CustomersPage() {
               status: form.status,
               can_see_product_prices: form.canSeeProductPrices,
               whatsapp_group_id: form.whatsappGroupId || null,
+              contact_person_id: form.contactPersonId || null,
             }
           : row,
       ),
@@ -132,6 +144,7 @@ export default function CustomersPage() {
         status: form.status,
         canSeeProductPrices: form.canSeeProductPrices,
         whatsappGroupId: form.whatsappGroupId || null,
+        contactPersonId: form.contactPersonId || null,
       });
       const { data, error } = await supabase.rpc("save_customer", toSaveCustomerRpcArgs(input));
       if (error) throw error;
@@ -275,6 +288,22 @@ export default function CustomersPage() {
       ),
     },
     {
+      key: "contactPerson",
+      label: "איש קשר",
+      render: (row) => (
+        <ContactPersonSummary
+          option={row.contact_person_id ? contactDirectory.optionById.get(row.contact_person_id) ?? null : null}
+        />
+      ),
+      renderEdit: () => (
+        <ContactPersonEditCell
+          options={contactDirectory.options}
+          selectedId={form.contactPersonId || null}
+          onSelect={(id) => setForm((current) => ({ ...current, contactPersonId: id ?? "" }))}
+        />
+      ),
+    },
+    {
       key: "created",
       label: "נוצר",
       // Server-set, so read-only: no renderEdit.
@@ -303,13 +332,20 @@ export default function CustomersPage() {
         onDelete={(row) => setDeleteTargetId(row.id)}
         onAdd={handleNew}
         addLabel="לקוח חדש"
-        loading={customersQuery.isLoading}
+        // Waits for the contact-person directory too: it's a column now,
+        // and a table that paints rows before it arrives would show every
+        // customer as having no contact for a moment.
+        loading={customersQuery.isLoading || contactDirectory.isLoading}
         loadError={
-          customersQuery.isError && !customersQuery.data
+          (customersQuery.isError && !customersQuery.data) ||
+          (contactDirectory.isError && contactDirectory.options.length === 0)
             ? {
                 what: "רשימת הלקוחות",
-                onRetry: () => void customersQuery.refetch(),
-                retrying: customersQuery.isFetching,
+                onRetry: () => {
+                  void customersQuery.refetch();
+                  contactDirectory.refetch();
+                },
+                retrying: customersQuery.isFetching || contactDirectory.isFetching,
               }
             : null
         }

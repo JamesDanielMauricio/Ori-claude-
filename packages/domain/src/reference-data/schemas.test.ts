@@ -18,13 +18,19 @@ const parseGroupId = {
       defaultPickupTime: null,
       productVarietyIds: [],
       transporterCompanyId: null,
+      contactPersonId: null,
       whatsappGroupId,
     }).whatsappGroupId,
   customer: (whatsappGroupId: string | null) =>
-    saveCustomerInputSchema.parse({ ...company, canSeeProductPrices: null, whatsappGroupId })
-      .whatsappGroupId,
+    saveCustomerInputSchema.parse({
+      ...company,
+      canSeeProductPrices: null,
+      contactPersonId: null,
+      whatsappGroupId,
+    }).whatsappGroupId,
   transporter: (whatsappGroupId: string | null) =>
-    saveTransporterInputSchema.parse({ ...company, whatsappGroupId }).whatsappGroupId,
+    saveTransporterInputSchema.parse({ ...company, contactPersonId: null, whatsappGroupId })
+      .whatsappGroupId,
 };
 
 describe.each(Object.entries(parseGroupId))("%s whatsappGroupId", (_, parse) => {

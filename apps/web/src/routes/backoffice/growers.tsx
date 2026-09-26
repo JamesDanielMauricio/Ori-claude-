@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
 import { CellChipList } from "@/components/reference-data/cell-popover";
+import { ContactPersonEditCell, ContactPersonSummary } from "@/components/reference-data/contact-person-cell";
 import { inputClassName } from "@/components/reference-data/form-field";
 import { ProductMultiSelectCell } from "@/components/reference-data/product-multi-select-cell";
 import { RecordTable, type RecordTableColumn } from "@/components/reference-data/record-table";
@@ -17,6 +18,7 @@ import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { hasChanges } from "@/lib/has-changes";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
+import { useContactPersonDirectory } from "@/lib/use-contact-person-directory";
 import { formatVarietyName } from "@/lib/variety-label";
 
 interface GrowerCompany {
@@ -26,6 +28,7 @@ interface GrowerCompany {
   default_pickup_time: string | null;
   whatsapp_group_id: string | null;
   transporter_company_id: string | null;
+  contact_person_id: string | null;
   created_at: string;
 }
 
@@ -41,6 +44,7 @@ interface FormState {
   whatsappGroupId: string;
   productVarietyIds: Set<string>;
   transporterCompanyId: string;
+  contactPersonId: string;
 }
 
 // Sentinel row id for a not-yet-created record: the draft row prepended to
@@ -58,6 +62,7 @@ const BLANK_FORM: FormState = {
   whatsappGroupId: "",
   productVarietyIds: new Set(),
   transporterCompanyId: "",
+  contactPersonId: "",
 };
 
 function blankRow(): GrowerCompany {
@@ -68,6 +73,7 @@ function blankRow(): GrowerCompany {
     default_pickup_time: null,
     whatsapp_group_id: null,
     transporter_company_id: null,
+    contact_person_id: null,
     created_at: "",
   };
 }
@@ -80,6 +86,7 @@ function toFormState(row: GrowerCompany, productVarietyIds: string[]): FormState
     whatsappGroupId: row.whatsapp_group_id ?? "",
     productVarietyIds: new Set(productVarietyIds),
     transporterCompanyId: row.transporter_company_id ?? "",
+    contactPersonId: row.contact_person_id ?? "",
   };
 }
 
@@ -112,7 +119,7 @@ export default function GrowersPage() {
       const { data, error } = await supabase
         .from("companies")
         .select(
-          "id, name, status, default_pickup_time, whatsapp_group_id, transporter_company_id, created_at",
+          "id, name, status, default_pickup_time, whatsapp_group_id, transporter_company_id, contact_person_id, created_at",
         )
         .eq("type", "grower")
         .order("name");
@@ -120,6 +127,8 @@ export default function GrowersPage() {
       return data as GrowerCompany[];
     },
   });
+
+  const contactDirectory = useContactPersonDirectory();
 
   // Every grower's in-season selection in ONE read, grouped client-side —
   // not a query per row. The in-season list is a column now, so every
@@ -222,6 +231,7 @@ export default function GrowersPage() {
               default_pickup_time: form.defaultPickupTime || null,
               whatsapp_group_id: form.whatsappGroupId || null,
               transporter_company_id: form.transporterCompanyId || null,
+              contact_person_id: form.contactPersonId || null,
             }
           : row,
       ),
@@ -251,6 +261,7 @@ export default function GrowersPage() {
         whatsappGroupId: form.whatsappGroupId || null,
         productVarietyIds: [...form.productVarietyIds],
         transporterCompanyId: form.transporterCompanyId || null,
+        contactPersonId: form.contactPersonId || null,
       });
       const { data, error } = await supabase.rpc("save_grower", toSaveGrowerRpcArgs(input));
       if (error) throw error;
@@ -444,6 +455,22 @@ export default function GrowersPage() {
       ),
     },
     {
+      key: "contactPerson",
+      label: "איש קשר",
+      render: (row) => (
+        <ContactPersonSummary
+          option={row.contact_person_id ? contactDirectory.optionById.get(row.contact_person_id) ?? null : null}
+        />
+      ),
+      renderEdit: () => (
+        <ContactPersonEditCell
+          options={contactDirectory.options}
+          selectedId={form.contactPersonId || null}
+          onSelect={(id) => setForm((current) => ({ ...current, contactPersonId: id ?? "" }))}
+        />
+      ),
+    },
+    {
       key: "inSeason",
       label: "מוצרים בעונה",
       render: (row) => (
@@ -492,22 +519,27 @@ export default function GrowersPage() {
         onDelete={(row) => setDeleteTargetId(row.id)}
         onAdd={handleNew}
         addLabel="מגדל חדש"
-        // Waits for the in-season lists too: they're a column now, and a
-        // table that paints rows before they arrive would show every grower
-        // as having nothing in season for a moment.
-        loading={growersQuery.isLoading || growerProductsQuery.isLoading}
-        // The in-season lists are a column too: without them every grower
-        // would read as having nothing in season.
+        // Waits for the in-season lists and the contact-person directory
+        // too: both are columns now, and a table that paints rows before
+        // they arrive would show every grower as having nothing in season
+        // (or an unresolved contact) for a moment.
+        loading={
+          growersQuery.isLoading || growerProductsQuery.isLoading || contactDirectory.isLoading
+        }
+        // Same reasoning as `loading` above, for the error path.
         loadError={
           (growersQuery.isError && !growersQuery.data) ||
-          (growerProductsQuery.isError && !growerProductsQuery.data)
+          (growerProductsQuery.isError && !growerProductsQuery.data) ||
+          (contactDirectory.isError && contactDirectory.options.length === 0)
             ? {
                 what: "רשימת המגדלים",
                 onRetry: () => {
                   void growersQuery.refetch();
                   void growerProductsQuery.refetch();
+                  contactDirectory.refetch();
                 },
-                retrying: growersQuery.isFetching || growerProductsQuery.isFetching,
+                retrying:
+                  growersQuery.isFetching || growerProductsQuery.isFetching || contactDirectory.isFetching,
               }
             : null
         }

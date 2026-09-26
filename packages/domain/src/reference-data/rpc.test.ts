@@ -4,11 +4,19 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createTestCompany, createTestProfile, deleteTestCompany, deleteTestUser, runCleanup, signInTestUser } from "../auth/test-helpers";
 
-import { PRODUCT_VERSION_CONFLICT_ERROR_CODE, toSaveGrowerRpcArgs, toSaveProductRpcArgs } from "./schemas";
 import {
+  PRODUCT_VERSION_CONFLICT_ERROR_CODE,
+  toSaveCustomerRpcArgs,
+  toSaveGrowerRpcArgs,
+  toSaveProductRpcArgs,
+  toSaveTransporterRpcArgs,
+} from "./schemas";
+import {
+  createTestCustomerCompany,
   createTestGrowerCompany,
   createTestProductFamily,
   createTestProductVariety,
+  createTestTransporterCompany,
   deleteTestCompany as deleteTestCompanyById,
   deleteTestProductFamily,
   deleteTestProductVariety,
@@ -126,6 +134,7 @@ describe("reference-data save functions", () => {
         whatsappGroupId: null,
         productVarietyIds: [randomUUID()],
         transporterCompanyId: null,
+        contactPersonId: null,
       }),
     );
 
@@ -157,6 +166,7 @@ describe("reference-data save functions", () => {
         whatsappGroupId: null,
         productVarietyIds: [product.id],
         transporterCompanyId: null,
+        contactPersonId: null,
       }),
     );
     expect(result.error).toBeNull();
@@ -187,6 +197,7 @@ describe("reference-data save functions", () => {
         whatsappGroupId: null,
         productVarietyIds: [],
         transporterCompanyId: transporter.id,
+        contactPersonId: null,
       }),
     );
     expect(created.error).toBeNull();
@@ -208,10 +219,88 @@ describe("reference-data save functions", () => {
         whatsappGroupId: null,
         productVarietyIds: [],
         transporterCompanyId: createdId!,
+        contactPersonId: null,
       }),
     );
     expect(rejected.error).not.toBeNull();
     expect(rejected.error?.code).toBe("P0008");
+  });
+
+  it("save_grower/save_customer/save_transporter: contact_person_id is set across all three, and clears itself (not RESTRICT) when that user is deleted", async () => {
+    const client = await signedInBackofficeClient();
+
+    const contactCompany = await createTestCompany();
+    cleanupFns.push(() => deleteTestCompany(contactCompany.id));
+    const contact = await createTestProfile({ companyId: contactCompany.id, role: "customer" });
+
+    const grower = await createTestGrowerCompany();
+    cleanupFns.push(() => deleteTestCompanyById(grower.id));
+    const customer = await createTestCustomerCompany();
+    cleanupFns.push(() => deleteTestCompanyById(customer.id));
+    const transporter = await createTestTransporterCompany();
+    cleanupFns.push(() => deleteTestCompanyById(transporter.id));
+
+    const growerSaved = await client.rpc(
+      "save_grower",
+      toSaveGrowerRpcArgs({
+        id: grower.id,
+        name: grower.name,
+        status: "active",
+        defaultPickupTime: null,
+        whatsappGroupId: null,
+        productVarietyIds: [],
+        transporterCompanyId: null,
+        contactPersonId: contact.userId,
+      }),
+    );
+    expect(growerSaved.error).toBeNull();
+    expect((growerSaved.data as { contact_person_id: string | null } | null)?.contact_person_id).toBe(
+      contact.userId,
+    );
+
+    const customerSaved = await client.rpc(
+      "save_customer",
+      toSaveCustomerRpcArgs({
+        id: customer.id,
+        name: customer.name,
+        status: "active",
+        canSeeProductPrices: null,
+        whatsappGroupId: null,
+        contactPersonId: contact.userId,
+      }),
+    );
+    expect(customerSaved.error).toBeNull();
+    expect((customerSaved.data as { contact_person_id: string | null } | null)?.contact_person_id).toBe(
+      contact.userId,
+    );
+
+    const transporterSaved = await client.rpc(
+      "save_transporter",
+      toSaveTransporterRpcArgs({
+        id: transporter.id,
+        name: transporter.name,
+        status: "active",
+        whatsappGroupId: null,
+        contactPersonId: contact.userId,
+      }),
+    );
+    expect(transporterSaved.error).toBeNull();
+    expect(
+      (transporterSaved.data as { contact_person_id: string | null } | null)?.contact_person_id,
+    ).toBe(contact.userId);
+
+    // Deleting the contact's own account must not be blocked by any of
+    // these references (unlike transporter_company_id, which is RESTRICT)
+    // — each one should clear itself automatically instead.
+    await deleteTestUser(contact.userId);
+
+    const { data: rowsAfterDelete } = await client
+      .from("companies")
+      .select("id, contact_person_id")
+      .in("id", [grower.id, customer.id, transporter.id]);
+    for (const row of rowsAfterDelete ?? []) {
+      expect(row.contact_person_id).toBeNull();
+    }
   });
 
   it("save_product: rejects a non-backoffice caller with a clear error, not a silent no-op", async () => {

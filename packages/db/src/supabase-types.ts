@@ -52,6 +52,9 @@ export type Database = {
           transporter_company_id: string | null;
           can_see_product_prices: boolean | null;
           whatsapp_group_id: string | null;
+          // The distributor's point of contact for this company — any
+          // profile in the system (migration 0057). Null when unset.
+          contact_person_id: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -64,6 +67,7 @@ export type Database = {
           transporter_company_id?: string | null;
           can_see_product_prices?: boolean | null;
           whatsapp_group_id?: string | null;
+          contact_person_id?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -76,6 +80,7 @@ export type Database = {
           transporter_company_id?: string | null;
           can_see_product_prices?: boolean | null;
           whatsapp_group_id?: string | null;
+          contact_person_id?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -1008,6 +1013,7 @@ export type Database = {
           p_whatsapp_group_id: string | null;
           p_product_variety_ids: string[];
           p_transporter_company_id?: string | null;
+          p_contact_person_id?: string | null;
         };
         Returns: Database["public"]["Tables"]["companies"]["Row"];
       };
@@ -1018,6 +1024,7 @@ export type Database = {
           p_status: Database["public"]["Enums"]["company_status"];
           p_can_see_product_prices: boolean | null;
           p_whatsapp_group_id: string | null;
+          p_contact_person_id?: string | null;
         };
         Returns: Database["public"]["Tables"]["companies"]["Row"];
       };
@@ -1027,6 +1034,7 @@ export type Database = {
           p_name: string;
           p_status: Database["public"]["Enums"]["company_status"];
           p_whatsapp_group_id: string | null;
+          p_contact_person_id?: string | null;
         };
         Returns: Database["public"]["Tables"]["companies"]["Row"];
       };

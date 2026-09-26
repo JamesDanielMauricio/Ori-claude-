@@ -2,6 +2,7 @@ import { saveTransporterInputSchema, toSaveTransporterRpcArgs } from "@ori/domai
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { ContactPersonEditCell, ContactPersonSummary } from "@/components/reference-data/contact-person-cell";
 import { inputClassName } from "@/components/reference-data/form-field";
 import { RecordTable, type RecordTableColumn } from "@/components/reference-data/record-table";
 import { PageHeader } from "@/components/ui/page-header";
@@ -14,12 +15,14 @@ import { errorMessage } from "@/lib/error-message";
 import { hasChanges } from "@/lib/has-changes";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
+import { useContactPersonDirectory } from "@/lib/use-contact-person-directory";
 
 interface TransporterCompany {
   id: string;
   name: string;
   status: "active" | "inactive";
   whatsapp_group_id: string | null;
+  contact_person_id: string | null;
   created_at: string;
 }
 
@@ -27,6 +30,7 @@ interface FormState {
   name: string;
   status: "active" | "inactive";
   whatsappGroupId: string;
+  contactPersonId: string;
 }
 
 // Sentinel row id for a not-yet-created record: the draft row prepended to
@@ -37,14 +41,31 @@ const NEW_ROW_ID = "__new__";
 
 const CREATED_AT_FORMAT = new Intl.DateTimeFormat("he-IL", { dateStyle: "short" });
 
-const BLANK_FORM: FormState = { name: "", status: "active", whatsappGroupId: "" };
+const BLANK_FORM: FormState = {
+  name: "",
+  status: "active",
+  whatsappGroupId: "",
+  contactPersonId: "",
+};
 
 function blankRow(): TransporterCompany {
-  return { id: NEW_ROW_ID, name: "", status: "active", whatsapp_group_id: null, created_at: "" };
+  return {
+    id: NEW_ROW_ID,
+    name: "",
+    status: "active",
+    whatsapp_group_id: null,
+    contact_person_id: null,
+    created_at: "",
+  };
 }
 
 function toFormState(row: TransporterCompany): FormState {
-  return { name: row.name, status: row.status, whatsappGroupId: row.whatsapp_group_id ?? "" };
+  return {
+    name: row.name,
+    status: row.status,
+    whatsappGroupId: row.whatsapp_group_id ?? "",
+    contactPersonId: row.contact_person_id ?? "",
+  };
 }
 
 // The Transporters management screen — directory only. Per the PRD, a
@@ -71,13 +92,15 @@ export default function TransportersPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("companies")
-        .select("id, name, status, whatsapp_group_id, created_at")
+        .select("id, name, status, whatsapp_group_id, contact_person_id, created_at")
         .eq("type", "transporter")
         .order("name");
       if (error) throw error;
       return data as TransporterCompany[];
     },
   });
+
+  const contactDirectory = useContactPersonDirectory();
 
   const editingRowId = editingId !== null && editingId !== NEW_ROW_ID ? editingId : null;
   const selected = transportersQuery.data?.find((row) => row.id === editingRowId) ?? null;
@@ -94,6 +117,7 @@ export default function TransportersPage() {
               name: form.name,
               status: form.status,
               whatsapp_group_id: form.whatsappGroupId || null,
+              contact_person_id: form.contactPersonId || null,
             }
           : row,
       ),
@@ -106,6 +130,7 @@ export default function TransportersPage() {
         name: form.name,
         status: form.status,
         whatsappGroupId: form.whatsappGroupId || null,
+        contactPersonId: form.contactPersonId || null,
       });
       const { data, error } = await supabase.rpc(
         "save_transporter",
@@ -228,6 +253,22 @@ export default function TransportersPage() {
       ),
     },
     {
+      key: "contactPerson",
+      label: "איש קשר",
+      render: (row) => (
+        <ContactPersonSummary
+          option={row.contact_person_id ? contactDirectory.optionById.get(row.contact_person_id) ?? null : null}
+        />
+      ),
+      renderEdit: () => (
+        <ContactPersonEditCell
+          options={contactDirectory.options}
+          selectedId={form.contactPersonId || null}
+          onSelect={(id) => setForm((current) => ({ ...current, contactPersonId: id ?? "" }))}
+        />
+      ),
+    },
+    {
       key: "created",
       label: "נוצר",
       // Server-set, so read-only: no renderEdit.
@@ -258,13 +299,20 @@ export default function TransportersPage() {
         onDelete={(row) => setDeleteTargetId(row.id)}
         onAdd={handleNew}
         addLabel="מוביל חדש"
-        loading={transportersQuery.isLoading}
+        // Waits for the contact-person directory too: it's a column now,
+        // and a table that paints rows before it arrives would show every
+        // transporter as having no contact for a moment.
+        loading={transportersQuery.isLoading || contactDirectory.isLoading}
         loadError={
-          transportersQuery.isError && !transportersQuery.data
+          (transportersQuery.isError && !transportersQuery.data) ||
+          (contactDirectory.isError && contactDirectory.options.length === 0)
             ? {
                 what: "רשימת המובילים",
-                onRetry: () => void transportersQuery.refetch(),
-                retrying: transportersQuery.isFetching,
+                onRetry: () => {
+                  void transportersQuery.refetch();
+                  contactDirectory.refetch();
+                },
+                retrying: transportersQuery.isFetching || contactDirectory.isFetching,
               }
             : null
         }

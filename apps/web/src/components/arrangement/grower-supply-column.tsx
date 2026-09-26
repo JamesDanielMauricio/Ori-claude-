@@ -32,6 +32,8 @@ export function GrowerSupplyColumn({
   onEditPick,
   onToggleSubmit,
   toggleSubmitDisabled = false,
+  filterVariety,
+  onClearFilter,
 }: {
   growers: GrowerSupply[];
   selection: PickSelection | null;
@@ -50,19 +52,59 @@ export function GrowerSupplyColumn({
   // then a read-only history view, so the truck icon is disabled the same
   // way the pencil's edits are gated elsewhere on this screen.
   toggleSubmitDisabled?: boolean;
+  /**
+   * Set by clicking a product on a customer's order card (opposite column):
+   * narrows this list to growers who actually carry that variety, so a
+   * distributor doesn't have to open every grower's card in turn to find who
+   * has it. Named (not just an id) because the empty state below needs the
+   * variety's own label to explain itself.
+   */
+  filterVariety?: { varietyId: string; varietyName: string } | null;
+  onClearFilter?: () => void;
 }) {
+  const visibleGrowers = filterVariety
+    ? growers.filter((grower) =>
+        grower.families.some((family) =>
+          family.lines.some((line) => line.varietyId === filterVariety.varietyId),
+        ),
+      )
+    : growers;
+
   return (
     <section className="animate-rise-in overflow-hidden rounded-xl bg-surface shadow-raised ring-1 ring-inset ring-border/70">
       <header className="flex items-center justify-between gap-3 border-b border-border bg-surface-muted/60 px-5 py-3.5">
         <h2 className="text-sm font-semibold text-ink">מגדלים</h2>
-        <span className="text-xs text-ink-muted">{growers.length}</span>
+        <span className="text-xs text-ink-muted">
+          {filterVariety ? `${visibleGrowers.length} מתוך ${growers.length}` : growers.length}
+        </span>
       </header>
+
+      {/* The active filter, named and clearable — a silently shortened list
+          would read as "today has fewer growers than it does." */}
+      {filterVariety && (
+        <div className="flex items-center justify-between gap-2 border-b border-border bg-accent-soft/40 px-5 py-2">
+          <p className="truncate text-xs text-ink-muted">
+            מציג מגדלים עם <span className="font-semibold text-accent">{filterVariety.varietyName}</span>
+          </p>
+          <button
+            type="button"
+            onClick={onClearFilter}
+            className="shrink-0 text-xs font-semibold text-ink-muted underline decoration-dotted underline-offset-2 hover:text-accent"
+          >
+            נקה סינון
+          </button>
+        </div>
+      )}
 
       {growers.length === 0 ? (
         <p className="px-5 py-8 text-center text-sm text-ink-muted">אין היצע רשום עדיין.</p>
+      ) : visibleGrowers.length === 0 ? (
+        <p className="px-5 py-8 text-center text-sm text-ink-muted">
+          אף מגדל לא הביא את {filterVariety?.varietyName}.
+        </p>
       ) : (
         <ul>
-          {growers.map((grower, index) => (
+          {visibleGrowers.map((grower, index) => (
             <GrowerRow
               key={grower.growerId}
               grower={grower}

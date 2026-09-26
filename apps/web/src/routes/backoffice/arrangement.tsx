@@ -112,6 +112,11 @@ export default function ArrangementPage() {
   // quantity box, what a ✓ writes against — reads off this one value.
   const [selection, setSelection] = useState<PickSelection | null>(null);
   const [expandedGrowerId, setExpandedGrowerId] = useState<string | null>(null);
+  // Set by clicking a product on a customer's order card — a "who has this?"
+  // lookup, kept apart from `selection` above because it names a variety, not
+  // a specific grower's pick line, and must not disturb an allocation already
+  // in progress. See GrowerSupplyColumn's `filterVariety` prop.
+  const [growerFilterVarietyId, setGrowerFilterVarietyId] = useState<string | null>(null);
   const [priceEditVarietyId, setPriceEditVarietyId] = useState<string | null>(null);
   const [ordersCustomerId, setOrdersCustomerId] = useState<string | null>(null);
   // Held as the whole row rather than an id: the dialog needs the pick's id,
@@ -278,6 +283,14 @@ export default function ArrangementPage() {
     () => view.products.find((product) => product.varietyId === effectiveVarietyId) ?? null,
     [view.products, effectiveVarietyId],
   );
+
+  // Named rather than a bare id, so the growers column's cleared-list empty
+  // state can say which product nobody brought.
+  const growerFilterVariety = useMemo(() => {
+    if (!growerFilterVarietyId) return null;
+    const product = view.products.find((p) => p.varietyId === growerFilterVarietyId);
+    return product ? { varietyId: product.varietyId, varietyName: product.varietyName } : null;
+  }, [view.products, growerFilterVarietyId]);
 
   const flatRecords = useMemo(() => flattenRecords(view.customers), [view.customers]);
 
@@ -671,12 +684,21 @@ export default function ArrangementPage() {
           onEditPick={setPickDialogGrower}
           onToggleSubmit={(grower) => toggleSubmitMutation.mutate(grower)}
           toggleSubmitDisabled={!editable || toggleSubmitMutation.isPending}
+          filterVariety={growerFilterVariety}
+          onClearFilter={() => setGrowerFilterVarietyId(null)}
           onSelect={(next) => {
             setSelection(next);
             // The staging list is per-product: customers offered last
             // product's surplus have nothing to do with this one, and
             // leaving them above the rule would silently mis-file them.
             setPromoted(new Set());
+            // A specific pick line is now the working selection, which can
+            // name a different variety than the filter (nothing stops a
+            // distributor from picking a different product off a grower the
+            // filter merely surfaced) — clearing it here is what keeps the
+            // strip above and the narrowed list from disagreeing about which
+            // product is "the" one.
+            setGrowerFilterVarietyId(null);
           }}
         />
 
@@ -687,6 +709,10 @@ export default function ArrangementPage() {
           promoted={promoted}
           editable={editable}
           saving={busy}
+          filterVarietyId={growerFilterVarietyId}
+          onFilterVariety={(varietyId) =>
+            setGrowerFilterVarietyId((current) => (current === varietyId ? null : varietyId))
+          }
           onPromote={(customerId) => setPromoted((current) => new Set(current).add(customerId))}
           onEditOrders={setOrdersCustomerId}
           onArrange={arrange}

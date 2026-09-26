@@ -62,6 +62,8 @@ export function CustomerDemandBoard({
   promoted,
   editable,
   saving,
+  filterVarietyId,
+  onFilterVariety,
   onPromote,
   onEditOrders,
   onArrange,
@@ -74,6 +76,11 @@ export function CustomerDemandBoard({
   promoted: ReadonlySet<string>;
   editable: boolean;
   saving: boolean;
+  /** The variety a click on an order line below is currently asking the
+   * growers column (opposite) to narrow down to — see this prop's own
+   * comment on OrderLineRow for why it's a separate idea from `selection`. */
+  filterVarietyId: string | null;
+  onFilterVariety: (varietyId: string) => void;
   onPromote: (customerId: string) => void;
   onEditOrders: (customerId: string) => void;
   onArrange: (request: ArrangeRequest) => Promise<boolean>;
@@ -91,6 +98,8 @@ export function CustomerDemandBoard({
     selected,
     editable,
     saving,
+    filterVarietyId,
+    onFilterVariety,
     onEditOrders,
     onArrange,
     onSave,
@@ -187,6 +196,8 @@ interface CardProps {
   selected: SelectedPickLine | null;
   editable: boolean;
   saving: boolean;
+  filterVarietyId: string | null;
+  onFilterVariety: (varietyId: string) => void;
   onPromote: (customerId: string) => void;
   onEditOrders: (customerId: string) => void;
   onArrange: (request: ArrangeRequest) => Promise<boolean>;
@@ -203,6 +214,8 @@ function CustomerCard({
   selected,
   editable,
   saving,
+  filterVarietyId,
+  onFilterVariety,
   onPromote,
   onEditOrders,
   onArrange,
@@ -353,6 +366,8 @@ function CustomerCard({
             onToggle={() => toggleLine(line.orderLineId)}
             editable={editable}
             saving={saving}
+            filterVarietyId={filterVarietyId}
+            onFilterVariety={onFilterVariety}
             onArrange={onArrange}
             onSave={onSave}
             onDelete={onDelete}
@@ -375,6 +390,8 @@ function OrderLineRow({
   onToggle,
   editable,
   saving,
+  filterVarietyId,
+  onFilterVariety,
   onArrange,
   onSave,
   onDelete,
@@ -387,11 +404,14 @@ function OrderLineRow({
   onToggle: () => void;
   editable: boolean;
   saving: boolean;
+  filterVarietyId: string | null;
+  onFilterVariety: (varietyId: string) => void;
   onArrange: (request: ArrangeRequest) => Promise<boolean>;
   onSave: (patch: AllocationPatch) => Promise<boolean>;
   onDelete: (recordId: string) => void;
 }) {
   const isSelected = selection?.varietyId === line.varietyId;
+  const isFiltering = filterVarietyId === line.varietyId;
   const covered = line.allocated >= line.ordered && line.ordered > 0;
   const expandable = line.allocations.length > 0;
 
@@ -448,52 +468,64 @@ function OrderLineRow({
     </span>
   );
 
+  // Clicking the row is how a distributor asks "who has this?" without
+  // already knowing which grower to look under — it sets the variety the
+  // growers column (opposite) narrows its list down to. Kept independent of
+  // `onToggle`/`isSelected`: this is a read-only lookup, not a step toward
+  // writing an allocation, so it must never disturb an arrangement already
+  // in progress on another row.
+  const filterThisRow = () => onFilterVariety(line.varietyId);
+
   return (
     <li
       className={`border-b border-border/60 last:border-b-0 ${
         isSelected
           ? "bg-accent-soft/45 shadow-[inset_3px_0_0_var(--color-accent)]"
-          : // Fully covered lines get their own background, not just the
-            // green arranged figure — a row a distributor doesn't need to
-            // act on should be findable at a glance, not just on close
-            // reading. Loses to selection above: mid-arrangement is a more
-            // urgent state than already-done.
-            covered
-            ? "bg-warning-soft"
-            : ""
+          : isFiltering
+            ? "bg-accent-soft/20 shadow-[inset_3px_0_0_var(--color-accent)]"
+            : // Fully covered lines get their own background, not just the
+              // green arranged figure — a row a distributor doesn't need to
+              // act on should be findable at a glance, not just on close
+              // reading. Loses to selection above: mid-arrangement is a more
+              // urgent state than already-done.
+              covered
+              ? "bg-warning-soft"
+              : ""
       }`}
     >
       <div className="flex flex-wrap items-center gap-2 px-3 py-2">
-        {/* The chevron, name and stats are one button — not just the chevron
-            — so the whole row is the toggle's hit target, the same as every
-            other expand/collapse row in the app (ExpandableEntityRow, the
-            grower supply column). A user pressing the variety name or the
-            ordered/allocated figures expects that to open the row exactly as
-            pressing the arrow does. */}
+        {/* Two separate hit targets now, not one: the chevron only ever opens
+            the allocation history below, and the name/stats button only ever
+            sets the growers filter opposite. They used to be one button that
+            did both, which meant there was no way to check "who has this?"
+            without also popping open the history list underneath it. */}
         {expandable ? (
           <button
             type="button"
             onClick={onToggle}
             aria-expanded={open}
             aria-label={`הצג שיוכים עבור ${line.varietyName}`}
-            className="group flex min-w-0 flex-1 items-center gap-2 text-start"
+            className="group shrink-0"
           >
             <Icon
               name="chevronDown"
-              className={`h-3.5 w-3.5 shrink-0 transition-[transform,color] duration-300 ease-[cubic-bezier(0.22,0.61,0.36,1)] ${
+              className={`h-3.5 w-3.5 transition-[transform,color] duration-300 ease-[cubic-bezier(0.22,0.61,0.36,1)] ${
                 open ? "rotate-180 text-accent" : "text-ink-subtle group-hover:text-accent"
               }`}
             />
-            {name}
-            {stats}
           </button>
         ) : (
-          <>
-            <span aria-hidden className="w-3.5 shrink-0" />
-            {name}
-            {stats}
-          </>
+          <span aria-hidden className="w-3.5 shrink-0" />
         )}
+        <button
+          type="button"
+          onClick={filterThisRow}
+          aria-label={`סנן מגדלים לפי ${line.varietyName}`}
+          className="group flex min-w-0 flex-1 items-center gap-2 text-start"
+        >
+          {name}
+          {stats}
+        </button>
 
         {/* The arrangement editor, and ONLY on the row whose product is the
             one selected in the growers column. Every other row on the card

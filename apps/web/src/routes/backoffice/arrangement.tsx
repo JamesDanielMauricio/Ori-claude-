@@ -741,6 +741,7 @@ export default function ArrangementPage() {
           // and the ceiling each ✓ is checked against, so the board has to
           // re-read before it starts validating against a stale number.
           void queryClient.invalidateQueries({ queryKey: ["arrangement", "board-data"] });
+          setPickDialogGrower(null);
         }}
         // See PickLinesEditor's own `readOnly` comment for why this can't be
         // left to pickStatus alone.

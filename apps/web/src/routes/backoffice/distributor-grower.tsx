@@ -589,6 +589,7 @@ export default function DistributorAsGrowerPage() {
           void queryClient.invalidateQueries({
             queryKey: ["grower-oversight", "picks-for-day", dayId],
           });
+          setPickDialogGrower(null);
         }}
         readOnly={!dayView.isLive}
       />

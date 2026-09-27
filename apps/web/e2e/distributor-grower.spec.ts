@@ -14,6 +14,7 @@ import {
   createTestGrowerWithProduct,
   deleteTestGrowerWithProduct,
   deleteTestTradingDay,
+  getDailyPickForGrower,
 } from "@ori/domain/lifecycle-engine/testing";
 import { expect, test } from "@playwright/test";
 
@@ -102,19 +103,49 @@ test.describe("Backoffice — Grower Inventory Status", () => {
     const palletsInput = page.locator("dialog[open]").getByLabel("פלטות שנקטפו");
     await expect(palletsInput).toBeEnabled();
     const commentInput = page.locator('dialog[open] input[type="text"]');
+    const editorDialog = page.getByRole("dialog", { name: `מלאי — ${growerName}` });
     await palletsInput.fill("8");
+    await editorDialog.getByLabel("פלטות עודף").fill("2");
     await commentInput.fill("distributor-entered note");
-    await page.getByRole("button", { name: "שמור" }).click();
+    // `exact` throughout: the review popup's own button is also "שמור".
+    await editorDialog.getByRole("button", { name: "שמור", exact: true }).click();
+
+    // Save opens the same review popup the grower gets, on top of this one,
+    // with each product's picked, leftover and total (picked + leftover).
+    const confirmDialog = page.getByRole("dialog", { name: "אישור ליקוט" });
+    await expect(confirmDialog).toContainText("נקטף 8");
+    await expect(confirmDialog).toContainText("עודף 2");
+    await expect(confirmDialog).toContainText("סה״כ 10");
+    // A distributor's save doesn't send the pick, so the button doesn't claim to.
+    await expect(confirmDialog.getByRole("button", { name: "שמור ושלח" })).toHaveCount(0);
+
+    // Backing out closes ONLY the review: the editor underneath stays open
+    // with the edit still in it. It used to close both — the review's close
+    // event reached this dialog's handler too (see ui/dialog.tsx) — so keep
+    // working in the editor afterwards: every step below needs it alive.
+    await confirmDialog.getByRole("button", { name: "חזרה לעריכה" }).click();
+    await expect(confirmDialog).toHaveCount(0);
+    await expect(editorDialog).toBeVisible();
+    await expect(palletsInput).toHaveValue("8");
+    await palletsInput.fill("9");
+    await editorDialog.getByRole("button", { name: "שמור", exact: true }).click();
+    await expect(confirmDialog).toContainText("סה״כ 11");
+
+    await confirmDialog.getByRole("button", { name: "שמור", exact: true }).click();
     await expect(page.getByText("השורות נשמרו.")).toBeVisible();
     // No explicit close here: a successful save closes this dialog itself
     // (distributor-grower.tsx's onSaved clears pickDialogGrower), so waiting
     // to click "סגור" waits for a button that is already gone.
     await expect(page.locator("dialog[open]")).toHaveCount(0);
+    // Saved, not sent: the pick is still the grower's draft. Sending from the
+    // distributor's side stays the arrangement board's truck icon.
+    expect((await getDailyPickForGrower(dayId, grower.companyId))?.status).toBe("draft");
 
     await page.reload();
     await page.getByRole("button", { name: `ערוך את מלאי ${growerName}` }).click();
     await page.locator("dialog[open]").getByRole("button", { expanded: false }).click();
-    await expect(page.locator("dialog[open]").getByLabel("פלטות שנקטפו")).toHaveValue("8");
+    await expect(page.locator("dialog[open]").getByLabel("פלטות שנקטפו")).toHaveValue("9");
+    await expect(page.locator("dialog[open]").getByLabel("פלטות עודף")).toHaveValue("2");
     await expect(page.locator('dialog[open] input[type="text"]')).toHaveValue(
       "distributor-entered note",
     );

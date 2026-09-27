@@ -38,6 +38,7 @@ export function ActionBar({
   editing,
   saving = false,
   dirty = true,
+  canSaveUnchanged = false,
   canDelete = true,
   sticky = false,
   onEdit,
@@ -64,6 +65,13 @@ export function ActionBar({
   // NOT applied to "מחק": deleting a record has nothing to do with whether
   // its form has unsaved edits.
   dirty?: boolean;
+  // Keeps "שמור" clickable when nothing has been edited, for the one host
+  // whose save does more than write the draft back: the grower's own picking
+  // screen, where "שמור" is also what sends a draft pick to the distributor.
+  // A grower whose saved numbers are already right still needs a button that
+  // sends them. "בטל שינויים" is unaffected — with no edits there is still
+  // nothing to discard. Defaults to false, so every other bar is unchanged.
+  canSaveUnchanged?: boolean;
   canDelete?: boolean;
   // Pins the bar to the bottom of whatever is scrolling it, instead of
   // leaving it at the end of the content. The reference-data screens are
@@ -99,7 +107,7 @@ export function ActionBar({
     >
       {editing ? (
         <>
-          <Button type="button" onClick={onSave} disabled={saving || !dirty}>
+          <Button type="button" onClick={onSave} disabled={saving || (!dirty && !canSaveUnchanged)}>
             {/* A spinning ring during the save, not just the word "שומר…".
                 The text alone changes by two characters and is easy to miss;
                 a moving element is unambiguous proof the click registered. */}

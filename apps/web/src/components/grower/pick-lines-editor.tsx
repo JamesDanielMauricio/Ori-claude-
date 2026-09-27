@@ -1,7 +1,13 @@
 import { savePickLinesInputSchema, toSavePickLinesRpcArgs } from "@ori/domain/grower";
+import {
+  LIFECYCLE_ERROR_CODES,
+  submitPickInputSchema,
+  toSubmitPickRpcArgs,
+} from "@ori/domain/lifecycle-engine";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { PickConfirmationDialog, type PickReviewFamily } from "@/components/grower/pick-confirmation-dialog";
 import { ActionBar } from "@/components/reference-data/action-bar";
 import { inputClassName } from "@/components/reference-data/form-field";
 import { Icon } from "@/components/ui/icon";
@@ -182,7 +188,7 @@ export function PickLinesEditor({
   dailyPickId,
   pickStatus,
   onSaved,
-  onUnsavedChange,
+  submitOnSave = false,
   sticky = false,
   readOnly = false,
 }: {
@@ -216,23 +222,34 @@ export function PickLinesEditor({
   readOnly?: boolean;
   // Fired after a successful save, for hosts that show this editor over
   // other data derived from the same pick — the arrangement board mounts it
-  // in a popup and has to re-read the day's supply once pallets change.
-  // Optional, so the two full-page hosts are unaffected; this component
-  // still refreshes its own query either way. Mirrors OrderLinesEditor's
-  // `onSubmitted`.
+  // in a popup and has to re-read the day's supply once pallets change, and
+  // the grower's own screen re-reads the pick's status, which a save with
+  // `submitOnSave` can change. Optional; this component still refreshes its
+  // own query either way. Mirrors OrderLinesEditor's `onSubmitted`.
   onSaved?: () => void;
-  // Told whether the screen holds changes that aren't saved yet (edited, or
-  // still being saved). The grower's own screen needs it because its
-  // "שלח ליקוט" submits the pick as SAVED — submit_pick only changes the
-  // status — so pressing it over unsaved numbers would send the old ones
-  // while the new ones sat on screen looking sent.
-  onUnsavedChange?: (unsaved: boolean) => void;
+  // The grower's own screen: "שמור" is the ONLY button, and it both saves
+  // and sends — confirming PickConfirmationDialog saves the lines and then,
+  // if the pick is still a draft, submits it (submit_pick). There used to be
+  // a separate "שלח ליקוט" button, and a grower who only pressed "שמור" left
+  // their pick sitting in draft without knowing it.
+  //
+  // Every host shows that confirmation; this prop decides only whether
+  // confirming also sends. Off for the two backoffice hosts on purpose. A
+  // distributor correcting a grower's numbers is not the grower sending their
+  // pick, and submitting from there already has its own control — the
+  // arrangement board's truck icon, which can also REVERT a pick to draft. A
+  // distributor's save that quietly re-submitted a pick they had just
+  // reverted would undo that.
+  submitOnSave?: boolean;
 }) {
   const supabase = createClient();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
 
   const [saving, setSaving] = useState(false);
+  // PickConfirmationDialog — what "שמור" opens; the save itself runs from its
+  // confirm button.
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [draft, setDraft] = useState<DraftLine[]>([]);
   // See the re-seeding effect below.
   const touched = useRef(false);
@@ -350,6 +367,46 @@ export function PickLinesEditor({
     },
   );
 
+  // `submitOnSave`'s second step, run only after save_pick_lines has
+  // committed — so the pick is always sent with the numbers just saved, never
+  // the previous ones.
+  //
+  // It asks the server for the pick's status rather than trusting the
+  // `pickStatus` prop, because that prop can be stale: the distributor can
+  // submit or revert this pick from the arrangement board (the truck icon)
+  // while the grower has this screen open. Trusting a stale "submitted"
+  // would skip the submit and leave a reverted pick in draft while telling
+  // the grower it was sent.
+  //
+  // INVALID_STATE from submit_pick means the pick left draft between that
+  // read and this call — submitted by the distributor's truck icon, or closed
+  // with the day. Either way it is no longer waiting to be sent, which is
+  // what this step exists to achieve, so it counts as success, not a failure.
+  //
+  // Returns the error instead of throwing it — the try/catch included, for
+  // anything that throws rather than returning `{ error }`. By the time this
+  // runs the lines ARE saved, and a throw would send the mutation down
+  // onError, which rolls the line cache back and shows "השמירה נכשלה" over
+  // numbers that did in fact save.
+  async function submitIfStillDraft(): Promise<unknown> {
+    try {
+      const { data: pick, error: readError } = await supabase
+        .from("daily_picks")
+        .select("status")
+        .eq("id", dailyPickId)
+        .single();
+      if (readError) return readError;
+      if (pick.status !== "draft") return null;
+
+      const input = submitPickInputSchema.parse({ dailyPickId });
+      const { error } = await supabase.rpc("submit_pick", toSubmitPickRpcArgs(input));
+      if (error && error.code !== LIFECYCLE_ERROR_CODES.INVALID_STATE) return error;
+      return null;
+    } catch (error) {
+      return error;
+    }
+  }
+
   const saveMutation = useMutation({
     mutationFn: async () => {
       const input = savePickLinesInputSchema.parse({
@@ -358,15 +415,28 @@ export function PickLinesEditor({
       });
       const { error } = await supabase.rpc("save_pick_lines", toSavePickLinesRpcArgs(input));
       if (error) throw error;
+      return { submitError: submitOnSave ? await submitIfStillDraft() : null };
     },
     onMutate: saveOptimistic.onMutate,
-    onSuccess: () => {
-      showToast("השורות נשמרו.", "success");
+    onSuccess: ({ submitError }) => {
+      if (submitError) {
+        // Save stays clickable on a draft pick (see `canSaveUnchanged`
+        // below), so pressing it again is a real retry: the lines re-save
+        // unchanged and the submit is attempted again.
+        showToast(
+          `השורות נשמרו, אך שליחת הליקוט נכשלה: ${errorMessage(submitError)}. לחץ שמירה שוב כדי לשלוח.`,
+          "error",
+        );
+      } else {
+        showToast(submitOnSave ? "הליקוט נשמר ונשלח." : "השורות נשמרו.", "success");
+      }
       // The draft now matches the server, so let the refetch below re-seed
       // it — otherwise the editor would stay frozen on this draft for the
       // rest of its life and quietly stop showing other people's changes.
       touched.current = false;
       void queryClient.invalidateQueries({ queryKey });
+      // Also how the grower's screen learns the pick's status just changed
+      // to "נשלח" — it refetches the pick when told a save landed.
       onSaved?.();
     },
     onError: mergeOnError(saveOptimistic.onError, (error: { message?: string }) => {
@@ -384,6 +454,31 @@ export function PickLinesEditor({
     [linesQuery.data, draft],
   );
 
+  // What PickConfirmationDialog lists: the same draft, same grouping, as
+  // numbers rather than input text ("8.00" from Postgres and a typed "8" both
+  // show as 8), keeping only lines with a quantity or a comment — see the
+  // dialog's own comment for why the empty ones are left out.
+  const reviewFamilies = useMemo<PickReviewFamily[]>(
+    () =>
+      families
+        .map((family) => ({
+          familyId: family.familyId,
+          familyName: family.familyName,
+          imageUrl: family.imageUrl,
+          varieties: family.varieties
+            .map((variety) => ({
+              id: variety.id,
+              varietyName: variety.varietyName,
+              pallets: Number(variety.pallets || 0),
+              leftover: Number(variety.leftover || 0),
+              comment: variety.comment.trim(),
+            }))
+            .filter((variety) => variety.pallets > 0 || variety.leftover > 0 || variety.comment !== ""),
+        }))
+        .filter((family) => family.varieties.length > 0),
+    [families],
+  );
+
   // The lines with no unsaved edits — what "בטל שינויים" puts back, and what
   // the draft is measured against to decide whether either button has
   // anything to do.
@@ -399,16 +494,21 @@ export function PickLinesEditor({
 
   function handleSave() {
     setSaving(true);
-    saveMutation.mutate(undefined, { onSettled: () => setSaving(false) });
+    saveMutation.mutate(undefined, {
+      onSettled: () => {
+        setSaving(false);
+        // Closed on failure too, not only on success. Toasts render below
+        // the browser's top layer, where a modal <dialog> lives, so an error
+        // raised with the popup still open would sit behind its dimmed
+        // backdrop, unreadable. A failed save (e.g. P0006, a number below
+        // what's already arranged) also means the grower has to go back and
+        // edit, which is where closing puts them.
+        setConfirmOpen(false);
+      },
+    });
   }
 
   const locked = pickStatus === "closed" || readOnly;
-
-  // Before the early returns below, so it runs on every render.
-  const unsaved = !locked && (dirty || saving);
-  useEffect(() => {
-    onUnsavedChange?.(unsaved);
-  }, [unsaved, onUnsavedChange]);
 
   if (linesQuery.isLoading) {
     return (
@@ -604,10 +704,31 @@ export function PickLinesEditor({
           editing
           saving={saving}
           dirty={dirty}
+          // A draft pick still has to be SENT even when every number on it is
+          // already saved — e.g. one saved before "שמור" also sent, or one
+          // whose carried-over leftover is already right. Once it's
+          // submitted, a save with nothing changed would do nothing, so the
+          // usual dirty rule applies again.
+          canSaveUnchanged={submitOnSave && pickStatus === "draft"}
           canDelete={false}
           sticky={sticky}
           onDiscard={handleDiscard}
-          onSave={handleSave}
+          onSave={() => setConfirmOpen(true)}
+        />
+      )}
+
+      {/* On the backoffice hosts this opens on top of GrowerPickDialog — a
+          dialog inside a dialog. Dismissing it ("חזרה לעריכה", ×, Escape)
+          must leave the editor popup underneath open with the edits still in
+          it, which is what Dialog's own-event check (ui/dialog.tsx) is for. */}
+      {!locked && (
+        <PickConfirmationDialog
+          open={confirmOpen}
+          families={reviewFamilies}
+          sends={submitOnSave}
+          confirming={saving}
+          onClose={() => setConfirmOpen(false)}
+          onConfirm={handleSave}
         />
       )}
     </div>

@@ -1,18 +1,14 @@
-import { submitPickInputSchema, toSubmitPickRpcArgs } from "@ori/domain/lifecycle-engine";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { PickLinesEditor } from "@/components/grower/pick-lines-editor";
-import { Button } from "@/components/ui/button";
 import { StatusPill, type StatusTone } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Icon } from "@/components/ui/icon";
 import { PageHeader } from "@/components/ui/page-header";
 import { QueryError } from "@/components/ui/query-error";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useToast } from "@/components/ui/toast";
-import { errorMessage } from "@/lib/error-message";
 import { useAuth } from "@/lib/auth-context";
 import { createClient } from "@/lib/supabase/client";
 
@@ -169,7 +165,7 @@ function TodayPickView() {
     <PickDetail
       pick={pickQuery.data}
       tradeDateLabel={tradeDateLabel}
-      onSubmitted={() =>
+      onSaved={() =>
         void queryClient.invalidateQueries({ queryKey: ["grower", "daily-pick", openDayId, companyId] })
       }
     />
@@ -230,7 +226,7 @@ function SpecificPickView({ pickId }: { pickId: string }) {
     <PickDetail
       pick={pick}
       tradeDateLabel={tradeDateLabel}
-      onSubmitted={() => void queryClient.invalidateQueries({ queryKey: ["grower", "pick-by-id", pickId] })}
+      onSaved={() => void queryClient.invalidateQueries({ queryKey: ["grower", "pick-by-id", pickId] })}
     />
   );
 }
@@ -306,71 +302,25 @@ function NoPickView({ tradingDayId }: { tradingDayId: string }) {
 // different kind of object, only a different way of finding one (same
 // precedent as OrderLinesEditor being shared between the customer's own
 // order screen and its history-reached view).
+//
+// No separate "send" button: the editor's "שמור" both saves and sends (see
+// PickLinesEditor's `submitOnSave`). There used to be a "שלח ליקוט" button up
+// here as well, and a grower who only ever pressed "שמור" left their pick in
+// draft without realising it had never been sent.
 function PickDetail({
   pick,
   tradeDateLabel,
-  onSubmitted,
+  onSaved,
 }: {
   pick: DailyPickSummary;
   tradeDateLabel: string;
-  onSubmitted: () => void;
+  onSaved: () => void;
 }) {
-  const supabase = createClient();
-  const { showToast } = useToast();
-  // Reported by PickLinesEditor below. submit_pick sends the pick exactly as
-  // SAVED, so "שלח ליקוט" waits until nothing on screen is unsaved —
-  // otherwise it sent the previous numbers while the ones just typed stayed
-  // on screen looking sent.
-  const [linesUnsaved, setLinesUnsaved] = useState(false);
-
-  const submitMutation = useMutation({
-    mutationFn: async () => {
-      if (linesUnsaved) throw new Error("יש לשמור את השינויים לפני השליחה.");
-      const input = submitPickInputSchema.parse({ dailyPickId: pick.id });
-      const { data, error } = await supabase.rpc("submit_pick", toSubmitPickRpcArgs(input));
-      if (error) throw error;
-      return data as DailyPickSummary;
-    },
-    onSuccess: () => {
-      showToast("הליקוט נשלח.", "success");
-      onSubmitted();
-    },
-    onError: (error: { message?: string }) => {
-      showToast(`השליחה נכשלה: ${errorMessage(error)}`, "error");
-    },
-  });
-
   return (
     <div className="flex flex-col gap-5">
       <PageHeader
         title="עדכון יומי"
-        subtitle="עדכן את הכמויות שנקטפו וההערות לכל מוצר, ושלח את הליקוט למפיץ."
-        actions={
-          pick.status === "draft" ? (
-            <div className="flex flex-col items-end gap-1.5">
-              <Button
-                type="button"
-                onClick={() => submitMutation.mutate()}
-                disabled={submitMutation.isPending || linesUnsaved}
-              >
-                {submitMutation.isPending && (
-                  <span
-                    aria-hidden
-                    className="animate-spin-loop h-3.5 w-3.5 rounded-full border-2 border-current border-t-transparent"
-                  />
-                )}
-                {submitMutation.isPending ? "שולח…" : "שלח ליקוט"}
-              </Button>
-              {/* Said in text, not in a tooltip on the disabled button:
-                  growers are mostly on phones, where a tooltip never shows. */}
-              {linesUnsaved && (
-                <p className="text-xs font-medium text-warning">
-                  יש שינויים שלא נשמרו — שמור אותם לפני השליחה.
-                </p>
-              )}
-            </div>
-          ) : undefined
-        }
+        subtitle="עדכן את הכמויות שנקטפו וההערות לכל מוצר ולחץ שמירה — הליקוט נשלח למפיץ לאחר אישור הסיכום."
       />
 
       {/* Status moved out of the subtitle and onto its own strip. "טיוטה" vs
@@ -402,7 +352,8 @@ function PickDetail({
         dailyPickId={pick.id}
         pickStatus={pick.status}
         sticky
-        onUnsavedChange={setLinesUnsaved}
+        submitOnSave
+        onSaved={onSaved}
       />
     </div>
   );

@@ -28,7 +28,7 @@ test.describe("Grower — daily picking input", () => {
     await runCleanup(cleanupFns);
   });
 
-  async function openTodayFor(growerCompanyId: string): Promise<string> {
+  async function openTodayFor(growerCompanyId: string): Promise<{ dayId: string; pickId: string }> {
     const adminCompany = await createTestCompany();
     cleanupFns.push(() => deleteTestCompany(adminCompany.id));
     const admin = await createTestProfile({ companyId: adminCompany.id, role: "backoffice" });
@@ -44,15 +44,15 @@ test.describe("Grower — daily picking input", () => {
 
     const pick = await getDailyPickForGrower(dayId, growerCompanyId);
     if (!pick) throw new Error("grower's pick was not bootstrapped by initiate_business_day");
-    return pick.id;
+    return { dayId, pickId: pick.id };
   }
 
-  test("a grower edits a pick line's pallets and comment, and the change persists across a reload", async ({
+  test("a grower edits a pick line's pallets and comment, confirms it in the review popup, and it is saved AND sent", async ({
     page,
   }) => {
     const grower = await createTestGrowerWithProduct();
     cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
-    await openTodayFor(grower.companyId);
+    const { dayId } = await openTodayFor(grower.companyId);
 
     const growerUser = await createTestProfile({ companyId: grower.companyId, role: "grower" });
     cleanupFns.push(() => deleteTestUser(growerUser.userId));
@@ -77,11 +77,46 @@ test.describe("Grower — daily picking input", () => {
     const palletsInput = page.getByLabel("פלטות שנקטפו");
     const commentInput = page.locator('input[type="text"]');
 
-    await palletsInput.fill("12");
-    await commentInput.fill("gate code 4321");
-    await page.getByRole("button", { name: "שמור" }).click();
+    // "שמור" is the only button — the separate "שלח ליקוט" is gone, because
+    // saving now also sends (pick-lines-editor.tsx's `submitOnSave`).
+    await expect(page.getByRole("button", { name: "שלח ליקוט" })).toHaveCount(0);
 
-    await expect(page.getByText("השורות נשמרו.")).toBeVisible();
+    await palletsInput.fill("12");
+    await page.getByLabel("פלטות עודף").fill("3");
+    await commentInput.fill("gate code 4321");
+    // `exact` throughout: the popup's own confirm button is "שמור ושלח",
+    // which a substring match on "שמור" would also hit.
+    await page.getByRole("button", { name: "שמור", exact: true }).click();
+
+    // The review popup lists what is about to be sent, grouped under its
+    // family — and every family is already open: nothing in it expands or
+    // collapses, so the line is readable without clicking anything.
+    const confirmDialog = page.locator("dialog[open]");
+    await expect(confirmDialog).toContainText("אישור ליקוט");
+    await expect(confirmDialog.getByRole("heading", { name: grower.familyName })).toBeVisible();
+    await expect(confirmDialog.locator("[aria-expanded]")).toHaveCount(0);
+    await expect(confirmDialog.getByText(grower.varietyName)).toBeVisible();
+    await expect(confirmDialog).toContainText("נקטף 12");
+    await expect(confirmDialog).toContainText("עודף 3");
+    // The product's total: picked + leftover.
+    await expect(confirmDialog).toContainText("סה״כ 15");
+    await expect(confirmDialog).toContainText("gate code 4321");
+
+    // Backing out sends nothing: the popup closes and the pick is still a draft.
+    await confirmDialog.getByRole("button", { name: "חזרה לעריכה" }).click();
+    await expect(page.locator("dialog[open]")).toHaveCount(0);
+    await expect(page.locator("main").getByText("טיוטה", { exact: true })).toBeVisible();
+    expect((await getDailyPickForGrower(dayId, grower.companyId))?.status).toBe("draft");
+
+    // Confirming saves and sends in one go.
+    await page.getByRole("button", { name: "שמור", exact: true }).click();
+    await page.locator("dialog[open]").getByRole("button", { name: "שמור ושלח" }).click();
+    await expect(page.getByText("הליקוט נשמר ונשלח.")).toBeVisible();
+    await expect(page.locator("dialog[open]")).toHaveCount(0);
+    await expect(page.locator("main").getByText("נשלח", { exact: true })).toBeVisible();
+    expect((await getDailyPickForGrower(dayId, grower.companyId))?.status).toBe("submitted");
+    // Sent, and nothing edited since: nothing left for "שמור" to do.
+    await expect(page.getByRole("button", { name: "שמור", exact: true })).toBeDisabled();
 
     await page.reload();
     // A fresh mount re-collapses every family.
@@ -93,11 +128,10 @@ test.describe("Grower — daily picking input", () => {
     await expect(commentInput).toHaveValue("gate code 4321");
 
     // The pick history list (routes/grower/history.tsx), the grower-module
-    // counterpart of the customer's order history. This pick was only saved,
-    // never submitted, so it's still "טיוטה" — same badge picks.tsx itself
-    // shows.
+    // counterpart of the customer's order history. Saving sent this pick, so
+    // it shows "נשלח" — same badge picks.tsx itself shows.
     await page.goto("/grower/history");
-    const historyRow = page.getByRole("button", { name: "טיוטה" });
+    const historyRow = page.getByRole("button", { name: "נשלח" });
     await expect(historyRow).toBeVisible();
     await historyRow.click();
 
@@ -138,8 +172,12 @@ test.describe("Grower — daily picking input", () => {
     const commentInput = page.locator('input[type="text"]');
     await palletsInput.fill("3");
     await commentInput.fill("baseline comment");
-    await page.getByRole("button", { name: "שמור" }).click();
-    await expect(page.getByText("השורות נשמרו.")).toBeVisible();
+    await page.getByRole("button", { name: "שמור", exact: true }).click();
+    await page.locator("dialog[open]").getByRole("button", { name: "שמור ושלח" }).click();
+    await expect(page.getByText("הליקוט נשמר ונשלח.")).toBeVisible();
+    // A modal <dialog> makes the rest of the page inert until it has finished
+    // closing, so wait it out before typing into the editor again.
+    await expect(page.locator("dialog[open]")).toHaveCount(0);
 
     // Change values again, but hit Cancel instead of Save.
     await palletsInput.fill("999");
@@ -156,5 +194,40 @@ test.describe("Grower — daily picking input", () => {
     await page.locator("main").getByRole("button", { expanded: false }).click();
     await expect(palletsInput).toHaveValue("3");
     await expect(commentInput).toHaveValue("baseline comment");
+  });
+
+  test("a draft pick can be sent with nothing edited — Save stays live, the popup says it's empty, and confirming submits it", async ({
+    page,
+  }) => {
+    const grower = await createTestGrowerWithProduct();
+    cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
+    const { dayId } = await openTodayFor(grower.companyId);
+
+    const growerUser = await createTestProfile({ companyId: grower.companyId, role: "grower" });
+    cleanupFns.push(() => deleteTestUser(growerUser.userId));
+
+    await page.goto("/login");
+    await page.getByLabel("אימייל").fill(growerUser.email);
+    await page.getByLabel("סיסמה", { exact: true }).fill(growerUser.password);
+    await page.getByRole("button", { name: "התחברות" }).click();
+    await expect(page).toHaveURL(/\/grower\/picks$/);
+
+    // Freshly bootstrapped, nothing typed. With "שמור" as the only way to
+    // send, it must not be greyed out just because nothing changed — the
+    // pick is still an unsent draft. "בטל שינויים" still is: nothing to undo.
+    const saveButton = page.getByRole("button", { name: "שמור", exact: true });
+    await expect(saveButton).toBeEnabled();
+    await expect(page.getByRole("button", { name: "בטל שינויים" })).toBeDisabled();
+
+    await saveButton.click();
+    const confirmDialog = page.locator("dialog[open]");
+    await expect(confirmDialog).toContainText("לא הוזנו כמויות");
+    await confirmDialog.getByRole("button", { name: "שמור ושלח" }).click();
+
+    await expect(page.getByText("הליקוט נשמר ונשלח.")).toBeVisible();
+    await expect(page.locator("dialog[open]")).toHaveCount(0);
+    await expect(page.locator("main").getByText("נשלח", { exact: true })).toBeVisible();
+    expect((await getDailyPickForGrower(dayId, grower.companyId))?.status).toBe("submitted");
+    await expect(saveButton).toBeDisabled();
   });
 });

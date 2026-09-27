@@ -90,8 +90,26 @@ export function Dialog({
   // it refuses, preventDefault() does nothing, the dialog closes
   // instantly, and the native `close` event below still tells the caller —
   // it just goes without the animation.
+  //
+  // Both this and handleClose below act only on the dialog's OWN event
+  // (`target === currentTarget`). React propagates every event except
+  // onScroll up the component tree — through portals too — so when one
+  // Dialog is rendered inside another's content (a confirmation opened from a
+  // popup's Save, a comment popup inside an order popup), the inner dialog's
+  // cancel/close reached the outer dialog's handlers as well, and dismissing
+  // the inner one closed both, throwing away whatever was being edited
+  // underneath. For a dialog with nothing nested inside it these events only
+  // ever come from the dialog itself, so the check changes nothing there.
+  // It also ignores the `cancel` a file input fires when its picker is
+  // dismissed, which would otherwise close the dialog holding that input.
   function handleCancel(event: SyntheticEvent<HTMLDialogElement>) {
+    if (event.target !== event.currentTarget) return;
     event.preventDefault();
+    onClose();
+  }
+
+  function handleClose(event: SyntheticEvent<HTMLDialogElement>) {
+    if (event.target !== event.currentTarget) return;
     onClose();
   }
 
@@ -116,7 +134,7 @@ export function Dialog({
   return createPortal(
     <dialog
       ref={ref}
-      onClose={onClose}
+      onClose={handleClose}
       onCancel={handleCancel}
       onClick={handleBackdropClick}
       aria-labelledby={titleId}

@@ -186,11 +186,6 @@ const PATHS = {
   // A bare checkmark — the custom Select's "this is the chosen option"
   // marker, as opposed to checkCircle's status-confirmation use.
   check: <path d="m5 12.5 4.5 4.5L19 7" />,
-  // The quantity stepper's two buttons (ui/quantity-stepper.tsx). Bare
-  // strokes rather than plusCircle's ringed version: the button around them
-  // is already the ring.
-  plus: <path d="M12 5.5v13M5.5 12h13" />,
-  minus: <path d="M5.5 12h13" />,
 } satisfies Record<string, ReactNode>;
 
 export type IconName = keyof typeof PATHS;

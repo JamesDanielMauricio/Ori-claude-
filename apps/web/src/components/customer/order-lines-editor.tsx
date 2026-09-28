@@ -51,9 +51,9 @@ function toDraft(rows: CatalogRow[]): Record<string, DraftLine> {
 // rather than by the state of the controls.
 //
 // Which matters most for an untouched row: toDraft leaves a variety nobody
-// ordered as "" while the stepper displays it as "0", so stepping a row up
-// and back down to 0 writes "0" into the draft and a textual comparison
-// would call that an edit. Both sides go through Number(... || 0) here, so 0 === 0 and
+// ordered as "" while the dropdown displays it as "0", so picking "0" on
+// such a row writes "0" into the draft and a textual comparison would call
+// that an edit. Both sides go through Number(... || 0) here, so 0 === 0 and
 // the order correctly reads as unchanged.
 function toSubmittedLines(rows: CatalogRow[], draft: Record<string, DraftLine>) {
   return rows.map((row) => ({
@@ -202,13 +202,13 @@ export function OrderLinesEditor({
   // has to be reachable without scrolling past everything they haven't
   // touched — see that function's own comment for why the split is keyed
   // off the server row, not `draft`.
-  // A stepper capped to remaining stock only makes sense as a promise to
+  // A dropdown capped to remaining stock only makes sense as a promise to
   // the person it constrains — the customer ordering for themselves.
   // Backoffice editing a customer's order on their behalf (customerCompanyId
   // supplied) keeps the free-typed number input: staff may deliberately
   // exceed the customer's own cap, same as submit_order never enforces it
   // on that path either (see 0042_customer-order-cap.sql).
-  const quantityMode = customerCompanyId ? "number" : "stepper";
+  const quantityMode = customerCompanyId ? "number" : "dropdown";
 
   const families: OrderFamilyRow[] = useMemo(
     () =>

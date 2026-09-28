@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/card";
 import { Icon } from "@/components/ui/icon";
 import { ProductThumbnail } from "@/components/ui/product-thumbnail";
-import { QuantityStepper } from "@/components/ui/quantity-stepper";
+import { Select } from "@/components/ui/select";
 import { blockDecimalKey, blockWheel, stripDecimal } from "@/lib/integer-input";
 
 export interface OrderVarietyRow {
@@ -18,7 +18,7 @@ export interface OrderVarietyRow {
   outOfStock?: boolean;
   // This customer's own ceiling for this row (get_orderable_catalog_for_
   // customer's max_orderable_for_customer, migration 0042) — the highest
-  // number the quantity stepper allows. Omitted for rows with no such
+  // number the quantity dropdown offers. Omitted for rows with no such
   // ceiling to offer (the read-only historical view builds its rows from
   // already-submitted lines, which carry no live stock figure).
   maxOrderable?: number;
@@ -28,6 +28,25 @@ const PACK_TYPE_LABEL: Record<"pallets" | "crates", string> = {
   pallets: "משטחים",
   crates: "ארגזים",
 };
+
+// Every whole number from 0 up to maxOrderable, plus the row's current
+// value even if it exceeds that ceiling — stock can drop out from under an
+// already-chosen quantity between page loads, and a <select> whose value
+// matches no <option> silently falls back to the first one, which would
+// quietly zero out a real order line the moment its family re-renders.
+// Surfacing the too-high figure as its own option instead leaves the
+// existing quantity visibly selected (and still change-able downward) until
+// the customer acts on it themselves.
+function dropdownOptions(maxOrderable: number, currentValue: string): number[] {
+  const safeMax = Number.isFinite(maxOrderable) ? Math.max(0, Math.floor(maxOrderable)) : 0;
+  const options = new Set<number>();
+  for (let n = 0; n <= safeMax; n++) options.add(n);
+  const current = Number(currentValue);
+  if (currentValue.trim() !== "" && Number.isInteger(current) && current > safeMax) {
+    options.add(current);
+  }
+  return [...options].sort((a, b) => a - b);
+}
 
 export interface OrderFamilyRow {
   familyId: string;
@@ -46,13 +65,13 @@ export interface OrderFamilyRow {
 // read-only historical order view (past, closed trading days);
 // `onChangePallets`/`onOpenComment` are omitted in the read-only case.
 //
-// quantityMode: "stepper" on the customer's own order screen — a `− n +`
-// control (ui/quantity-stepper.tsx) capped at each row's own maxOrderable, so
-// a customer can never pick more than they're actually allowed. "number"
-// (the default) is a free-typed number input, used for the backoffice
-// on-behalf-of editor (staff may deliberately exceed a customer's cap) and
-// the read-only historical view. This is the one place that distinction is
-// drawn — never a second, divergent quantity control.
+// quantityMode: "dropdown" on the customer's own order screen — the shared
+// Select capped at each row's own maxOrderable, so a customer can never pick
+// more than they're actually allowed. "number" (the default) is a free-typed
+// number input, used for the backoffice on-behalf-of editor (staff may
+// deliberately exceed a customer's cap) and the read-only historical view.
+// This is the one place that distinction is drawn — never a second,
+// divergent quantity control.
 export function OrderProductList({
   families,
   editable,
@@ -62,7 +81,7 @@ export function OrderProductList({
 }: {
   families: OrderFamilyRow[];
   editable: boolean;
-  quantityMode?: "stepper" | "number";
+  quantityMode?: "dropdown" | "number";
   onChangePallets?: (varietyId: string, value: string) => void;
   onOpenComment?: (varietyId: string) => void;
 }) {
@@ -168,13 +187,7 @@ export function OrderProductList({
                           against the pick row's 388. At 448 this name still
                           gets 202px, which is what it already had on a 768px
                           tablet and reads fine — so the threshold is each
-                          row's own arithmetic, not a shared guess.
-
-                          The customer's stepper is the same 128, but a row
-                          with a pack type adds the word beside it (38px for
-                          "משטחים", plus an 8px gap): 260 in all, leaving the
-                          name 156px at 448 — narrower, still nowhere near
-                          the 34-89px that broke it. */}
+                          row's own arithmetic, not a shared guess. */}
                       <div className="w-full min-w-0 @md:w-auto @md:flex-1">
                         {/* A wrapping flex row, not an inline badge after the
                             name. Inline, a narrow row broke the badge's two
@@ -217,35 +230,36 @@ export function OrderProductList({
                           </p>
                         )
                       )}
-                      {/* On the customer's own order screen
-                          (quantityMode="stepper") the quantity is a `− n +`
-                          stepper capped at this row's own remaining stock
-                          (ui/quantity-stepper.tsx), with the pack type as a
-                          word beside it — the stepper's own middle is only
-                          wide enough for the number. Every other caller
-                          (backoffice on-behalf-of, the read-only historical
-                          view) keeps the free-typed number input with the
-                          pack type inside it, matching the reference
-                          design's single pill-shaped control: backoffice
-                          staff need to see they can type any value, not
-                          step within a cap. */}
-                      {quantityMode === "stepper" ? (
-                        <div className="flex items-center gap-2">
-                          <QuantityStepper
+                      {/* Quantity + pack type together, matching the reference
+                          design's single pill-shaped control. On the
+                          customer's own order screen (quantityMode="dropdown")
+                          the quantity itself is the shared Select
+                          (ui/select.tsx), capped at this row's own remaining
+                          stock — see dropdownOptions above, with
+                          `showChevron={false}` and the leading chevron drawn
+                          here instead, so it sits centered against the pack-
+                          type label rather than off to the Select's own edge.
+                          Every other caller (backoffice on-behalf-of, the
+                          read-only historical view) keeps the free-typed
+                          number input — which does NOT draw that chevron: a
+                          plain number field with a select-style affordance on
+                          it reads as a dropdown it isn't, and backoffice staff
+                          need to see they can type any value, not just pick
+                          from a capped list. */}
+                      <div className="relative">
+                        {quantityMode === "dropdown" ? (
+                          <Select
                             disabled={!editable}
-                            label={`כמות ${variety.packType ? PACK_TYPE_LABEL[variety.packType] : "פלטות"} — ${variety.varietyName}`}
-                            value={variety.pallets}
-                            max={variety.maxOrderable ?? 0}
+                            showChevron={false}
+                            aria-label={`כמות ${variety.packType ? PACK_TYPE_LABEL[variety.packType] : "פלטות"} — ${variety.varietyName}`}
+                            className="w-32 ps-7 pe-14 font-semibold"
+                            value={variety.pallets === "" ? "0" : variety.pallets}
                             onChange={(next) => onChangePallets?.(variety.varietyId, next)}
+                            options={dropdownOptions(variety.maxOrderable ?? 0, variety.pallets).map(
+                              (n) => ({ value: String(n), label: String(n) }),
+                            )}
                           />
-                          {variety.packType && (
-                            <span className="text-xs font-medium text-ink-muted">
-                              {PACK_TYPE_LABEL[variety.packType]}
-                            </span>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="relative">
+                        ) : (
                           <input
                             type="number"
                             min="0"
@@ -260,13 +274,19 @@ export function OrderProductList({
                               onChangePallets?.(variety.varietyId, stripDecimal(event.target.value))
                             }
                           />
-                          {variety.packType && (
-                            <span className="pointer-events-none absolute inset-y-0 end-3 my-auto flex items-center text-xs font-medium text-ink-subtle">
-                              {PACK_TYPE_LABEL[variety.packType]}
-                            </span>
-                          )}
-                        </div>
-                      )}
+                        )}
+                        {quantityMode === "dropdown" && (
+                          <Icon
+                            name="chevronDown"
+                            className="pointer-events-none absolute inset-y-0 start-2 my-auto h-3.5 w-3.5 text-ink-subtle"
+                          />
+                        )}
+                        {variety.packType && (
+                          <span className="pointer-events-none absolute inset-y-0 end-3 my-auto flex items-center text-xs font-medium text-ink-subtle">
+                            {PACK_TYPE_LABEL[variety.packType]}
+                          </span>
+                        )}
+                      </div>
                     </li>
                   ))}
                 </ul>

@@ -20,6 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { createClient } from "@/lib/supabase/client";
+import { useTradingDayView } from "@/lib/trading-day-view";
 import { formatVarietyName } from "@/lib/variety-label";
 
 interface OrderRow {
@@ -56,16 +57,32 @@ const STATUS_LABEL: Record<OrderRow["status"], string> = {
 // is what actually enforces that, not a client-side filter.
 export default function ArrangedOrderHistoryPage() {
   const supabase = createClient();
-  const [date, setDate] = useState(todayIsoDate());
+  // Opens on the day the sidebar is on — the live day, or the one pinned in
+  // its calendar — like every other date-aware backoffice screen, until a
+  // date is picked here. It used to open on the calendar's today, which is
+  // often not a trading day at all (the live day can be dated for delivery,
+  // or be yesterday's after midnight), so the screen's first view was "no
+  // trading day on this date" with the day everyone was working on one
+  // click away in the sidebar.
+  //
+  // Today stays the fallback when the sidebar has no day to offer (nothing
+  // open, nothing pinned). `null` while the sidebar's own day is still
+  // loading, so the screen waits for it instead of flashing today's empty
+  // state first.
+  const dayView = useTradingDayView();
+  const [pickedDate, setPickedDate] = useState<string | null>(null);
+  const date =
+    pickedDate ?? dayView.day?.trade_date ?? (dayView.isLoading ? null : todayIsoDate());
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
 
   const dayQuery = useQuery({
     queryKey: ["order-history", "trading-day", date],
+    enabled: date !== null,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("trading_days")
         .select("id, trade_date")
-        .eq("trade_date", date)
+        .eq("trade_date", date!)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -147,9 +164,9 @@ export default function ArrangedOrderHistoryPage() {
             <input
               id="historyDate"
               type="date"
-              value={date}
+              value={date ?? ""}
               onChange={(event) => {
-                setDate(event.target.value);
+                setPickedDate(event.target.value);
                 setSelectedOrderId(null);
               }}
               className={inputClassName}
@@ -161,7 +178,7 @@ export default function ArrangedOrderHistoryPage() {
       {/* A failed read is reported as a failure at every level here — this
           is the dispute-resolution screen, and "no trading day", "no orders"
           or "no lines" are answers someone acts on. */}
-      {dayQuery.isLoading ? (
+      {date === null || dayQuery.isLoading ? (
         <Skeleton className="h-40 w-full rounded-xl" />
       ) : dayQuery.isError && dayQuery.data === undefined ? (
         <QueryError

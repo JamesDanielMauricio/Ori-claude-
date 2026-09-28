@@ -1087,6 +1087,16 @@ export type Database = {
         Args: Record<PropertyKey, never>;
         Returns: Database["public"]["Tables"]["lifecycle_sessions"]["Row"];
       };
+      // Hand-added for migration 0059 (applied 2026-09-28). Its shape — one
+      // uuid argument, returning the deleted trading_days row — was checked
+      // against the live catalog after the migration ran; `supabase gen
+      // types` would produce the same entry.
+      discard_business_day: {
+        Args: {
+          p_trading_day_id: string;
+        };
+        Returns: Database["public"]["Tables"]["trading_days"]["Row"];
+      };
       // Hand-added ahead of migration 0034 actually running — mirrors the
       // shape `supabase gen types` will produce once it does. Regenerate
       // for real after applying that migration; this is a stand-in so

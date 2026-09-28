@@ -24,6 +24,18 @@ export function toOpenShopRpcArgs(input: OpenShopInput) {
   return { p_can_see_prices: input.canSeePrices };
 }
 
+// discard_business_day (0059): deletes a day that was started but whose shop
+// was never opened. Takes the day's id rather than acting on "whichever day
+// is open", so it can only ever delete the day the person confirmed.
+export const discardBusinessDayInputSchema = z.object({
+  tradingDayId: z.string().uuid(),
+});
+export type DiscardBusinessDayInput = z.infer<typeof discardBusinessDayInputSchema>;
+
+export function toDiscardBusinessDayRpcArgs(input: DiscardBusinessDayInput) {
+  return { p_trading_day_id: input.tradingDayId };
+}
+
 export const submitPickInputSchema = z.object({
   dailyPickId: z.string().uuid(),
 });

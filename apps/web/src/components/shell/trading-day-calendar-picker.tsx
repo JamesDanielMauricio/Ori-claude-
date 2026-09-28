@@ -143,28 +143,15 @@ export function TradingDayCalendarPicker({
     };
   }, [open]);
 
-  const year = viewDate.getFullYear();
-  const month = viewDate.getMonth();
-  // Deliberately [year, month], not viewDate: buildMonthGrid only reads
-  // those two fields, and `viewDate` can carry any day-of-month (opening the
-  // popover seeds it from parseIsoDate(selectedDate), not the 1st) — keying
-  // on the object itself would rebuild the grid on a day-only change that
-  // can never affect its output.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const cells = useMemo(() => buildMonthGrid(viewDate), [year, month]);
-
-  // Ranged to this one visible month rather than every trading day ever —
-  // see useTradingDaysInRange's own comment.
-  const monthStart = todayIsoDate(new Date(year, month, 1));
-  const monthEnd = todayIsoDate(new Date(year, month + 1, 0));
-  const rangeQuery = useTradingDaysInRange(monthStart, monthEnd);
-  const tradingDates = useMemo(
-    () => new Set((rangeQuery.data ?? []).map((row) => row.trade_date)),
-    [rangeQuery.data],
-  );
+  // Fetched here as well as inside TradingDayMonthGrid, with the same key, so
+  // the visible month's trading days are already cached by the time the
+  // popover opens — the grid (mounted only while open) then paints its dots
+  // on the first frame instead of popping them in a round trip later.
+  // TanStack Query dedupes the two calls into one request.
+  const [monthStart, monthEnd] = monthBounds(viewDate);
+  useTradingDaysInRange(monthStart, monthEnd);
 
   const shownDate = selectedDate ?? liveDate;
-  const todayDate = todayIsoDate();
 
   const triggerLabel = shownDate
     ? new Intl.DateTimeFormat("he-IL", { dateStyle: "medium" }).format(parseIsoDate(shownDate))
@@ -201,112 +188,197 @@ export function TradingDayCalendarPicker({
             // openPopover), which the open/close animation scales from.
             className="animate-popover origin-top-right z-50 w-[19rem] overflow-hidden rounded-xl border border-border bg-surface p-3 text-ink shadow-overlay"
           >
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <button
-                type="button"
-                onClick={() => setViewDate(new Date(year, month - 1, 1))}
-                aria-label="חודש קודם"
-                // h-10/w-10, same as the day cells this sits above — the
-                // month arrows were the two smallest targets in the popover.
-                className="flex h-10 w-10 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-surface-muted hover:text-ink"
-              >
-                {/* chevronStart points visually right (inline-start); a 180°
-                    spin makes it point left — inline-end, i.e. "forward" —
-                    the same technique globals.css's accordion chevron uses. */}
-                <Icon name="chevronStart" className="h-4 w-4 rotate-180" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewDate(parseIsoDate(liveDate ?? todayDate))}
-                className="text-sm font-semibold text-ink hover:text-accent"
-              >
-                {MONTH_YEAR_FORMAT.format(viewDate)}
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewDate(new Date(year, month + 1, 1))}
-                aria-label="חודש הבא"
-                // See "חודש קודם" above.
-                className="flex h-10 w-10 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-surface-muted hover:text-ink"
-              >
-                <Icon name="chevronStart" className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-7 gap-y-1 text-center">
-              {WEEKDAY_LABELS.map((label, i) => (
-                <span key={i} aria-hidden className="text-xs font-semibold text-ink-subtle">
-                  {label}
-                </span>
-              ))}
-
-              {cells.map((cellDate) => {
-                const iso = todayIsoDate(cellDate);
-                const inMonth = cellDate.getMonth() === month;
-                const hasTradingDay = tradingDates.has(iso);
-                const isLiveDay = iso === liveDate;
-                const isShown = iso === shownDate;
-                const isToday = iso === todayDate;
-
-                if (!inMonth) {
-                  // Grid filler only — see buildMonthGrid's comment on why
-                  // these exist at all. Not a button: nothing to click, and
-                  // an unlabelled disabled control is worse than a plain span.
-                  return (
-                    <span key={iso} aria-hidden className="py-1.5 text-xs text-ink-subtle/40">
-                      {cellDate.getDate()}
-                    </span>
-                  );
-                }
-
-                return (
-                  <button
-                    key={iso}
-                    type="button"
-                    onClick={() => {
-                      onSelect(iso);
-                      setOpen(false);
-                    }}
-                    aria-label={
-                      CELL_LABEL_FORMAT.format(cellDate) +
-                      (hasTradingDay ? " — קיים יום מסחר" : "") +
-                      (isLiveDay ? " — היום הפעיל" : "")
-                    }
-                    aria-current={isShown ? "date" : undefined}
-                    className={`relative mx-auto flex h-10 w-10 items-center justify-center rounded-full text-xs font-semibold transition-colors duration-150 ${
-                      isShown
-                        ? "bg-accent text-accent-ink"
-                        : isLiveDay
-                          ? "text-accent ring-2 ring-inset ring-accent"
-                          : isToday
-                            ? "text-ink ring-1 ring-inset ring-border-strong"
-                            : hasTradingDay
-                              ? "bg-surface-muted text-ink hover:bg-accent-soft"
-                              : "text-ink-muted hover:bg-surface-muted"
-                    }`}
-                  >
-                    {cellDate.getDate()}
-                    {/* The highlight the user asked for: a small dot marking
-                        any day with a trading day, distinct from the ring
-                        that marks the live one and the fill that marks
-                        whichever day is currently shown. Omitted when the
-                        cell is already filled solid (isShown) — a dot on top
-                        of a solid disc doesn't read as anything. */}
-                    {hasTradingDay && !isShown && (
-                      <span
-                        aria-hidden
-                        className={`absolute bottom-0.5 h-1 w-1 rounded-full ${
-                          isLiveDay ? "bg-accent" : "bg-ink-subtle"
-                        }`}
-                      />
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+            <TradingDayMonthGrid
+              viewDate={viewDate}
+              onViewDateChange={setViewDate}
+              selectedDate={shownDate}
+              liveDate={liveDate}
+              onSelect={(iso) => {
+                onSelect(iso);
+                setOpen(false);
+              }}
+            />
           </div>,
           document.body,
         )}
+    </>
+  );
+}
+
+// Returns [first, last] day of viewDate's month as ISO dates — the range
+// both the sidebar's prefetch and TradingDayMonthGrid query, so the two
+// always build the same cache key.
+function monthBounds(viewDate: Date): [string, string] {
+  const year = viewDate.getFullYear();
+  const month = viewDate.getMonth();
+  return [todayIsoDate(new Date(year, month, 1)), todayIsoDate(new Date(year, month + 1, 0))];
+}
+
+// The month view itself — header (previous / month name / next), weekday
+// labels and the 42 day cells, each marking whether a trading day exists on
+// it. Split out of TradingDayCalendarPicker so the "פתיחת יום עסקים" dialog
+// (business-day-panel.tsx) can offer the very same calendar for choosing
+// the new day's date: one grid, drawn and queried the same way in both.
+//
+// It renders two sibling blocks, not a wrapper, so the sidebar popover's
+// markup is exactly what it was when this lived inline there; each host
+// supplies its own frame.
+//
+// `selectedDate` is the day drawn solid — the pinned/live day in the
+// sidebar, the chosen date in the dialog. `liveDate` is the open day, ringed.
+// `isDateDisabled` makes some days unpickable (the dialog's past dates and
+// dates that already have a trading day); the sidebar passes none, so every
+// day there stays clickable exactly as before.
+export function TradingDayMonthGrid({
+  viewDate,
+  onViewDateChange,
+  selectedDate,
+  liveDate,
+  onSelect,
+  isDateDisabled,
+}: {
+  viewDate: Date;
+  onViewDateChange: (date: Date) => void;
+  selectedDate: string | null;
+  liveDate: string | null;
+  onSelect: (date: string) => void;
+  isDateDisabled?: (date: string, hasTradingDay: boolean) => boolean;
+}) {
+  const year = viewDate.getFullYear();
+  const month = viewDate.getMonth();
+  // Deliberately [year, month], not viewDate: buildMonthGrid only reads
+  // those two fields, and `viewDate` can carry any day-of-month (opening the
+  // popover seeds it from parseIsoDate(selectedDate), not the 1st) — keying
+  // on the object itself would rebuild the grid on a day-only change that
+  // can never affect its output.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const cells = useMemo(() => buildMonthGrid(viewDate), [year, month]);
+
+  // Ranged to this one visible month rather than every trading day ever —
+  // see useTradingDaysInRange's own comment.
+  const [monthStart, monthEnd] = monthBounds(viewDate);
+  const rangeQuery = useTradingDaysInRange(monthStart, monthEnd);
+  const tradingDates = useMemo(
+    () => new Set((rangeQuery.data ?? []).map((row) => row.trade_date)),
+    [rangeQuery.data],
+  );
+
+  const todayDate = todayIsoDate();
+
+  return (
+    <>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => onViewDateChange(new Date(year, month - 1, 1))}
+          aria-label="חודש קודם"
+          // h-10/w-10, same as the day cells this sits above — the
+          // month arrows were the two smallest targets in the popover.
+          className="flex h-10 w-10 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-surface-muted hover:text-ink"
+        >
+          {/* chevronStart points visually right (inline-start); a 180°
+              spin makes it point left — inline-end, i.e. "forward" —
+              the same technique globals.css's accordion chevron uses. */}
+          <Icon name="chevronStart" className="h-4 w-4 rotate-180" />
+        </button>
+        <button
+          type="button"
+          onClick={() => onViewDateChange(parseIsoDate(liveDate ?? todayDate))}
+          className="text-sm font-semibold text-ink hover:text-accent"
+        >
+          {MONTH_YEAR_FORMAT.format(viewDate)}
+        </button>
+        <button
+          type="button"
+          onClick={() => onViewDateChange(new Date(year, month + 1, 1))}
+          aria-label="חודש הבא"
+          // See "חודש קודם" above.
+          className="flex h-10 w-10 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-surface-muted hover:text-ink"
+        >
+          <Icon name="chevronStart" className="h-4 w-4" />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-7 gap-y-1 text-center">
+        {WEEKDAY_LABELS.map((label, i) => (
+          <span key={i} aria-hidden className="text-xs font-semibold text-ink-subtle">
+            {label}
+          </span>
+        ))}
+
+        {cells.map((cellDate) => {
+          const iso = todayIsoDate(cellDate);
+          const inMonth = cellDate.getMonth() === month;
+          const hasTradingDay = tradingDates.has(iso);
+          const isLiveDay = iso === liveDate;
+          const isShown = iso === selectedDate;
+          const isToday = iso === todayDate;
+          const isDisabled = isDateDisabled?.(iso, hasTradingDay) ?? false;
+
+          if (!inMonth) {
+            // Grid filler only — see buildMonthGrid's comment on why
+            // these exist at all. Not a button: nothing to click, and
+            // an unlabelled disabled control is worse than a plain span.
+            return (
+              <span key={iso} aria-hidden className="py-1.5 text-xs text-ink-subtle/40">
+                {cellDate.getDate()}
+              </span>
+            );
+          }
+
+          return (
+            <button
+              key={iso}
+              type="button"
+              // A real `disabled`, so the click does nothing and a screen
+              // reader announces the day as unavailable, label and all
+              // ("… — קיים יום מסחר" says why).
+              disabled={isDisabled}
+              onClick={() => onSelect(iso)}
+              aria-label={
+                CELL_LABEL_FORMAT.format(cellDate) +
+                (hasTradingDay ? " — קיים יום מסחר" : "") +
+                (isLiveDay ? " — היום הפעיל" : "")
+              }
+              aria-current={isShown ? "date" : undefined}
+              // A disabled day wins over every other state, `isShown`
+              // included — the dialog may open on today when today is
+              // already taken, and a solid "selected" disc would then
+              // promise a date that can't be used.
+              className={`relative mx-auto flex h-10 w-10 items-center justify-center rounded-full text-xs font-semibold transition-colors duration-150 ${
+                isDisabled
+                  ? "cursor-not-allowed text-ink-subtle/50"
+                  : isShown
+                    ? "bg-accent text-accent-ink"
+                    : isLiveDay
+                      ? "text-accent ring-2 ring-inset ring-accent"
+                      : isToday
+                        ? "text-ink ring-1 ring-inset ring-border-strong"
+                        : hasTradingDay
+                          ? "bg-surface-muted text-ink hover:bg-accent-soft"
+                          : "text-ink-muted hover:bg-surface-muted"
+              }`}
+            >
+              {cellDate.getDate()}
+              {/* The highlight the user asked for: a small dot marking
+                  any day with a trading day, distinct from the ring
+                  that marks the live one and the fill that marks
+                  whichever day is currently shown. Omitted when the
+                  cell is already filled solid (isShown) — a dot on top
+                  of a solid disc doesn't read as anything — unless the
+                  day is disabled, which is never drawn solid. */}
+              {hasTradingDay && (!isShown || isDisabled) && (
+                <span
+                  aria-hidden
+                  className={`absolute bottom-0.5 h-1 w-1 rounded-full ${
+                    isLiveDay ? "bg-accent" : "bg-ink-subtle"
+                  }`}
+                />
+              )}
+            </button>
+          );
+        })}
+      </div>
     </>
   );
 }

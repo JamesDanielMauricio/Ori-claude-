@@ -414,6 +414,13 @@
       "when": 1789326000000,
       "tag": "0058_product-photo-storage-bucket",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1789329600000,
+      "tag": "0059_discard-unopened-business-day",
+      "breakpoints": true
     }
   ]
 }

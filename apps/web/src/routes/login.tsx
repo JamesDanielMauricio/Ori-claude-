@@ -7,6 +7,7 @@ import { PasswordInput } from "@/components/auth/password-input";
 import { FormField, inputClassName } from "@/components/reference-data/form-field";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
+import { retryOnClockSkew } from "@/lib/supabase/retry-clock-skew";
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -34,11 +35,18 @@ export default function LoginPage() {
 
     // RLS-protected read: "profiles_select_own" is what permits this — see
     // docs/SCHEMA_DECISIONS.md.
-    const { data: profile, error: profileError } = await supabase
-      .from("profiles")
-      .select("role, must_change_password")
-      .eq("user_id", data.user.id)
-      .single();
+    //
+    // The first read made with the token sign-in just issued, which is
+    // exactly the moment a database server whose clock runs a little behind
+    // refuses it as "issued in the future" (PGRST303). That used to land in
+    // the error branch below and sign a correct password straight back out;
+    // retryOnClockSkew waits and asks again instead, while the button stays
+    // disabled on "מתחבר…". Every other error reaches the branch below
+    // exactly as before.
+    const userId = data.user.id;
+    const { data: profile, error: profileError } = await retryOnClockSkew(() =>
+      supabase.from("profiles").select("role, must_change_password").eq("user_id", userId).single(),
+    );
 
     // A failed READ and a genuinely missing row are different problems and no
     // longer collapse into the same silent outcome. Previously both ended in

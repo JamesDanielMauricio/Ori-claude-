@@ -12,6 +12,7 @@ import {
 } from "react";
 
 import { createClient } from "./supabase/client";
+import { retryOnClockSkew } from "./supabase/retry-clock-skew";
 
 export interface AuthProfile {
   role: UserRole;
@@ -118,11 +119,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // them straight back to /login with no error shown. The `!company_id`
     // hint pins it to the `profiles.company_id -> companies.id` relationship
     // explicitly.
-    const { data } = await createClient()
-      .from("profiles")
-      .select("role, display_name, company_id, must_change_password, companies!company_id(name)")
-      .eq("user_id", user.id)
-      .single();
+    //
+    // Retried on PGRST303 — see retryOnClockSkew. This read runs the moment
+    // Supabase hands out a new token (signing in, and the hourly refresh),
+    // which is exactly when a database server whose clock runs a little
+    // behind refuses that token as "issued in the future". Its error is
+    // otherwise ignored here, so a refusal left `data` empty and the guard
+    // sent a signed-in user back to an empty /login with no message — at
+    // sign-in, or in the middle of a session after a refresh.
+    const { data } = await retryOnClockSkew(() =>
+      createClient()
+        .from("profiles")
+        .select("role, display_name, company_id, must_change_password, companies!company_id(name)")
+        .eq("user_id", user.id)
+        .single(),
+    );
 
     // A newer auth event has superseded this read — drop it rather than
     // overwriting whatever that newer event already decided.

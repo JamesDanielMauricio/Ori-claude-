@@ -5,7 +5,7 @@ import {
   toDeleteArrangementRecordRpcArgs,
 } from "@ori/domain/arrangement";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import {
@@ -122,33 +122,6 @@ export default function NewArrangementPage() {
       return data as unknown as TradingDay | null;
     },
   });
-
-  // Push-triggered refresh, same trigger-only shape as the arrangement
-  // board's: the payload is never read, it only means "re-run the query".
-  // This matters more here than there — two distributors can be typing into
-  // different columns of the same grid, and each needs the other's pallets to
-  // show up in the זמין column before they over-commit a lot.
-  useEffect(() => {
-    if (!day?.id) return;
-    const dayId = day.id;
-    const invalidate = () => {
-      void queryClient.invalidateQueries({ queryKey: ["new-arrangement", "matrix", dayId] });
-    };
-
-    const channel = supabase
-      .channel(`arrangement-matrix-${dayId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "daily_arrangements" }, invalidate)
-      .on("postgres_changes", { event: "*", schema: "public", table: "daily_picks" }, invalidate)
-      .on("postgres_changes", { event: "*", schema: "public", table: "daily_orders" }, invalidate)
-      .on("postgres_changes", { event: "*", schema: "public", table: "arrangement_records" }, invalidate)
-      .on("postgres_changes", { event: "*", schema: "public", table: "daily_pick_products" }, invalidate)
-      .on("postgres_changes", { event: "*", schema: "public", table: "daily_order_products" }, invalidate)
-      .subscribe();
-
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [day?.id, supabase, queryClient]);
 
   // Whole-table reference data with no dependency on the day, so it starts
   // immediately and resolves in parallel instead of adding a round trip.

@@ -16,6 +16,7 @@ import { errorMessage } from "@/lib/error-message";
 import { hasChanges } from "@/lib/has-changes";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { createClient } from "@/lib/supabase/client";
+import { fetchOpenTradingDay, OPEN_TRADING_DAY_QUERY_KEY } from "@/lib/trading-day-view";
 import { formatVarietyName } from "@/lib/variety-label";
 
 import { CommentPopup } from "./comment-popup";
@@ -32,6 +33,14 @@ import { SubmissionConfirmationDialog } from "./submission-confirmation-dialog";
 interface DraftLine {
   pallets: string;
   comment: string;
+}
+
+// A customer's submit found the shop already closed — see submitMutation.
+class ShopClosedError extends Error {
+  constructor() {
+    super("החנות נסגרה להזמנות.");
+    this.name = "ShopClosedError";
+  }
 }
 
 function toDraft(rows: CatalogRow[]): Record<string, DraftLine> {
@@ -150,47 +159,14 @@ export function OrderLinesEditor({
   // re-seed from ("not editing"); with it gone, the first keystroke is what
   // marks the draft as the user's — seed freely until then, hold still after,
   // until the next save or discard resets `touched`. This matters more here
-  // than in the pick editor: the realtime channel below invalidates this
-  // query whenever ANY pick or order line on the day changes, which on the
-  // arrangement board is every time the distributor presses ✓ on somebody
-  // else's card.
+  // than in the pick editor: lib/refresh-on-return.ts refetches this query
+  // whenever the person comes back to the screen, which can be mid-way
+  // through an order they started before looking away.
   useEffect(() => {
     if (!catalogQuery.data) return;
     if (touched.current) return;
     setDraft(toDraft(catalogQuery.data));
   }, [catalogQuery.data]);
-
-  // Same live-invalidation the customer's own screen relies on (see
-  // packages/db/migrations/0019_customer-catalog-realtime.sql) — kept
-  // identical for the backoffice caller too, rather than a second,
-  // divergent behavior: a backoffice user editing a customer's order
-  // benefits from the same "no query on an unmodified revisit" cache
-  // reuse (apps/web/src/lib/providers.tsx's staleTime) and the same push
-  // update when supply/demand changes underneath them.
-  useEffect(() => {
-    const channel = supabase
-      .channel(`customer-catalog-${tradingDayId}-${customerCompanyId ?? "self"}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "daily_pick_products" },
-        () => {
-          void queryClient.invalidateQueries({ queryKey });
-        },
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "daily_order_products" },
-        () => {
-          void queryClient.invalidateQueries({ queryKey });
-        },
-      )
-      .subscribe();
-
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tradingDayId, customerCompanyId]);
 
   // The reference design's shop screen: a collapsed row per product
   // family, expanding to that family's varieties — matches
@@ -278,6 +254,29 @@ export function OrderLinesEditor({
 
   const submitMutation = useMutation({
     mutationFn: async () => {
+      // A customer's own order: confirm, right now, that the shop is still
+      // open. Nothing pushes "the shop closed" to this screen while someone
+      // is busy filling in an order (lib/refresh-on-return.ts only re-reads
+      // when they come back to the app), and submit_order itself accepts a
+      // customer's write until the day is fully closed (0042, P0007) — so
+      // without this, an order typed across the close would still land after
+      // the distributor started building the arrangement from the numbers.
+      // One ~1 KB read, only when someone actually submits. fetchQuery also
+      // writes the answer into the shared open-day cache, which is what flips
+      // the page to read-only (routes/customer/order.tsx) when it's closed.
+      //
+      // Not on the backoffice on-behalf-of path (customerCompanyId given):
+      // staff may still edit a customer's order after the shop closes.
+      if (!customerCompanyId) {
+        const day = await queryClient.fetchQuery({
+          queryKey: OPEN_TRADING_DAY_QUERY_KEY,
+          queryFn: fetchOpenTradingDay,
+          staleTime: 0,
+        });
+        if (day?.id !== tradingDayId || day.phase !== "shop_open") {
+          throw new ShopClosedError();
+        }
+      }
       const lines = toSubmittedLines(catalogQuery.data ?? [], draft);
       const input = submitOrderInputSchema.parse({ tradingDayId, lines, customerCompanyId });
       const { data, error } = await supabase.rpc("submit_order", toSubmitOrderRpcArgs(input));
@@ -297,6 +296,8 @@ export function OrderLinesEditor({
     },
     onError: mergeOnError(submitOptimistic.onError, (error: { message?: string }) => {
       showToast(`השליחה נכשלה: ${errorMessage(error)}`, "error");
+      // Nothing left to confirm: the page is turning read-only underneath.
+      if (error instanceof ShopClosedError) setConfirmOpen(false);
     }),
   });
 

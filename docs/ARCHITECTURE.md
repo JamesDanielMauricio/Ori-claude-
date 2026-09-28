@@ -395,11 +395,11 @@ confirmation dialog is built from the same local draft state that's about to be 
 successful `submit_order` call updates the UI directly (invalidate + re-render) rather than a
 full-page reload — the source's submit button froze the page for 1–3 seconds and then forced a
 reload, a failure mode this shape makes structurally impossible rather than something to remember
-to avoid. A Supabase Realtime subscription on `daily_pick_products`/`daily_order_products`
-(optional, not required for functional parity) invalidates the catalog query on any change, so
-the screen updates live without polling — the client never reads the broadcast row payload
-itself, only uses it as a signal to re-run `get_orderable_catalog_for_customer` through the
-caller's own RLS-governed session, keeping the same privacy boundary that function already has.
+to avoid. Other people's changes reach the screen without Realtime and without polling:
+`apps/web/src/lib/refresh-on-return.ts` re-runs every query on screen —
+`get_orderable_catalog_for_customer` included — whenever the person comes back to the app (tab
+shown, window focused, back online, or first touch after a minute away), through the caller's
+own RLS-governed session.
 See `packages/db/migrations/0017`-`0019`, `packages/domain/src/customer/` (input schemas, test
 fixtures, and direct tests of the mixed-family orderable-catalog rule and concurrent submissions
 against a depleting variety), and `apps/web/src/routes/customer/{order,history}.tsx`.

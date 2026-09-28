@@ -14,7 +14,7 @@ import {
   toSubmitPickRpcArgs,
 } from "@ori/domain/lifecycle-engine";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import {
   buildBoard,
@@ -201,37 +201,6 @@ export default function ArrangementPage() {
       return data as unknown as TradingDay | null;
     },
   });
-
-  // Push-triggered refresh of the board: every table the query above embeds
-  // (both the parent day/arrangement rows and the pick/order line tables,
-  // since a line edit — pallets picked, order quantity — never bumps its
-  // parent) is in the realtime publication (packages/db/migrations/
-  // 0041_expand-realtime-publication.sql). Same trigger-only shape as
-  // order-lines-editor.tsx: the payload is never read, only used to
-  // re-run this RLS-governed query. One channel per open day, torn down
-  // when the day changes or the screen unmounts.
-  useEffect(() => {
-    if (!day?.id) return;
-    const dayId = day.id;
-    const queryKey = ["arrangement", "board-data", dayId];
-    const invalidate = () => {
-      void queryClient.invalidateQueries({ queryKey });
-    };
-
-    const channel = supabase
-      .channel(`arrangement-board-${dayId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "daily_arrangements" }, invalidate)
-      .on("postgres_changes", { event: "*", schema: "public", table: "daily_picks" }, invalidate)
-      .on("postgres_changes", { event: "*", schema: "public", table: "daily_orders" }, invalidate)
-      .on("postgres_changes", { event: "*", schema: "public", table: "arrangement_records" }, invalidate)
-      .on("postgres_changes", { event: "*", schema: "public", table: "daily_pick_products" }, invalidate)
-      .on("postgres_changes", { event: "*", schema: "public", table: "daily_order_products" }, invalidate)
-      .subscribe();
-
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [day?.id, supabase, queryClient]);
 
   const companiesQuery = useQuery({
     queryKey: ["arrangement", "companies"],

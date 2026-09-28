@@ -5,6 +5,7 @@ import { BrowserRouter } from "react-router-dom";
 import { AppRoutes } from "./app-routes";
 import { AuthProvider } from "./lib/auth-context";
 import { Providers } from "./lib/providers";
+import { RefreshOnReturn } from "./lib/refresh-on-return";
 import { initTheme } from "./lib/theme";
 
 // Self-hosted Assistant (hebrew + latin subsets) — globals.css names the
@@ -46,6 +47,8 @@ createRoot(container).render(
     <BrowserRouter>
       <Providers>
         <AuthProvider>
+          {/* Outside the routes: one watcher for every screen. */}
+          <RefreshOnReturn />
           <AppRoutes />
         </AuthProvider>
       </Providers>

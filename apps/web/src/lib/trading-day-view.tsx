@@ -1,13 +1,5 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useId,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
+import { useQuery } from "@tanstack/react-query";
+import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 
 import { createClient } from "./supabase/client";
 
@@ -72,63 +64,30 @@ export function useSelectedTradingDay(): SelectedTradingDayState {
 // own.
 export const OPEN_TRADING_DAY_QUERY_KEY = ["trading-day", "open"] as const;
 
+// The live open trading day's row — at most one (trading_days_single_open_idx).
+// Shared by useOpenTradingDay and by anything that must check the day's phase
+// fresh at the moment it acts (see OrderLinesEditor's submit).
+export async function fetchOpenTradingDay(): Promise<TradingDayView | null> {
+  const { data, error } = await createClient()
+    .from("trading_days")
+    .select("id, trade_date, phase")
+    .neq("phase", "closed")
+    .maybeSingle();
+  if (error) throw error;
+  return data as TradingDayView | null;
+}
+
+// Kept current by lib/refresh-on-return.ts, like every other query: a day
+// started, opened or closed on one device shows up on every other the next
+// time someone looks at it.
 export function useOpenTradingDay() {
-  const supabase = createClient();
-  const queryClient = useQueryClient();
-  // This hook is mounted by more than one component at once — BusinessDayPanel
-  // (always in the sidebar) plus whatever routed screen also calls it through
-  // useTradingDayView below. supabase-js keys its channel registry by topic
-  // name and reuses the same channel object for a repeated `.channel(name)`
-  // call, so a shared literal name here meant the second mounted instance's
-  // `.on()` landed on a channel the first instance had already subscribed —
-  // which supabase-js rejects outright ("cannot add postgres_changes
-  // callbacks... after subscribe()"), crashing the whole page. useId gives
-  // each mounted instance its own channel instead.
-  const instanceId = useId();
-
-  const query = useQuery({
+  return useQuery({
     queryKey: OPEN_TRADING_DAY_QUERY_KEY,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("trading_days")
-        .select("id, trade_date, phase")
-        .neq("phase", "closed")
-        .maybeSingle();
-      if (error) throw error;
-      return data as TradingDayView | null;
-    },
-    // Matches BusinessDayPanel's original polling — this is now the one
-    // place that interval is declared, rather than a second copy of it.
-    // Kept alongside the realtime push below as a fallback for the rare
-    // dropped-websocket case, not replaced by it.
-    refetchInterval: 60000,
+    queryFn: fetchOpenTradingDay,
+    // No polling interval. This used to re-read every 60 seconds on every
+    // open device, used or not; it is now re-read whenever someone comes
+    // back to the app instead (lib/refresh-on-return.ts).
   });
-
-  // Push-triggered version of the same polling: a lifecycle transition
-  // (open/close a day) is exactly the kind of change every mounted
-  // date-aware screen needs to see immediately, not up to 60s later. Same
-  // trigger-only shape as order-lines-editor.tsx's subscription (see
-  // packages/db/migrations/0041_expand-realtime-publication.sql) — the
-  // payload is never read, only used to know "re-run the query".
-  useEffect(() => {
-    const channel = supabase
-      .channel(`trading-days-open-${instanceId}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "trading_days" },
-        () => {
-          void queryClient.invalidateQueries({ queryKey: OPEN_TRADING_DAY_QUERY_KEY });
-        },
-      )
-      .subscribe();
-
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [instanceId]);
-
-  return query;
 }
 
 // The day every date-aware backoffice screen (Shop, Arrangement, Grower

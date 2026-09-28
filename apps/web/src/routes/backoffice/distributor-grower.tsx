@@ -184,34 +184,6 @@ export default function DistributorAsGrowerPage() {
     },
   });
 
-  // Push-triggered refresh: a pick edited elsewhere (the grower's own
-  // screen, the arrangement board's pencil) has to show up here without a
-  // manual reload. Same trigger-only shape used throughout — payload
-  // unread, only "re-run the query."
-  useEffect(() => {
-    if (!dayId) return;
-    const channel = supabase
-      .channel(`grower-oversight-picks-${dayId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "daily_picks" }, () => {
-        void queryClient.invalidateQueries({
-          queryKey: ["grower-oversight", "picks-for-day", dayId],
-        });
-      })
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "daily_pick_products" },
-        () => {
-          void queryClient.invalidateQueries({
-            queryKey: ["grower-oversight", "picks-for-day", dayId],
-          });
-        },
-      )
-      .subscribe();
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [dayId, supabase, queryClient]);
-
   const pickByGrowerId = useMemo(() => {
     const map = new Map<string, DailyPickForDay>();
     for (const pick of picksForDayQuery.data ?? []) map.set(pick.grower_company_id, pick);

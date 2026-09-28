@@ -289,31 +289,6 @@ export function PickLinesEditor({
     },
   });
 
-  // Push-triggered refresh: the arrangement board (routes/backoffice/
-  // arrangement.tsx) edits these same rows when a distributor works this
-  // grower's card, and this editor also opens standalone on the grower's
-  // own picking screen — either way, a save from elsewhere should show up
-  // here without a manual refresh. Same trigger-only shape as
-  // order-lines-editor.tsx; daily_pick_products is already in the realtime
-  // publication (packages/db/migrations/0019_customer-catalog-realtime.sql).
-  useEffect(() => {
-    const channel = supabase
-      .channel(`grower-pick-lines-${dailyPickId}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "daily_pick_products", filter: `daily_pick_id=eq.${dailyPickId}` },
-        () => {
-          void queryClient.invalidateQueries({ queryKey });
-        },
-      )
-      .subscribe();
-
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dailyPickId]);
-
   // Keeps the draft tracking the server without ever clobbering typing in
   // progress. The gate used to supply an idle state that was always safe to
   // re-seed from ("not editing"); with it gone, the first keystroke is what

@@ -1,6 +1,6 @@
 import { sendOrderReminderInputSchema, toSendOrderReminderRpcArgs } from "@ori/domain/customer";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import { formatPallets } from "@/components/arrangement/board-data";
 import { CustomerOrdersDialog } from "@/components/arrangement/customer-orders-dialog";
@@ -151,35 +151,6 @@ export default function DistributorAsCustomerPage() {
       return data as unknown as DailyOrderForDay[];
     },
   });
-
-  // Push-triggered refresh — same trigger-only shape as distributor-
-  // grower.tsx's, mirrored onto orders: an order edited elsewhere (the
-  // customer's own screen, the arrangement board's pencil, or the
-  // arrangement board pushing surplus onto a zero-pallet line) has to show
-  // up here without a manual reload.
-  useEffect(() => {
-    if (!dayId) return;
-    const channel = supabase
-      .channel(`customer-oversight-orders-${dayId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "daily_orders" }, () => {
-        void queryClient.invalidateQueries({
-          queryKey: ["customer-oversight", "orders-for-day", dayId],
-        });
-      })
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "daily_order_products" },
-        () => {
-          void queryClient.invalidateQueries({
-            queryKey: ["customer-oversight", "orders-for-day", dayId],
-          });
-        },
-      )
-      .subscribe();
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [dayId, supabase, queryClient]);
 
   const orderByCustomerId = useMemo(() => {
     const map = new Map<string, DailyOrderForDay>();

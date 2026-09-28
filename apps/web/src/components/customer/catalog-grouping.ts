@@ -34,7 +34,7 @@ export interface CatalogRow {
   // This customer's own ceiling for this row (migration 0042's
   // max_orderable_for_customer): least(the variety's per-customer cap,
   // remaining stock excluding demand from every OTHER customer), floored at
-  // 0. Sizes the quantity dropdown on the customer's own order screen —
+  // 0. Caps the quantity stepper on the customer's own order screen —
   // never treated as a hard limit on the backoffice on-behalf-of path.
   max_orderable_for_customer: number;
 }

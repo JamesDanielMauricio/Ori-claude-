@@ -1073,7 +1073,7 @@ export function ProductCatalogScreen({
     {
       key: "orderCap",
       label: "מקס' הזמנות ללקוח",
-      // The customer order screen's dropdown (order-product-list.tsx) reads
+      // The customer order screen's stepper (order-product-list.tsx) reads
       // this as its own ceiling — never applied to a backoffice
       // on-behalf-of edit, where staff may deliberately exceed it. Empty
       // means uncapped. See product-variety.ts's schema comment for how it

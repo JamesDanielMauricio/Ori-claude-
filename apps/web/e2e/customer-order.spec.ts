@@ -26,8 +26,6 @@ import {
 import { createTestProductVariety, deleteTestProductVariety } from "@ori/domain/reference-data/testing";
 import { expect, test } from "@playwright/test";
 
-import { chooseOption } from "./choose-option";
-
 // Drives the customer's browse/order/history screens end to end. The
 // trading day, shop, and grower supply are all bootstrapped headlessly via
 // the real lifecycle/grower RPCs (initiate_business_day, open_shop,
@@ -132,23 +130,27 @@ test.describe("Customer — order + history", () => {
     const familyToggle = familyItem.locator("button[aria-expanded]").first();
     await expect(familyToggle).toBeVisible();
 
-    // Rows render collapsed (image + name + chevron); the quantity dropdown
+    // Rows render collapsed (image + name + chevron); the quantity stepper
     // and comment control only exist once a row is expanded. The customer's
-    // own order screen renders quantity as a dropdown capped to remaining
-    // stock (order-product-list.tsx's quantityMode="dropdown"), not a typed
-    // number input.
+    // own order screen renders quantity as a `− n +` stepper capped to
+    // remaining stock (order-product-list.tsx's quantityMode="stepper"), not
+    // a typed number input.
     await familyToggle.click();
-    // One dropdown = one variety row under this family. That IS the
+    // One stepper = one variety row under this family. That IS the
     // assertion the row count used to make: the depleted sibling is absent.
-    const quantitySelect = familyItem.getByRole("combobox");
-    await expect(quantitySelect).toHaveCount(1);
+    const quantityField = familyItem.getByRole("spinbutton");
+    await expect(quantityField).toHaveCount(1);
 
     // No "ערוך" gate: the shop is open, so the order is editable, full stop
-    // (routes/customer/order.tsx's isOrderEditable). The dropdown is live
+    // (routes/customer/order.tsx's isOrderEditable). The stepper is live
     // immediately and "שמור" is already on screen.
     await expect(page.getByRole("button", { name: "ערוך", exact: true })).toHaveCount(0);
-    await expect(quantitySelect).toBeEnabled();
-    await chooseOption(quantitySelect, "4");
+    await expect(quantityField).toBeEnabled();
+    // Four taps on "+", the way a customer enters a quantity on a phone.
+    // The grower picked 10, so none of the four reaches the cap.
+    const increase = familyItem.getByRole("button", { name: "הוסף אחד", exact: true });
+    for (let tap = 0; tap < 4; tap++) await increase.click();
+    await expect(quantityField).toHaveValue("4");
 
     // Scoped to this family: every other family in the catalog renders its
     // own comment buttons too (the accordion panels stay mounted while
@@ -165,14 +167,14 @@ test.describe("Customer — order + history", () => {
     await expect(page.getByText("ההזמנה נשלחה.")).toBeVisible();
 
     // Optimistic UI update: no reload needed to see the submitted state.
-    await expect(quantitySelect).toHaveText("4");
+    await expect(quantityField).toHaveValue("4");
 
     // A fresh reload confirms it actually persisted server-side, not just
     // in local draft state. The row collapses again on remount, so expand
     // it before reading the value back.
     await page.reload();
     await familyToggle.click();
-    await expect(quantitySelect).toHaveText("4");
+    await expect(quantityField).toHaveValue("4");
 
     await page.goto("/customer/history");
     const historyRow = page.getByRole("button", { name: "נשלח" });
@@ -184,7 +186,7 @@ test.describe("Customer — order + history", () => {
     // with what was just submitted — rather than a read-only view.
     await expect(page).toHaveURL(/\/customer\/order\?orderId=/);
     await familyToggle.click();
-    await expect(familyItem.getByRole("combobox")).toHaveText("4");
+    await expect(familyItem.getByRole("spinbutton")).toHaveValue("4");
     // "הערה: <text>" is the READ-ONLY rendering. This view is the live
     // editable one (the comment two lines up says so — the day is still
     // open), where a comment shows as the "✎ הערה" button that opens it, so

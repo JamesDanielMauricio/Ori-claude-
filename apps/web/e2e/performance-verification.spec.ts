@@ -16,8 +16,6 @@ import {
 } from "@ori/domain/lifecycle-engine/testing";
 import { expect, test } from "@playwright/test";
 
-import { chooseOption } from "./choose-option";
-
 // Direct, measured verification of the source's own documented perf
 // findings (st4ck spec "Performance Issues — Identified Bugs & Fixes"),
 // not an assumption that a route-per-screen rebuild automatically fixes
@@ -270,7 +268,7 @@ test.describe("Performance verification — measured against the source's docume
     // has a quantity control to set. No "ערוך" click in between — the shop is
     // open, so the order is editable on arrival (routes/customer/order.tsx's
     // isOrderEditable) — and the control is the customer screen's capped
-    // dropdown, not a typed number input.
+    // `− n +` stepper, not a typed number input.
     //
     // Addressed by family name rather than "the collapsed row in main":
     // initiate_business_day bootstraps a pick for every eligible grower, so
@@ -279,7 +277,10 @@ test.describe("Performance verification — measured against the source's docume
     const familyName = grower.familyName;
     await page.getByRole("button", { name: familyName, exact: true }).click();
     const familyItem = page.locator("main li").filter({ hasText: familyName });
-    await chooseOption(familyItem.getByRole("combobox"), "2");
+    const increase = familyItem.getByRole("button", { name: "הוסף אחד", exact: true });
+    await increase.click();
+    await increase.click();
+    await expect(familyItem.getByRole("spinbutton")).toHaveValue("2");
     await page.getByRole("button", { name: "שמור" }).click();
     await expect(page.getByText("אישור הזמנה")).toBeVisible();
 

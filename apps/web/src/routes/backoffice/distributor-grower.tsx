@@ -88,7 +88,11 @@ function groupPickLines(lines: PickLineRow[]): FamilyGroupedRow[] {
       };
       families.set(variety.family_id, group);
     }
-    const pallets = Number(line.pallets_picked) || 0;
+    // Picked + leftover, not picked alone: carried-forward leftover is real,
+    // arrangeable stock on equal footing with a fresh pick (migration 0050),
+    // and every other supply view — the arrangement board, the matrix, the
+    // grower's own confirmation total — already shows the combined figure.
+    const pallets = (Number(line.pallets_picked) || 0) + (Number(line.leftover_pallets) || 0);
     group.lines.push({
       id: line.id,
       varietyName: formatVarietyName(variety.name, variety.sizes),

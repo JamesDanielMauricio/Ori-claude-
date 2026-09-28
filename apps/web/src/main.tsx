@@ -29,6 +29,18 @@ if (!container) {
   throw new Error("Root container #root is missing from index.html");
 }
 
+// The service worker that, with manifest.webmanifest, makes the app
+// installable — public/sw.js says what it does and, as importantly, what it
+// doesn't. Production builds only: under `vite dev` it would be one more thing
+// between an edit and the browser. Registered after the page has loaded, so it
+// never competes with the app's own first download. A failed registration is
+// not fatal (the app works without it) and is left to show in the console.
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    void navigator.serviceWorker.register("/sw.js");
+  });
+}
+
 createRoot(container).render(
   <StrictMode>
     <BrowserRouter>

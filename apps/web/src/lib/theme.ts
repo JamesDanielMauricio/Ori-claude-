@@ -60,9 +60,18 @@ function readStoredPreference(): ThemePreference {
   }
 }
 
+// The colour of the browser's own bar — the phone's status bar, and the title
+// bar of the installed app — comes from <meta name="theme-color">, not from
+// CSS. These are the phone header's surface in each theme (the sidebar palette
+// in globals.css), so the bar and the header read as one strip. index.html's
+// inline script sets the same two values before first paint.
+const THEME_COLOR: Record<ResolvedTheme, string> = { light: "#ffffff", dark: "#0c0c0b" };
+
 function paint() {
   const systemPrefersDark = window.matchMedia(DARK_QUERY).matches;
-  document.documentElement.dataset.theme = resolveTheme(current, systemPrefersDark);
+  const theme = resolveTheme(current, systemPrefersDark);
+  document.documentElement.dataset.theme = theme;
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", THEME_COLOR[theme]);
 }
 
 // Switching theme with CSS transitions live makes every button, input and nav

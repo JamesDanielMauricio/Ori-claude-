@@ -209,6 +209,10 @@
   --glyph-select-chevron: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236f6f6a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 9 7 7 7-7'/%3E%3C/svg%3E");
   /* The checkbox tick, in accent-ink: white on accent-bright, 3.77:1. */
   --glyph-check: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5.5 12.5 4.5 4.5 8.5-9'/%3E%3C/svg%3E");
+  /* The company logo (components/ui/logo-mark.tsx), as drawn: dark-green
+     lettering, for a light page. The dark theme points this at a copy with
+     the lettering lightened. Only the file on screen is ever downloaded. */
+  --logo-image: url("./assets/logo.png");
 }
 
 /*
@@ -303,6 +307,12 @@
      tick = accent-ink on the bright green (7.5:1). */
   --glyph-select-chevron: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238a8a84' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 9 7 7 7-7'/%3E%3C/svg%3E");
   --glyph-check: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2304130c' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5.5 12.5 4.5 4.5 8.5-9'/%3E%3C/svg%3E");
+
+  /* The logo with its lettering lightened: the original's dark green is about
+     2.3:1 on this canvas, this about 11:1 (never under 7:1). The three
+     squares keep their exact colours. The page's theme alone decides, so the
+     dark sidebar needs no entry of its own. */
+  --logo-image: url("./assets/logo-dark.png");
 
   /* Deeper than paper's shadows only so a dialog or popover doesn't look
      pasted on; the real separation is the lighter surface and the rings. */

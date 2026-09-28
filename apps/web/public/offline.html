@@ -1,0 +1,97 @@
+<!doctype html>
+<!--
+  Shown by public/sw.js in place of the browser's error page when a page is
+  opened with no connection. It is saved on the device ahead of time, so it
+  has to stand on its own: no app bundle, no web font, nothing it would need
+  the network to fetch. The colours are the app's own tokens (globals.css),
+  written out by hand for the same reason.
+
+  After editing this file, bump the CACHE name in public/sw.js — otherwise
+  devices that already have the old copy keep showing it.
+-->
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>אין חיבור — אורי והבננות</title>
+    <!-- Same pre-paint theme script as index.html — see the comment there. -->
+    <script>
+      (function () {
+        var preference = null;
+        try {
+          preference = localStorage.getItem("ori-theme");
+        } catch (error) {}
+        var dark =
+          preference === "dark" ||
+          (preference !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+      })();
+    </script>
+    <style>
+      :root {
+        --canvas: #f5f5f3;
+        --ink: #1c1c1a;
+        --ink-muted: #5e5e59;
+        --accent: #047857;
+        --accent-ink: #ffffff;
+        color-scheme: light;
+      }
+      :root[data-theme="dark"] {
+        --canvas: #131312;
+        --ink: #ededea;
+        --ink-muted: #a8a8a2;
+        --accent: #10b981;
+        --accent-ink: #04130c;
+        color-scheme: dark;
+      }
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        box-sizing: border-box;
+        background: var(--canvas);
+        color: var(--ink);
+        font-family: system-ui, sans-serif;
+        text-align: center;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 1.5rem;
+      }
+      p {
+        margin: 0 0 24px;
+        max-width: 22rem;
+        color: var(--ink-muted);
+        line-height: 1.6;
+      }
+      button {
+        min-height: 44px;
+        padding: 0 20px;
+        border: 0;
+        border-radius: 8px;
+        background: var(--accent);
+        color: var(--accent-ink);
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>אין חיבור לאינטרנט</h1>
+      <p>אורי והבננות צריכה חיבור כדי להציג הזמנות ומלאי עדכניים. בדוק את החיבור ונסה שוב.</p>
+      <button type="button" onclick="location.reload()">נסה שוב</button>
+    </main>
+    <script>
+      // Try again by itself the moment the device reports a connection, so
+      // nobody has to notice it came back.
+      window.addEventListener("online", function () {
+        location.reload();
+      });
+    </script>
+  </body>
+</html>

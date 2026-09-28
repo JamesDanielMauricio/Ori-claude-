@@ -18,13 +18,26 @@
     <title>אורי והבננות</title>
     <meta name="description" content="ניהול הזמנות ומלאי לשיווק תוצרת חקלאית" />
     <!--
+      Installable app (PWA). The manifest gives the name, icons and "open in
+      its own window" setting that Android, Chrome and Edge use to install it;
+      iPhones use the manifest too but take the home-screen icon from
+      apple-touch-icon. public/sw.js is the other half — see main.tsx.
+    -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/png" sizes="48x48" href="/icons/favicon-48.png" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <!-- Filled in by the theme script below and by lib/theme.ts; this value
+         only matters if scripts don't run. -->
+    <meta name="theme-color" content="#ffffff" />
+    <!--
       Applies the saved colour theme before the first paint. It has to be a
       small inline script here in <head>: the React bundle only runs after the
       page has been drawn once, so leaving this to React would flash the light
       theme at every dark-mode user on every load.
 
       Mirrors parseThemePreference + resolveTheme in src/lib/theme.ts (same
-      storage key, same fallback to "system") — change one, change the other.
+      storage key, same fallback to "system"), and its THEME_COLOR for the
+      status bar — change one, change the other.
 
       If a Content-Security-Policy is ever added, it has to allow this block
       by its sha256 hash (not with 'unsafe-inline', which would also allow any
@@ -41,6 +54,9 @@
           preference === "dark" ||
           (preference !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
         document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+        document
+          .querySelector('meta[name="theme-color"]')
+          .setAttribute("content", dark ? "#0c0c0b" : "#ffffff");
       })();
     </script>
   </head>

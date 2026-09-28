@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 
 import { Icon } from "@/components/ui/icon";
+import { LogoMark } from "@/components/ui/logo-mark";
 import { useAuth } from "@/lib/auth-context";
 
 import { AlertsBell } from "./alerts-bell";
@@ -98,15 +99,12 @@ export function RoleShell({ navItems, children }: RoleShellProps) {
         // is what divides them.
         className="hidden w-64 shrink-0 border-e border-border bg-surface p-5 text-ink md:sticky md:top-0 md:flex md:h-dvh md:flex-col md:gap-5"
       >
-        <div className="flex items-center gap-2.5">
-          {/* Letter mark rather than an icon-set glyph — see BackofficeNav. */}
-          <span
-            aria-hidden
-            className="flex h-9 w-9 select-none items-center justify-center rounded-lg text-sm font-semibold text-accent ring-1 ring-inset ring-accent/40"
-          >
-            א
-          </span>
-          <p className="text-sm font-semibold text-ink">אורי והבננות</p>
+        {/* The logo alone and centred, as at the top of the backoffice
+            sidebar. Wrapped rather than placed straight in this column: a
+            column stretches its children full-width, which only LOOKED
+            centred because the image is drawn in the middle of its box. */}
+        <div className="flex justify-center">
+          <LogoMark />
         </div>
 
         <div className="flex items-center justify-between gap-2 rounded-lg bg-surface-muted px-3 py-2.5 ring-1 ring-inset ring-border">

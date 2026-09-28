@@ -1,9 +1,11 @@
 import type { ReactNode } from "react";
 
+import { LogoMark } from "@/components/ui/logo-mark";
+
 // The unauthenticated pages' shared frame (login / reset-password /
 // change-password): per the PRD's Login doc, these pages carry none of
 // the app's chrome — no header, no sidebar — just a centered card with
-// the product name above it. One component so all three stay identical.
+// the company logo above it. One component so all three stay identical.
 export function AuthCard({
   title,
   subtitle,
@@ -47,21 +49,11 @@ export function AuthCard({
       />
 
       <div className="animate-rise-in relative flex w-full max-w-sm flex-col items-center">
-        <div className="mb-8 flex items-center gap-2.5">
-          {/* The same mark and wordmark the sidebar carries, at the same size,
-              so signing in and the app share one lockup. It deliberately
-              doesn't lead: the form's title below is this screen's one 24px
-              line, and a brand name above it at the same size (or, as it was,
-              larger) split attention between two headings. Outlined, not
-              filled: a hairline reads as considered, where a solid chip
-              reads as a logo placeholder. */}
-          <span
-            aria-hidden
-            className="flex h-9 w-9 select-none items-center justify-center rounded-lg text-sm font-semibold text-accent ring-1 ring-inset ring-accent/40"
-          >
-            א
-          </span>
-          <p className="text-sm font-semibold text-ink">אורי והבננות</p>
+        {/* The same logo the sidebar carries, so signing in and the app share
+            one brand mark. Larger here, where the screen is otherwise empty
+            and its small print can be read. */}
+        <div className="mb-8">
+          <LogoMark size="lg" />
         </div>
 
         {/* The card is a panel lifted off the field — one step lighter (white

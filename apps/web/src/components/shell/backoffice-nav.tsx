@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { Icon, type IconName } from "@/components/ui/icon";
+import { LogoMark } from "@/components/ui/logo-mark";
 import { useAuth } from "@/lib/auth-context";
 
 import { AlertsBell } from "./alerts-bell";
@@ -74,25 +75,6 @@ function BackofficeNavLink({ href, label, icon }: { href: string; label: string;
       />
       <span className="truncate">{label}</span>
     </NavLink>
-  );
-}
-
-// The brand lockup. A letter mark, not a glyph from the icon set: every
-// icon in that set is spoken for by a nav row, and reusing one for the brand
-// made the logo read as a twelfth destination. Outlined rather than filled —
-// a solid green chip competed with the active nav row, which is the one
-// thing here that should be a solid block of green.
-function BrandMark() {
-  return (
-    <div className="flex items-center gap-2.5">
-      <span
-        aria-hidden
-        className="flex h-9 w-9 shrink-0 select-none items-center justify-center rounded-lg text-sm font-semibold text-accent ring-1 ring-inset ring-accent/40"
-      >
-        א
-      </span>
-      <p className="truncate text-sm font-semibold text-ink">אורי והבננות</p>
-    </div>
   );
 }
 
@@ -188,7 +170,8 @@ export function BackofficeNav() {
         className="sticky top-0 z-30 bg-surface text-ink shadow-raised md:hidden"
       >
         <header className="flex items-center justify-between gap-2 px-4 py-2.5">
-          <BrandMark />
+          {/* `sm`: the height of the bell and menu button beside it. */}
+          <LogoMark size="sm" />
           <div className="flex shrink-0 items-center gap-0.5">
             <AlertsBell />
             <button
@@ -262,8 +245,10 @@ function DesktopRail() {
       className="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col border-e border-border bg-surface text-ink md:flex"
     >
       <div className="px-5 pb-4 pt-5">
-        <div className="mb-4">
-          <BrandMark />
+        {/* Centred: with no name beside it, the logo reads as the rail's
+            heading. RoleShell's sidebar centres it the same way. */}
+        <div className="mb-4 flex justify-center">
+          <LogoMark size="md" />
         </div>
         <IdentityBlock />
       </div>

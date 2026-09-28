@@ -18,7 +18,10 @@ export default function ProfileLayout() {
   const { profile } = useAuth();
 
   return (
-    <div className="mx-auto flex min-h-dvh max-w-2xl flex-col gap-4 p-6">
+    // <main>, like the role shells' content area: this page has no shell,
+    // so without it the screen had no main landmark at all, and a screen
+    // reader's "jump to main content" found nothing to jump to.
+    <main className="mx-auto flex min-h-dvh max-w-2xl flex-col gap-4 p-6">
       <Link
         to={profile ? resolveHomeRoute(profile.role) : "/"}
         // `min-h-10` plus real horizontal padding: this was a 55×24 target,
@@ -34,6 +37,6 @@ export default function ProfileLayout() {
       <Suspense fallback={null}>
         <Outlet />
       </Suspense>
-    </div>
+    </main>
   );
 }

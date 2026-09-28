@@ -57,11 +57,21 @@
   --color-ink: #1c1c1a;
   /* 6.5:1 on surface, 5.9:1 on surface-muted — safe for secondary text. */
   --color-ink-muted: #5e5e59;
-  /* Tertiary only — placeholders, decorative glyphs, table headers. 3.1:1 on
-     surface-muted and 3.5:1 on surface: clears the 3:1 bar for non-text
-     marks (it also fills in-progress bars), but is below AA for body text,
-     so never use it for content a user must read. */
-  --color-ink-subtle: #8a8a85;
+  /* Tertiary — placeholders, meta labels, table headers, decorative glyphs.
+     5.05:1 on surface, 4.63:1 on canvas, 4.55:1 on surface-muted: AA for
+     normal text on all three, the backgrounds it actually sits on.
+
+     It was #8a8a85 (3.5:1 / 3.1:1), sized for non-text marks only, with a
+     rule that it must never carry text a user reads. The screens broke that
+     rule in 85 places — dates, counts, column headers, "not ordered" — so
+     the colour now meets the bar its uses need, rather than each of those
+     uses being moved to ink-muted. Same warm gray, one step darker; still
+     visibly lighter than ink-muted, which is what keeps three levels.
+
+     Its limit: a fill darker than surface-muted (the Products table's
+     family bands, color-mix of 7-9% ink) drops it under 4.5:1 — text on
+     those bands uses ink-muted instead. */
+  --color-ink-subtle: #6f6f6a;
 
   /* ---- Paper: brand ------------------------------------------------- */
   /* Emerald, in two steps. The brand value #059669 measures only 3.77:1
@@ -193,10 +203,10 @@
  */
 :root {
   color-scheme: light;
-  /* The <select> chevron. Stroke = ink-subtle #8a8a85, 3.12:1 on the field's
+  /* The <select> chevron. Stroke = ink-subtle #6f6f6a, 4.55:1 on the field's
      surface-muted fill. (It was a leftover brass-era #9b9284 at 2.76:1 —
      under the 3:1 bar for a non-text mark.) */
-  --glyph-select-chevron: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238a8a85' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 9 7 7 7-7'/%3E%3C/svg%3E");
+  --glyph-select-chevron: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236f6f6a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 9 7 7 7-7'/%3E%3C/svg%3E");
   /* The checkbox tick, in accent-ink: white on accent-bright, 3.77:1. */
   --glyph-check: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5.5 12.5 4.5 4.5 8.5-9'/%3E%3C/svg%3E");
 }
@@ -256,8 +266,10 @@
   --color-ink: #ededea;
   /* 7.1:1 on surface, 7.5:1 on surface-muted. */
   --color-ink-muted: #a8a8a2;
-  /* 4.2:1 on surface, 4.4:1 on surface-muted — still tertiary-only. */
-  --color-ink-subtle: #7e7e78;
+  /* 4.9:1 on surface, 5.2:1 on surface-muted, 5.4:1 on canvas — AA for
+     normal text, for the same reason as the light value (see @theme). It was
+     #7e7e78, 4.2:1 on surface. */
+  --color-ink-subtle: #8a8a84;
 
   /* Brand. 6.7:1 as text on surface, 6.0:1 on its own tint; the near-black
      label on a filled button holds 7.5:1 (8.8:1 on hover). */
@@ -287,9 +299,9 @@
   --color-scrim: rgb(0 0 0 / 0.6);
   --color-shimmer: rgb(255 255 255 / 0.06);
 
-  /* Chevron stroke = this theme's ink-subtle (4.4:1 on surface-muted); the
+  /* Chevron stroke = this theme's ink-subtle (5.2:1 on surface-muted); the
      tick = accent-ink on the bright green (7.5:1). */
-  --glyph-select-chevron: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%237e7e78' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 9 7 7 7-7'/%3E%3C/svg%3E");
+  --glyph-select-chevron: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238a8a84' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 9 7 7 7-7'/%3E%3C/svg%3E");
   --glyph-check: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2304130c' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5.5 12.5 4.5 4.5 8.5-9'/%3E%3C/svg%3E");
 
   /* Deeper than paper's shadows only so a dialog or popover doesn't look
@@ -340,7 +352,7 @@
   --color-surface-muted: #f3f3f1;
   /* The hover fill (the alerts bell). Deeper than the page canvas, which sits
      only 1.09:1 from white — too faint for a hover. This is 1.14:1, and
-     ink-subtle still holds 3.04:1 on it, the emerald 4.8:1. */
+     ink-subtle still holds 4.42:1 on it, the emerald 4.8:1. */
   --color-canvas: #f0f0ec;
   /* Hairlines, including the edge that faces the page: 1.25:1 on white. */
   --color-border: #e6e6e3;

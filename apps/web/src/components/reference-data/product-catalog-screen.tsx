@@ -1554,7 +1554,10 @@ export function ProductCatalogScreen({
         name: toggle,
         family: family.category ? <StatusPill tone="neutral">{family.category}</StatusPill> : null,
         sizes: (
-          <span className="whitespace-nowrap text-xs font-semibold text-ink-subtle">
+          // ink-muted, not ink-subtle: this sits on the family row's tinted
+          // band, where ink-subtle measures under 4.5:1 (4.1:1 light, 4.0:1
+          // dark) — see the band notes in globals.css.
+          <span className="whitespace-nowrap text-xs font-semibold text-ink-muted">
             {varietyCountLabel(varietyCount)}
           </span>
         ),

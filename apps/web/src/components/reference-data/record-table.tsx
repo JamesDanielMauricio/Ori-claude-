@@ -617,16 +617,17 @@ export function RecordTable<T>({
                   their sum, which matters on a table already wide enough to
                   scroll — and it reads as what it is, one column standing
                   for a record and for the group above it. The group meaning
-                  goes in the subtle ink so the record meaning still leads.
+                  goes in a lighter weight, on the second line, so the record
+                  meaning still leads. Not a lighter ink: on this header's
+                  tinted band even ink-subtle measures under 4.5:1 (4.4:1
+                  light, 4.3:1 dark), so both lines share ink-muted.
                   `align-top` so every primary label sits on one baseline
                   whether or not its column carries a second line. */}
               {visibleColumns.map((column) => (
                 <TableHead key={column.key} className="align-top">
                   <span className="block">{column.label}</span>
                   {column.groupLabel && (
-                    <span className="mt-0.5 block font-medium text-ink-subtle">
-                      {column.groupLabel}
-                    </span>
+                    <span className="mt-0.5 block font-medium">{column.groupLabel}</span>
                   )}
                 </TableHead>
               ))}

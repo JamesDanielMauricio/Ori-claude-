@@ -47,11 +47,18 @@ const BADGE_LABEL: Record<BadgeKind, string> = {
   closed: "נסגר",
 };
 
+// "none" and "closed" are both gray — neither asks the customer to do
+// anything — but they must not look the same: one is a day they ordered on,
+// the other a day they didn't, and those two used to share this exact class
+// string, so the only way to find your past orders was to read every pill.
+// A DASHED outline in the faintest ink reads as an absence; a solid one in
+// ink-muted, as a record that exists. No extra colour — the palette keeps
+// colour for states that need attention (warning, accent).
 const BADGE_CLASSES: Record<BadgeKind, string> = {
-  none: "border-border-strong text-ink-subtle font-medium",
+  none: "border-dashed border-border-strong text-ink-subtle font-medium",
   new: "border-warning text-warning font-semibold",
   sent: "border-accent text-accent font-semibold",
-  closed: "border-border-strong text-ink-subtle font-medium",
+  closed: "border-border-strong text-ink-muted font-semibold",
 };
 
 function shortDateLabel(isoDate: string): string {

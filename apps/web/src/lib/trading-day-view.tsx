@@ -77,16 +77,17 @@ export async function fetchOpenTradingDay(): Promise<TradingDayView | null> {
   return data as TradingDayView | null;
 }
 
-// Kept current by lib/refresh-on-return.ts, like every other query: a day
-// started, opened or closed on one device shows up on every other the next
-// time someone looks at it.
+// Kept current by lib/live-updates.ts, like every other query: a day started,
+// opened or closed on one device shows up on every other open device within
+// about a second.
 export function useOpenTradingDay() {
   return useQuery({
     queryKey: OPEN_TRADING_DAY_QUERY_KEY,
     queryFn: fetchOpenTradingDay,
     // No polling interval. This used to re-read every 60 seconds on every
-    // open device, used or not; it is now re-read whenever someone comes
-    // back to the app instead (lib/refresh-on-return.ts).
+    // open device, used or not; it is now re-read when the day actually
+    // changes (lib/live-updates.ts) or someone comes back to the app
+    // (lib/refresh-on-return.ts).
   });
 }
 

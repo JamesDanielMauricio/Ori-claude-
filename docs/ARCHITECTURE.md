@@ -395,11 +395,15 @@ confirmation dialog is built from the same local draft state that's about to be 
 successful `submit_order` call updates the UI directly (invalidate + re-render) rather than a
 full-page reload — the source's submit button froze the page for 1–3 seconds and then forced a
 reload, a failure mode this shape makes structurally impossible rather than something to remember
-to avoid. Other people's changes reach the screen without Realtime and without polling:
-`apps/web/src/lib/refresh-on-return.ts` re-runs every query on screen —
-`get_orderable_catalog_for_customer` included — whenever the person comes back to the app (tab
-shown, window focused, back online, or first touch after a minute away), through the caller's
-own RLS-governed session.
+to avoid. Other people's changes reach the screen live, without polling: migration 0060 has the
+database broadcast one "something changed" message per saved transaction on a private Supabase
+Realtime channel (the message names a table, never a row), and `apps/web/src/lib/live-updates.ts`
+answers by re-running every query on screen — `get_orderable_catalog_for_customer` included —
+through the caller's own RLS-governed session. A device listens only while the app is on screen —
+Supabase counts a message per listening device, looking or not — and on returning it re-joins
+with a one-minute replay so nothing saved during the reconnect goes unheard.
+`apps/web/src/lib/refresh-on-return.ts` re-reads the screen the moment the person comes back,
+covering whatever changed while it wasn't listening.
 See `packages/db/migrations/0017`-`0019`, `packages/domain/src/customer/` (input schemas, test
 fixtures, and direct tests of the mixed-family orderable-catalog rule and concurrent submissions
 against a depleting variety), and `apps/web/src/routes/customer/{order,history}.tsx`.

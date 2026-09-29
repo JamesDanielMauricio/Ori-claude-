@@ -4,6 +4,7 @@ import { BrowserRouter } from "react-router-dom";
 
 import { AppRoutes } from "./app-routes";
 import { AuthProvider } from "./lib/auth-context";
+import { LiveUpdates } from "./lib/live-updates";
 import { Providers } from "./lib/providers";
 import { RefreshOnReturn } from "./lib/refresh-on-return";
 import { initTheme } from "./lib/theme";
@@ -47,7 +48,10 @@ createRoot(container).render(
     <BrowserRouter>
       <Providers>
         <AuthProvider>
-          {/* Outside the routes: one watcher for every screen. */}
+          {/* Outside the routes: one of each for every screen. LiveUpdates
+              sits inside AuthProvider because it listens only while someone
+              is signed in (and only while the app is on screen). */}
+          <LiveUpdates />
           <RefreshOnReturn />
           <AppRoutes />
         </AuthProvider>

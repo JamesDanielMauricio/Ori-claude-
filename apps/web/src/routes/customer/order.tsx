@@ -85,12 +85,12 @@ const PHASE_SUBTITLE: Record<TradingDayPhase, string> = {
 function TodayOrderView() {
   // The shared "live open trading day" query (lib/trading-day-view.tsx),
   // not a private copy of it: it selects `phase`, which this screen now
-  // needs, and lib/refresh-on-return.ts re-reads it whenever the customer
-  // comes back to the app. That keeps the rule honest without a reload —
-  // when the distributor closes the shop, this page drops to read-only the
-  // next time the customer looks at it. A customer still typing never "comes
-  // back", so OrderLinesEditor also re-checks the day at the moment of
-  // submitting and refuses once the shop has closed.
+  // needs, and the live updates (lib/live-updates.ts) keep it current. That
+  // keeps the rule honest without a reload — when the distributor closes the
+  // shop, this page drops to read-only within about a second. For that second,
+  // and for a device whose connection has dropped, OrderLinesEditor also
+  // re-checks the day at the moment of submitting and refuses once the shop
+  // has closed.
   const openDayQuery = useOpenTradingDay();
   const day = openDayQuery.data ?? null;
 

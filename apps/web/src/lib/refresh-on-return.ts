@@ -1,12 +1,12 @@
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 
-// Keeps screens current without Supabase Realtime and without any timer: the
-// moment someone comes BACK to the app, everything on their screen is re-read.
-// That is when stale data would actually be seen — nobody reads a screen
-// they're not looking at — so a person who opens a trading day on one device
-// is seen by growers and customers the next time they look at theirs, without
-// anyone pressing reload.
+// The moment someone comes BACK to the app, everything on their screen is
+// re-read. The live updates (lib/live-updates.ts) keep a screen current while
+// it's on screen and listening; this covers the time it wasn't. They stop
+// listening whenever the app is hidden — a locked phone, a background tab —
+// to save messages, so whatever changed meanwhile is read here, the instant
+// it's shown. It also keeps screens current if Realtime is ever unavailable.
 //
 // "Coming back" is any of:
 //   - the tab or installed app is shown again (a phone unlocked, a tab
@@ -17,15 +17,9 @@ import { useEffect } from "react";
 //   - the first tap, click or keypress after AWAY_AFTER_MS of none (someone
 //     who left the screen up and walked away, then returns to it).
 //
-// What this can't catch: someone staring at a screen without touching it
-// while another person changes something. They see it on their next touch
-// or return. That is the price of having no timer and no push connection;
-// James chose it over both (2026-09-29).
-//
 // Cost: one re-read of the screen per return — ~5 KB for the grower's picks
 // screen, ~12 KB for the customer's order screen, ~31 KB for the arrangement
-// board (measured 2026-09-29, compressed). Nothing at all runs while nobody
-// is using the app: no interval, no open connection.
+// board (measured 2026-09-29, compressed). Nothing runs on a timer.
 //
 // Mounted once for the whole app, in main.tsx.
 

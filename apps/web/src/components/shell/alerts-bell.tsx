@@ -49,9 +49,13 @@ export function AlertsBell() {
     },
     // Alerts are typically created by a backoffice action (e.g. Close
     // Arrangement) the signed-in user isn't the one triggering. They show up
-    // the next time the user comes back to the app (lib/refresh-on-return.ts),
-    // which replaces the 60-second poll this query used to run on every open
-    // device, used or not.
+    // within about a second (lib/live-updates.ts), replacing the 60-second
+    // poll this query used to run on every open device, used or not.
+    //
+    // The live updates re-run this query whenever ANY alert changes, not only
+    // this user's own — the message says a table changed, never whose row.
+    // That costs one small read; what comes back is still only this user's
+    // alerts, because RLS decides that, not the message.
   });
 
   const unreadCount = alertsQuery.data?.filter((alert) => !alert.read).length ?? 0;

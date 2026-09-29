@@ -159,9 +159,10 @@ export function OrderLinesEditor({
   // re-seed from ("not editing"); with it gone, the first keystroke is what
   // marks the draft as the user's — seed freely until then, hold still after,
   // until the next save or discard resets `touched`. This matters more here
-  // than in the pick editor: lib/refresh-on-return.ts refetches this query
-  // whenever the person comes back to the screen, which can be mid-way
-  // through an order they started before looking away.
+  // than in the pick editor: the live updates (lib/live-updates.ts) refetch
+  // this query whenever anything on the day changes — any grower's pick, any
+  // customer's order, every ✓ the distributor presses on the arrangement
+  // board — which can land mid-way through this customer's own typing.
   useEffect(() => {
     if (!catalogQuery.data) return;
     if (touched.current) return;
@@ -255,12 +256,13 @@ export function OrderLinesEditor({
   const submitMutation = useMutation({
     mutationFn: async () => {
       // A customer's own order: confirm, right now, that the shop is still
-      // open. Nothing pushes "the shop closed" to this screen while someone
-      // is busy filling in an order (lib/refresh-on-return.ts only re-reads
-      // when they come back to the app), and submit_order itself accepts a
-      // customer's write until the day is fully closed (0042, P0007) — so
-      // without this, an order typed across the close would still land after
-      // the distributor started building the arrangement from the numbers.
+      // open. The live updates (lib/live-updates.ts) tell this screen the
+      // shop closed within about a second — but not on a device whose
+      // connection has dropped, and not in that second — and submit_order
+      // itself accepts a customer's write until the day is fully closed
+      // (0042, P0007). Without this, an order sent in that gap would still
+      // land after the distributor started building the arrangement from the
+      // numbers.
       // One ~1 KB read, only when someone actually submits. fetchQuery also
       // writes the answer into the shared open-day cache, which is what flips
       // the page to read-only (routes/customer/order.tsx) when it's closed.

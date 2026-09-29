@@ -30,8 +30,9 @@ export function GrowerSupplyColumn({
   onToggle,
   onSelect,
   onEditPick,
-  onToggleSubmit,
-  toggleSubmitDisabled = false,
+  onToggleTruck,
+  toggleTruckDisabled = false,
+  showTruck = true,
   filterVariety,
   onClearFilter,
 }: {
@@ -41,17 +42,23 @@ export function GrowerSupplyColumn({
   onToggle: (growerId: string) => void;
   onSelect: (selection: PickSelection) => void;
   onEditPick: (grower: GrowerSupply) => void;
-  // The truck icon: submits a draft pick, or reverts an already-submitted
-  // one back to draft (a deliberate exception to the pick status state
-  // machine's otherwise forward-only rule — see migration 0044). Not
-  // offered at all once a pick is 'closed' — the trading day is done, and
-  // there is nothing left to toggle.
-  onToggleSubmit: (grower: GrowerSupply) => void;
-  // True once the trading day itself is no longer open (closed, or the
-  // sidebar's date picker has pinned a past day) — the whole column is
-  // then a read-only history view, so the truck icon is disabled the same
-  // way the pencil's edits are gated elsewhere on this screen.
-  toggleSubmitDisabled?: boolean;
+  // The truck icon: closes the grower's pick, and pressing it again puts the
+  // pick back the way it was (Submitted if the grower had sent it, Draft if
+  // not). It is lit while the pick is 'closed' and nothing else — a save moves
+  // a pick to 'submitted', which is not closed, so a save never lights it
+  // (migration 0062). While closed, a pick can't be edited: the pencil's
+  // popup and the grower's own screen both go read-only until it is reopened.
+  onToggleTruck: (grower: GrowerSupply) => void;
+  // True once the trading day itself is no longer open for changes (the
+  // sidebar's date picker has pinned a past day) — the whole column is then a
+  // read-only history view, so the truck icon is disabled the same way the
+  // pencil's edits are gated elsewhere on this screen.
+  toggleTruckDisabled?: boolean;
+  // False once the trading day has ended: close_arrangement then closes every
+  // pick for good, so a lit truck would mean nothing and pressing it could do
+  // nothing. The icon is left off the row entirely rather than sitting lit on
+  // every grower.
+  showTruck?: boolean;
   /**
    * Set by clicking a product on a customer's order card (opposite column):
    * narrows this list to growers who actually carry that variety, so a
@@ -114,8 +121,9 @@ export function GrowerSupplyColumn({
               onToggle={() => onToggle(grower.growerId)}
               onSelect={onSelect}
               onEditPick={onEditPick}
-              onToggleSubmit={onToggleSubmit}
-              toggleSubmitDisabled={toggleSubmitDisabled}
+              onToggleTruck={onToggleTruck}
+              toggleTruckDisabled={toggleTruckDisabled}
+              showTruck={showTruck}
             />
           ))}
         </ul>
@@ -132,8 +140,9 @@ function GrowerRow({
   onToggle,
   onSelect,
   onEditPick,
-  onToggleSubmit,
-  toggleSubmitDisabled,
+  onToggleTruck,
+  toggleTruckDisabled,
+  showTruck,
 }: {
   grower: GrowerSupply;
   index: number;
@@ -142,8 +151,9 @@ function GrowerRow({
   onToggle: () => void;
   onSelect: (selection: PickSelection) => void;
   onEditPick: (grower: GrowerSupply) => void;
-  onToggleSubmit: (grower: GrowerSupply) => void;
-  toggleSubmitDisabled: boolean;
+  onToggleTruck: (grower: GrowerSupply) => void;
+  toggleTruckDisabled: boolean;
+  showTruck: boolean;
 }) {
   const time = formatPickupTime(grower.pickupTime);
   // Free stock is picked + leftover minus allocated — carried-forward
@@ -207,24 +217,28 @@ function GrowerRow({
         </button>
 
         <div className="me-3 flex shrink-0 items-center gap-1.5">
-          {/* The submit/un-submit toggle. Nothing to toggle once the pick is
-              closed — the trading day is done, so the button disappears
-              rather than sitting there disabled and unexplained. Coloured
-              like the "נבחר" pill while submitted, so a glance down the
-              column shows who's actually ready to be arranged against. */}
-          {grower.status !== "closed" && (
+          {/* The truck toggle: closes the pick, or puts it back the way it was.
+              Coloured like the "נבחר" pill while the pick is closed, so a
+              glance down the column shows which growers' picks are closed.
+
+              It lights on `closed` and on nothing else — NOT on `submitted`.
+              Submitted is what a save produces ("נשלח", the green name on
+              "בשם מגדל"), and a save must never light this. Left off the row
+              once the trading day has ended (`showTruck`): every pick is then
+              closed for good, so there is nothing to toggle. */}
+          {showTruck && (
             <button
               type="button"
-              onClick={() => onToggleSubmit(grower)}
-              disabled={toggleSubmitDisabled}
+              onClick={() => onToggleTruck(grower)}
+              disabled={toggleTruckDisabled}
               aria-label={
-                grower.status === "submitted"
-                  ? `החזר את הליקוט של ${grower.growerName} לטיוטה`
-                  : `שלח את הליקוט של ${grower.growerName} למפיץ`
+                grower.status === "closed"
+                  ? `החזר את הליקוט של ${grower.growerName} למצב הקודם`
+                  : `סגור את הליקוט של ${grower.growerName}`
               }
-              title={grower.status === "submitted" ? "החזר לטיוטה" : "שלח ליקוט"}
+              title={grower.status === "closed" ? "החזר למצב הקודם" : "סגור ליקוט"}
               className={`flex h-10 w-10 items-center justify-center rounded-md ring-1 ring-inset transition-colors duration-200 disabled:pointer-events-none disabled:opacity-40 ${
-                grower.status === "submitted"
+                grower.status === "closed"
                   ? "bg-accent-soft/60 text-accent ring-accent/40 hover:bg-accent-soft hover:ring-accent/60"
                   : "text-ink-subtle ring-border hover:bg-surface hover:text-accent hover:ring-accent/40"
               }`}

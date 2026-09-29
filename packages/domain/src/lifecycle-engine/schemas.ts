@@ -45,15 +45,15 @@ export function toSubmitPickRpcArgs(input: SubmitPickInput) {
   return { p_daily_pick_id: input.dailyPickId };
 }
 
-// Backoffice-only reverse of submit_pick, from the arrangement board's
-// truck icon (migration 0044) — Submitted -> Draft, while the trading day
-// is still open. Unlike every other status transition in this module, this
-// one is NOT forward-only: it's a deliberate, later product decision that a
-// distributor can un-submit a grower whose pick isn't actually ready to be
-// arranged against yet. Once the trading day closes, every pick is 'closed'
-// (close_arrangement, 0043/0044), so there is no submitted pick left to
-// revert — the function's own status check enforces that without needing a
-// separate day-phase check.
+// Backoffice-only reverse of submit_pick (migration 0044) — Submitted ->
+// Draft, while the trading day is still open. Unlike every other status
+// transition in this module, this one is NOT forward-only. It was the
+// arrangement board's truck icon until migration 0062 gave the truck a job of
+// its own (setPickClosed below); the app no longer calls it, and it stays
+// because the database function and its test do. Once the trading day closes,
+// every pick is 'closed' (close_arrangement, 0043/0044), so there is no
+// submitted pick left to revert — the function's own status check enforces
+// that without needing a separate day-phase check.
 export const revertPickToDraftInputSchema = z.object({
   dailyPickId: z.string().uuid(),
 });
@@ -61,6 +61,24 @@ export type RevertPickToDraftInput = z.infer<typeof revertPickToDraftInputSchema
 
 export function toRevertPickToDraftRpcArgs(input: RevertPickToDraftInput) {
   return { p_daily_pick_id: input.dailyPickId };
+}
+
+// The arrangement board's truck icon (migration 0062): closes one pick, or
+// reopens it to whatever it was before (Submitted if it had been sent, else
+// Draft) — while the trading day is still running. It names the state wanted
+// (`closed`) instead of "flip it", so two clicks that race each other end in a
+// state somebody asked for rather than cancelling out. Backoffice-only. A save
+// only ever moves a pick Draft -> Submitted, so it can never reach Closed and
+// never lights the truck; once the day ends every pick is Closed for good and
+// this refuses to reopen one.
+export const setPickClosedInputSchema = z.object({
+  dailyPickId: z.string().uuid(),
+  closed: z.boolean(),
+});
+export type SetPickClosedInput = z.infer<typeof setPickClosedInputSchema>;
+
+export function toSetPickClosedRpcArgs(input: SetPickClosedInput) {
+  return { p_daily_pick_id: input.dailyPickId, p_closed: input.closed };
 }
 
 export const updatePickProductPalletsInputSchema = z.object({

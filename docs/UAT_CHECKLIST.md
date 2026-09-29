@@ -69,14 +69,21 @@ here.
       `/backoffice/growers`, submit their pick for the day, then change the grower's default again —
       the already-submitted pick's collection time (shown on the arrangement board and on
       `/backoffice/distributor-grower`) stays at the value it had when submitted, not the new default.
-- [ ] On `/backoffice/arrangement`, the truck icon beside a grower's pencil submits a Draft pick
-      (status badge/label moves to Submitted); clicking it again while the trading day is still open
-      reverts it back to Draft. The icon disappears once the pick is Closed, and the whole toggle is
-      disabled once the arrangement itself is closed or a past day is pinned.
+- [ ] On `/backoffice/arrangement` (requires migration 0062), the truck icon beside a grower's pencil
+      closes that grower's pick: pressing it lights it (tooltip "החזר למצב הקודם"), the pick's status
+      becomes Closed ("סגור" on the grower's screen and on `/backoffice/distributor-grower`), and the
+      state survives a reload. Pressing it again unlights it and puts the pick back the way it was —
+      Submitted if the grower had sent it, Draft if not, never the other one. While it is closed the
+      grower's own screen and both pencil popups are read-only, and the bell (reminder) is disabled;
+      arranging against that grower's stock still works. The icon is left off once the trading day has
+      ended, and the toggle is disabled while a past day is pinned.
+- [ ] Saving or sending a pick never lights the truck: the grower's "שמור" on their own screen, and
+      the distributor's "שמור" on `/backoffice/distributor-grower`, both submit the pick (the name
+      turns green) while that grower's truck on `/backoffice/arrangement` stays unlit. Only closing
+      a pick — pressing the truck — lights it.
 - [ ] Closing the trading day's arrangement (sidebar's "סגירת יום עסקים") force-finalizes any pick
-      still in Draft (a no-show, or one reverted with the truck icon and never re-submitted) straight
-      to Closed — it should not get stuck, and its pickup time still reflects the grower's default at
-      that moment.
+      still in Draft (a no-show) straight to Closed — it should not get stuck, and its pickup time
+      still reflects the grower's default at that moment.
 - [ ] A grower with **no** Daily Pick for today (distributor hasn't initiated a day yet) sees a
       sensible empty state, not an error or a blank screen.
 - [ ] **Backoffice-as-grower** (`/backoffice/distributor-grower`): a backoffice user can open any
@@ -86,7 +93,7 @@ here.
       "שמור ושלח" also submits that grower's pick: the toast says "הליקוט נשמר ונשלח.", and the
       grower's name turns green with "נשלח ב-…" under it. Opening the pencil on a draft pick and
       pressing "שמור" with nothing changed sends it too. (The pencil on `/backoffice/arrangement`
-      only saves — sending from there is still the truck icon.)
+      only saves; the truck icon there closes the pick and does not send it.)
 - [ ] Backoffice can add a grower's in-season products mid-day (via "ערוך מוצרים בעונה") and see a
       new pick line appear immediately for that grower without needing a full day restart.
 

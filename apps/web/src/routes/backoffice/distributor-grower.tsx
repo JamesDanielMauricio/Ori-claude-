@@ -571,10 +571,13 @@ export default function DistributorAsGrowerPage() {
         }}
         readOnly={!dayView.isLive}
         // Saving here also SENDS the pick, the same as the grower's own
-        // screen. This screen has no truck icon (that lives on the arrangement
-        // board), so without this a distributor could fill in a grower's pick
-        // but never submit it — and the grower's name above, which is green
-        // exactly when the pick is submitted (`isDone`), could never turn green.
+        // screen. This is the distributor's way to send a pick on a grower's
+        // behalf — the truck icon on the arrangement board closes a pick and
+        // reopens it, which is a different thing — so without this a
+        // distributor could fill in a grower's pick but never submit it, and
+        // the grower's name above, which turns green once the pick is
+        // submitted (`isDone`), would stay un-green. Sending never closes the
+        // pick, so it leaves that truck icon as it was.
         submitOnSave
       />
 

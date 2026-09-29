@@ -43,9 +43,11 @@ export function GrowerPickDialog({
   readOnly?: boolean;
   // Forwarded straight through to PickLinesEditor's own `submitOnSave` — see
   // that prop's comment for what it does and why it is opt-in. The two hosts
-  // differ on purpose: "בשם מגדל" turns it on, because that screen has no other
-  // way to send a pick; the arrangement board leaves it off, because its truck
-  // icon is where a pick is sent or reverted.
+  // differ: "בשם מגדל" turns it on, so a distributor's save there sends the
+  // pick the way the grower's own does; the arrangement board leaves it off —
+  // its pencil only saves. Neither host closes the pick: closing is the
+  // arrangement board's truck icon, a later status ('closed') that a save
+  // can't reach — and while a pick is closed this popup is read-only.
   submitOnSave?: boolean;
 }) {
   const status =

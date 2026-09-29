@@ -236,13 +236,15 @@ export function PickLinesEditor({
   // draft without knowing it.
   //
   // Every host shows that confirmation; this prop decides only whether
-  // confirming also sends. Off for the arrangement board's pencil on purpose:
-  // that screen has its own control for sending — the truck icon, which can
-  // also REVERT a pick to draft — and a save there that quietly re-submitted
-  // a pick the distributor had just reverted would undo that. "בשם מגדל" has
-  // no such icon, so without this its distributor could edit a grower's pick
-  // but never send it, and the grower's name there (green = sent) could never
-  // turn green.
+  // confirming also sends. Off for the arrangement board's pencil, which only
+  // saves. On for "בשם מגדל": without it that screen's distributor could edit a
+  // grower's pick but never send it, and the grower's name there (green =
+  // sent) could never turn green.
+  //
+  // "Sending" here is draft -> submitted, and no further. It never closes the
+  // pick: closing is the arrangement board's truck icon, a later status
+  // ('closed', migration 0062) that a save cannot reach — so a save that sends
+  // a pick never lights the truck.
   submitOnSave?: boolean;
 }) {
   const supabase = createClient();
@@ -350,16 +352,17 @@ export function PickLinesEditor({
   // the previous ones.
   //
   // It asks the server for the pick's status rather than trusting the
-  // `pickStatus` prop, because that prop can be stale: the distributor can
-  // submit or revert this pick from the arrangement board (the truck icon)
-  // while the grower has this screen open. Trusting a stale "submitted"
-  // would skip the submit and leave a reverted pick in draft while telling
-  // the grower it was sent.
+  // `pickStatus` prop, because that prop can be stale: the pick's status can
+  // change under an open screen — the same pick sent from a second device, or
+  // by the distributor's save on "בשם מגדל", or closed (with the day, or by
+  // the distributor's truck icon). Trusting a stale "draft" would try a submit
+  // that is no longer needed.
   //
   // INVALID_STATE from submit_pick means the pick left draft between that
-  // read and this call — submitted by the distributor's truck icon, or closed
-  // with the day. Either way it is no longer waiting to be sent, which is
-  // what this step exists to achieve, so it counts as success, not a failure.
+  // read and this call — submitted by someone else in that instant, or closed
+  // (with the day, or by the truck). Either way it is no longer waiting to be
+  // sent, which is what this step exists to achieve, so it counts as success,
+  // not a failure.
   //
   // Returns the error instead of throwing it — the try/catch included, for
   // anything that throws rather than returning `{ error }`. By the time this

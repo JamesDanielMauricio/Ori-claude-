@@ -20,6 +20,7 @@ import {
   toInitiateBusinessDayRpcArgs,
   toOpenShopRpcArgs,
   toRevertPickToDraftRpcArgs,
+  toSetPickClosedRpcArgs,
   toSubmitPickRpcArgs,
   toUpdatePickProductPalletsRpcArgs,
 } from "./schemas";
@@ -621,8 +622,11 @@ describe("lifecycle engine", () => {
   }, 30000);
 
   // revert_pick_to_draft (0044) is the one deliberate exception to this
-  // module's otherwise forward-only rule — the arrangement board's truck
-  // icon. Proves: backoffice-only, only accepts a submitted pick, clears
+  // module's otherwise forward-only rule. It was the arrangement board's truck
+  // icon until migration 0062 gave the truck a different job — closing and
+  // reopening a pick (see set_pick_closed's test below); nothing in the app
+  // calls it now, and it stays covered because it is still deployed. Proves:
+  // backoffice-only, only accepts a submitted pick, clears
   // submitted_at AND the pickup_time snapshot (0043) so a later
   // re-submission captures the company's default fresh rather than the
   // stale one from before the revert, and a closed pick can never be
@@ -691,6 +695,155 @@ describe("lifecycle engine", () => {
     );
     expect(revertWhileClosed.error).not.toBeNull();
     expect(revertWhileClosed.error?.code).toBe(LIFECYCLE_ERROR_CODES.INVALID_STATE);
+  }, 30000);
+
+  // set_pick_closed (0062) is the arrangement board's truck icon: it closes a
+  // pick and, pressed again, puts it back the way it was. Proves what the screen
+  // relies on — closing leaves submitted_at and pickup_time alone; reopening goes
+  // back to Submitted for a pick that had been sent and to Draft for one that had
+  // not; a save's own steps (save_pick_lines, then submit_pick) move a pick to
+  // Submitted and never to Closed, which is the reported bug (they used to light
+  // the truck); a closed pick refuses edits; the call is idempotent; only a
+  // backoffice caller can use it, through the function or by writing the column;
+  // and once the trading day has ended it can reopen nothing.
+  it("set_pick_closed closes a pick and reopens it to the state it was in, is never reached by a save, is backoffice-only, and is refused once the day has ended", async () => {
+    const backoffice = await signedInBackoffice();
+    const admin = await createTestBackofficeAdmin();
+    cleanupFns.push(() => deleteTestBackofficeAdmin(admin));
+
+    const grower = await createTestGrowerWithProduct({ defaultPickupTime: "07:00" });
+    cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
+
+    const day = await createTestTradingDay({ initiatedByUserId: admin.userId, phase: "initiated" });
+    cleanupFns.push(() => deleteTestTradingDay(day.id));
+
+    const growerClient = await signedInGrowerFor(grower.companyId);
+
+    const directPick = await backoffice
+      .from("daily_picks")
+      .insert({ trading_day_id: day.id, grower_company_id: grower.companyId, status: "draft" })
+      .select()
+      .single();
+    const dailyPickId = directPick.data!.id;
+    const directLine = await backoffice
+      .from("daily_pick_products")
+      .insert({
+        daily_pick_id: dailyPickId,
+        product_variety_id: grower.varietyId,
+        pallets_picked: "0",
+      })
+      .select()
+      .single();
+    const lineId = directLine.data!.id;
+
+    const setClosed = (closed: boolean) =>
+      backoffice.rpc("set_pick_closed", toSetPickClosedRpcArgs({ dailyPickId, closed }));
+    const editLine = (palletsPicked: number) =>
+      growerClient.rpc(
+        "update_pick_product_pallets",
+        toUpdatePickProductPalletsRpcArgs({ dailyPickProductId: lineId, palletsPicked }),
+      );
+
+    // A Draft pick: closing it leaves submitted_at and pickup_time as they were
+    // (empty), and a closed pick can't be edited.
+    const closeDraft = await setClosed(true);
+    expect(closeDraft.error).toBeNull();
+    expect(closeDraft.data).toMatchObject({
+      status: "closed",
+      submitted_at: null,
+      pickup_time: null,
+    });
+    const editWhileClosed = await editLine(5);
+    expect(editWhileClosed.error?.code).toBe(LIFECYCLE_ERROR_CODES.INVALID_STATE);
+
+    // Reopening it brings back a Draft — and editing works again.
+    const reopenDraft = await setClosed(false);
+    expect(reopenDraft.error).toBeNull();
+    expect(reopenDraft.data).toMatchObject({ status: "draft", submitted_at: null });
+    expect((await editLine(5)).error).toBeNull();
+
+    // The reported bug: what a save does to a pick is send it (submit_pick) —
+    // Submitted, never Closed — so the truck, which is lit on Closed alone,
+    // stays unlit.
+    const submit = await growerClient.rpc("submit_pick", toSubmitPickRpcArgs({ dailyPickId }));
+    expect(submit.error).toBeNull();
+    expect(submit.data).toMatchObject({ status: "submitted", pickup_time: "07:00:00" });
+
+    // A Submitted pick: closing keeps its submitted_at and pickup_time...
+    const closeSubmitted = await setClosed(true);
+    expect(closeSubmitted.error).toBeNull();
+    expect(closeSubmitted.data).toMatchObject({
+      status: "closed",
+      submitted_at: submit.data!.submitted_at,
+      pickup_time: "07:00:00",
+    });
+    // ...closing it again (a double-click) writes nothing...
+    const closeAgain = await setClosed(true);
+    expect(closeAgain.error).toBeNull();
+    expect(closeAgain.data).toMatchObject({
+      status: "closed",
+      updated_at: closeSubmitted.data!.updated_at,
+    });
+    // ...and reopening it goes back to Submitted, not to Draft — the previous
+    // state, as the truck promises.
+    const reopenSubmitted = await setClosed(false);
+    expect(reopenSubmitted.error).toBeNull();
+    expect(reopenSubmitted.data).toMatchObject({
+      status: "submitted",
+      submitted_at: submit.data!.submitted_at,
+      pickup_time: "07:00:00",
+    });
+    const reopenAgain = await setClosed(false);
+    expect(reopenAgain.error).toBeNull();
+    expect(reopenAgain.data).toMatchObject({
+      status: "submitted",
+      updated_at: reopenSubmitted.data!.updated_at,
+    });
+
+    // A grower cannot press the truck — their own pick's included — and cannot
+    // close a pick by writing the column either (a grower has no update policy
+    // on daily_picks, so Row Level Security filters the write).
+    const forbidden = await growerClient.rpc(
+      "set_pick_closed",
+      toSetPickClosedRpcArgs({ dailyPickId, closed: true }),
+    );
+    expect(forbidden.error?.code).toBe(LIFECYCLE_ERROR_CODES.FORBIDDEN);
+    await growerClient.from("daily_picks").update({ status: "closed" }).eq("id", dailyPickId);
+    const afterGrowerWrite = await backoffice
+      .from("daily_picks")
+      .select("status")
+      .eq("id", dailyPickId)
+      .single();
+    expect(afterGrowerWrite.data!.status).toBe("submitted");
+
+    // Input the function refuses: a pick that doesn't exist, and a missing
+    // true/false (which must never be read as "reopen").
+    const unknown = await backoffice.rpc(
+      "set_pick_closed",
+      toSetPickClosedRpcArgs({ dailyPickId: randomUUID(), closed: true }),
+    );
+    expect(unknown.error?.code).toBe(LIFECYCLE_ERROR_CODES.NOT_FOUND);
+    const noAnswer = await backoffice.rpc("set_pick_closed", {
+      p_daily_pick_id: dailyPickId,
+      p_closed: null as unknown as boolean,
+    });
+    expect(noAnswer.error?.code).toBe(LIFECYCLE_ERROR_CODES.INVALID_INPUT);
+
+    // The day ends: close_arrangement leaves every pick Closed and the day's
+    // phase 'closed' (stood in for directly, as the tests above do). From here
+    // the pick can be neither reopened nor closed — a Closed pick is now final.
+    expect((await setClosed(true)).error).toBeNull();
+    await backoffice.from("trading_days").update({ phase: "closed" }).eq("id", day.id);
+    const reopenAfterDay = await setClosed(false);
+    expect(reopenAfterDay.error?.code).toBe(LIFECYCLE_ERROR_CODES.INVALID_STATE);
+    const closeAfterDay = await setClosed(true);
+    expect(closeAfterDay.error?.code).toBe(LIFECYCLE_ERROR_CODES.INVALID_STATE);
+    const finalRow = await backoffice
+      .from("daily_picks")
+      .select("status")
+      .eq("id", dailyPickId)
+      .single();
+    expect(finalRow.data!.status).toBe("closed");
   }, 30000);
 
   it("open_shop enqueues one shop_open notification per active customer, none for an inactive one — id 4", async () => {

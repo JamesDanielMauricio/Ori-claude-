@@ -8,10 +8,8 @@ import {
 } from "@ori/domain/arrangement";
 import {
   LIFECYCLE_ERROR_CODES,
-  revertPickToDraftInputSchema,
-  submitPickInputSchema,
-  toRevertPickToDraftRpcArgs,
-  toSubmitPickRpcArgs,
+  setPickClosedInputSchema,
+  toSetPickClosedRpcArgs,
 } from "@ori/domain/lifecycle-engine";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
@@ -190,7 +188,7 @@ export default function ArrangementPage() {
         .select(
           `id, trade_date, phase,
            daily_arrangements(id, status, arrangement_records(id, daily_pick_product_id, daily_order_product_id, customer_company_id, quantity_pallets, price, price_type)),
-           daily_picks(id, grower_company_id, status, pickup_time, daily_pick_products(id, daily_pick_id, product_variety_id, pallets_picked, leftover_pallets, comment, product_varieties(id, name, sizes, family_id, product_families(name, image_url)))),
+           daily_picks(id, grower_company_id, status, submitted_at, pickup_time, daily_pick_products(id, daily_pick_id, product_variety_id, pallets_picked, leftover_pallets, comment, product_varieties(id, name, sizes, family_id, product_families(name, image_url)))),
            daily_orders(id, customer_company_id, status, daily_order_products(id, daily_order_id, product_variety_id, pallets_ordered, comment, product_varieties(id, name, sizes, family_id, product_families(name, image_url))), order_submission_logs(id, snapshot, created_at))`,
         )
         .eq("id", day!.id)
@@ -466,14 +464,25 @@ export default function ArrangementPage() {
     }
   };
 
-  // The truck icon: submit_pick for a draft pick, revert_pick_to_draft for
-  // a submitted one — the grower row's own current status decides which
-  // RPC this call is, so the column never has to know about either
-  // function by name. FORBIDDEN/INVALID_STATE get their own messages here
-  // rather than reusing describeRpcError above: that one's copy ("הסידור
-  // כבר סגור") is written for the arrangement-record functions and would
-  // mislead for this pick-status action.
-  const toggleSubmitOptimistic = optimisticUpdate<TradingDay | null, GrowerSupply>(
+  // The truck icon: set_pick_closed closes the grower's pick, or reopens it to
+  // what it was before. The row's own status decides which — and the call names
+  // the state it wants (the opposite of what's showing) instead of "flip it",
+  // so a double-click can't cancel itself out on the server.
+  //
+  // It used to be submit_pick / revert_pick_to_draft, which made the truck a
+  // mirror of 'submitted' — so every save that sent a pick lit it (see
+  // migration 0062). Now the truck owns 'closed'. A save moves a pick to
+  // 'submitted' and can't reach it.
+  //
+  // Reopening goes back to "Submitted" if the pick had been sent (it still has
+  // its `submitted_at`) and to "Draft" if not — the same rule set_pick_closed
+  // applies, predicted here so the icon and the row don't wait for the round
+  // trip. The refetch after the call is what the screen finally trusts.
+  //
+  // FORBIDDEN/INVALID_STATE get their own messages here rather than reusing
+  // describeRpcError above: that one's copy ("הסידור כבר סגור") is written for
+  // the arrangement-record functions and would mislead for this pick action.
+  const toggleTruckOptimistic = optimisticUpdate<TradingDay | null, GrowerSupply>(
     queryClient,
     boardDataQueryKey,
     (current, grower) =>
@@ -482,37 +491,39 @@ export default function ArrangementPage() {
             ...current,
             daily_picks: current.daily_picks.map((pick) =>
               pick.id === grower.pickId
-                ? { ...pick, status: grower.status === "submitted" ? "draft" : "submitted" }
+                ? {
+                    ...pick,
+                    status:
+                      grower.status !== "closed"
+                        ? "closed"
+                        : pick.submitted_at
+                          ? "submitted"
+                          : "draft",
+                  }
                 : pick,
             ),
           }
         : current,
   );
 
-  const toggleSubmitMutation = useMutation({
+  const toggleTruckMutation = useMutation({
     mutationFn: async (grower: GrowerSupply) => {
-      if (grower.status === "submitted") {
-        const input = revertPickToDraftInputSchema.parse({ dailyPickId: grower.pickId });
-        const { error } = await supabase.rpc(
-          "revert_pick_to_draft",
-          toRevertPickToDraftRpcArgs(input),
-        );
-        if (error) throw error;
-      } else {
-        const input = submitPickInputSchema.parse({ dailyPickId: grower.pickId });
-        const { error } = await supabase.rpc("submit_pick", toSubmitPickRpcArgs(input));
-        if (error) throw error;
-      }
+      const input = setPickClosedInputSchema.parse({
+        dailyPickId: grower.pickId,
+        closed: grower.status !== "closed",
+      });
+      const { error } = await supabase.rpc("set_pick_closed", toSetPickClosedRpcArgs(input));
+      if (error) throw error;
     },
-    onMutate: toggleSubmitOptimistic.onMutate,
+    onMutate: toggleTruckOptimistic.onMutate,
     onSuccess: (_data, grower) => {
       showToast(
-        grower.status === "submitted" ? "הליקוט הוחזר לטיוטה." : "הליקוט נשלח.",
+        grower.status === "closed" ? "הליקוט הוחזר למצב הקודם." : "הליקוט נסגר.",
         "success",
       );
       void queryClient.invalidateQueries({ queryKey: boardDataQueryKey });
     },
-    onError: mergeOnError(toggleSubmitOptimistic.onError, (error: RpcError) => {
+    onError: mergeOnError(toggleTruckOptimistic.onError, (error: RpcError) => {
       const message =
         error.code === LIFECYCLE_ERROR_CODES.INVALID_STATE
           ? "סטטוס הליקוט כבר השתנה בינתיים. רענן את הדף."
@@ -651,8 +662,11 @@ export default function ArrangementPage() {
             setExpandedGrowerId((current) => (current === growerId ? null : growerId))
           }
           onEditPick={setPickDialogGrower}
-          onToggleSubmit={(grower) => toggleSubmitMutation.mutate(grower)}
-          toggleSubmitDisabled={!editable || toggleSubmitMutation.isPending}
+          onToggleTruck={(grower) => toggleTruckMutation.mutate(grower)}
+          toggleTruckDisabled={!editable || toggleTruckMutation.isPending}
+          // Once the day has ended every pick is closed for good, so the
+          // truck has nothing to say (see GrowerSupplyColumn).
+          showTruck={boardDay.phase !== "closed"}
           filterVariety={growerFilterVariety}
           onClearFilter={() => setGrowerFilterVarietyId(null)}
           onSelect={(next) => {

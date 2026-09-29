@@ -1119,6 +1119,17 @@ export type Database = {
         };
         Returns: Database["public"]["Tables"]["daily_picks"]["Row"];
       };
+      // Hand-added for migration 0062, which has not been applied yet — same
+      // caveat as update_growers_data above. Its shape (a uuid and a boolean,
+      // returning the pick) is what `supabase gen types` will produce; replace
+      // this note with a check against the live catalog once it has run.
+      set_pick_closed: {
+        Args: {
+          p_daily_pick_id: string;
+          p_closed: boolean;
+        };
+        Returns: Database["public"]["Tables"]["daily_picks"]["Row"];
+      };
       update_pick_product_pallets: {
         Args: {
           p_daily_pick_product_id: string;

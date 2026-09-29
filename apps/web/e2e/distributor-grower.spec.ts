@@ -125,8 +125,8 @@ test.describe("Backoffice — Grower Inventory Status", () => {
     await expect(confirmDialog).toContainText("נקטף 8");
     await expect(confirmDialog).toContainText("עודף 2");
     await expect(confirmDialog).toContainText("סה״כ 10");
-    // Saving here also sends the pick (this screen has no truck icon), so the
-    // button says so — the same "שמור ושלח" as on the grower's own screen.
+    // Saving here also sends the pick, so the button says so — the same
+    // "שמור ושלח" as on the grower's own screen.
     await expect(confirmDialog.getByRole("button", { name: "שמור ושלח" })).toBeVisible();
     // Nothing has been sent yet: backing out below must leave the pick a draft.
     expect((await getDailyPickForGrower(dayId, grower.companyId))?.status).toBe("draft");

@@ -5,7 +5,55 @@ A running log of non-obvious decisions made about `packages/db`'s schema — the
 
 ---
 
-## 2026-09-10 (latest) — Pick status gains a deliberate backward transition: Submitted → Draft,
+## 2026-09-30 (latest) — The arrangement board's truck icon closes a pick and reopens it
+## (`set_pick_closed`); it no longer submits or reverts
+
+**Context.** Since 0044 the truck icon beside the pencil in `GrowerSupplyColumn` toggled a pick
+between Draft and Submitted: it was lit whenever `daily_picks.status = 'submitted'`, and pressing
+it called `submit_pick` / `revert_pick_to_draft`. That was harmless while the truck was the only
+thing that sent a pick. It stopped being harmless when the grower's own "שמור" began sending the
+pick (d7dc917) and, a day later, the distributor's "שמור" on "בשם מגדל" did too (919506f): every
+save that sent a pick also lit its truck, though nobody had pressed it. Reported 2026-09-30, along
+with what the truck is for — it closes the daily pick, and pressing it again puts the pick back to
+its previous state.
+
+**What changed (`packages/db/migrations/0062_close-and-reopen-pick.sql`).**
+
+- **`set_pick_closed(p_daily_pick_id, p_closed)`, new, backoffice-only.** Closing moves a Draft or
+  Submitted pick to `'closed'` and leaves `submitted_at` and `pickup_time` alone. Reopening moves a
+  closed pick back to `'submitted'` if it has a `submitted_at` and to `'draft'` if not — exactly
+  the state it was closed from, with no "status before close" column: `submit_pick` and
+  `revert_pick_to_draft` are the only mid-day writers of `submitted_at`, and closing doesn't touch
+  it. (`close_arrangement` backfills it at the very end of the day, when nothing can be reopened.)
+- **It takes the state wanted** (true/false) rather than "flip it", so two racing clicks (a
+  double-click, two distributors) end in a state somebody asked for. Asking for the state the pick
+  already has writes nothing and sends no live-updates broadcast. It refuses a non-backoffice
+  caller (`42501`), a null `p_closed` (`P0008`, so a missing answer can never be read as
+  "reopen"), an unknown pick (`P0002`), and — the guard that keeps a finished day final — any pick
+  whose trading day is `'closed'` (`P0007`). A `'closed'` status alone can't tell a truck-closed
+  pick from one `close_arrangement` closed at the end of the day; the day's phase can.
+- **`security invoker`**, unlike `submit_pick` / `revert_pick_to_draft`: those had to be definer
+  because a grower has no write access to `daily_picks`, whereas nobody but backoffice needs to
+  write here and backoffice already can (`daily_picks_write_backoffice`, 0010) — so it borrows no
+  extra rights and the policy stays the last line of defence behind its role check.
+- **What a closed pick already meant, and still does.** `save_pick_lines`,
+  `update_pick_product_pallets` / `_details` and `send_pick_reminder` refuse it, so the grower's
+  screen and both pencil popups go read-only until it is reopened. Arranging against its stock and
+  customers' orders are not affected — they are gated by the trading day's phase, not by the
+  pick's status — and `close_arrangement` still closes every pick at the end of the day.
+- **The board** lights the truck on `closed` and on nothing else, so a save (Draft → Submitted)
+  can't reach it, and leaves it off the row once the day has ended (every pick is then closed for
+  good).
+- **`revert_pick_to_draft` stays deployed and tested but has no caller in the app.** Un-submitting
+  a grower's pick from the UI is therefore no longer possible; nothing asked for it here, and it
+  can be re-exposed on its own if it is wanted.
+- **Replaces an earlier draft of this same migration** that gave the truck a separate marker
+  (`truck_marked_at` and `set_pick_truck`). That draft was never committed or released; 0062 drops
+  both if they exist and does nothing if they don't.
+
+---
+
+## 2026-09-10 — Pick status gains a deliberate backward transition: Submitted → Draft,
 ## backoffice-only, from the arrangement board
 
 **Context.** `reference/prd/state-machines/pick-status-state-machine.md` documents the Daily Pick
@@ -43,6 +91,10 @@ The arrangement-board UI (`GrowerSupplyColumn`) hides the toggle entirely once a
 — there's nothing left to flip — and disables it whenever the screen's own `editable` flag
 (trading day live + arrangement still open) is false, the same gate every other write control on
 that screen already uses.
+
+*Superseded in part on 2026-09-30 (see the entry above): the truck icon no longer calls
+`submit_pick` / `revert_pick_to_draft` — it closes and reopens the pick (`set_pick_closed`). The
+function this entry adds is still deployed, but nothing in the app calls it.*
 
 ---
 

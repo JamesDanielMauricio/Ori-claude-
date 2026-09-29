@@ -49,6 +49,16 @@ export interface BoardPick {
    * default in that case.
    */
   pickup_time: string | null;
+  /**
+   * When the pick was sent (submit_pick), null while it never has been. The
+   * truck icon closes a pick without touching this, which is how reopening it
+   * knows what to go back to: a pick with a `submitted_at` was Submitted, one
+   * without was a Draft (see set_pick_closed, migration 0062).
+   *
+   * Optional because only the arrangement board's query selects it — the
+   * matrix screen builds the same picks and has no use for it.
+   */
+  submitted_at?: string | null;
   daily_pick_products: BoardPickLine[];
 }
 

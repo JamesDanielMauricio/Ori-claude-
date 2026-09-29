@@ -24,6 +24,7 @@ export function GrowerPickDialog({
   onClose,
   onSaved,
   readOnly = false,
+  submitOnSave = false,
 }: {
   pickId: string | null;
   // Widened from the editor's own union because the board reads `status` off
@@ -40,6 +41,12 @@ export function GrowerPickDialog({
   // has pinned a day other than the live one, which includes the one case
   // `pickStatus` can't catch on its own (pinning the live day's own date).
   readOnly?: boolean;
+  // Forwarded straight through to PickLinesEditor's own `submitOnSave` — see
+  // that prop's comment for what it does and why it is opt-in. The two hosts
+  // differ on purpose: "בשם מגדל" turns it on, because that screen has no other
+  // way to send a pick; the arrangement board leaves it off, because its truck
+  // icon is where a pick is sent or reverted.
+  submitOnSave?: boolean;
 }) {
   const status =
     pickStatus === "draft" || pickStatus === "submitted" || pickStatus === "closed"
@@ -64,6 +71,7 @@ export function GrowerPickDialog({
           dailyPickId={pickId}
           pickStatus={status}
           onSaved={onSaved}
+          submitOnSave={submitOnSave}
           // Keeps "שמור" pinned to the bottom of the popup instead of
           // wherever the line list happens to end — this dialog is a fixed
           // scroll area, so an in-flow bar would be a scroll away from where

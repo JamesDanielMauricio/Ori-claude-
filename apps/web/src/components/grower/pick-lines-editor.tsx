@@ -223,23 +223,26 @@ export function PickLinesEditor({
   // Fired after a successful save, for hosts that show this editor over
   // other data derived from the same pick — the arrangement board mounts it
   // in a popup and has to re-read the day's supply once pallets change, and
-  // the grower's own screen re-reads the pick's status, which a save with
-  // `submitOnSave` can change. Optional; this component still refreshes its
-  // own query either way. Mirrors OrderLinesEditor's `onSubmitted`.
+  // the grower's own screen and "בשם מגדל" re-read the pick's status, which a
+  // save with `submitOnSave` can change. Optional; this component still
+  // refreshes its own query either way. Mirrors OrderLinesEditor's
+  // `onSubmitted`.
   onSaved?: () => void;
-  // The grower's own screen: "שמור" is the ONLY button, and it both saves
-  // and sends — confirming PickConfirmationDialog saves the lines and then,
-  // if the pick is still a draft, submits it (submit_pick). There used to be
-  // a separate "שלח ליקוט" button, and a grower who only pressed "שמור" left
-  // their pick sitting in draft without knowing it.
+  // The grower's own screen, and the distributor's "בשם מגדל": "שמור" is the
+  // ONLY button, and it both saves and sends — confirming
+  // PickConfirmationDialog saves the lines and then, if the pick is still a
+  // draft, submits it (submit_pick). There used to be a separate "שלח ליקוט"
+  // button, and a grower who only pressed "שמור" left their pick sitting in
+  // draft without knowing it.
   //
   // Every host shows that confirmation; this prop decides only whether
-  // confirming also sends. Off for the two backoffice hosts on purpose. A
-  // distributor correcting a grower's numbers is not the grower sending their
-  // pick, and submitting from there already has its own control — the
-  // arrangement board's truck icon, which can also REVERT a pick to draft. A
-  // distributor's save that quietly re-submitted a pick they had just
-  // reverted would undo that.
+  // confirming also sends. Off for the arrangement board's pencil on purpose:
+  // that screen has its own control for sending — the truck icon, which can
+  // also REVERT a pick to draft — and a save there that quietly re-submitted
+  // a pick the distributor had just reverted would undo that. "בשם מגדל" has
+  // no such icon, so without this its distributor could edit a grower's pick
+  // but never send it, and the grower's name there (green = sent) could never
+  // turn green.
   submitOnSave?: boolean;
 }) {
   const supabase = createClient();

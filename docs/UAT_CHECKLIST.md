@@ -82,6 +82,11 @@ here.
 - [ ] **Backoffice-as-grower** (`/backoffice/distributor-grower`): a backoffice user can open any
       grower's pick, edit a line on their behalf, and it persists — same underlying editor as the
       grower's own screen.
+- [ ] On `/backoffice/distributor-grower`, pressing "שמור" in a grower's pencil popup and then
+      "שמור ושלח" also submits that grower's pick: the toast says "הליקוט נשמר ונשלח.", and the
+      grower's name turns green with "נשלח ב-…" under it. Opening the pencil on a draft pick and
+      pressing "שמור" with nothing changed sends it too. (The pencil on `/backoffice/arrangement`
+      only saves — sending from there is still the truck icon.)
 - [ ] Backoffice can add a grower's in-season products mid-day (via "ערוך מוצרים בעונה") and see a
       new pick line appear immediately for that grower without needing a full day restart.
 

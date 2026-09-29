@@ -38,11 +38,11 @@ export function PickConfirmationDialog({
 }: {
   open: boolean;
   families: PickReviewFamily[];
-  // Whether confirming also SENDS the pick (the grower's own screen, see
-  // PickLinesEditor's `submitOnSave`) or only saves it (the distributor's
-  // hosts, where sending is the arrangement board's truck icon). Only the
-  // wording changes: the button must not say "ושלח" over a save that sends
-  // nothing.
+  // Whether confirming also SENDS the pick (the grower's own screen and the
+  // distributor's "בשם מגדל", see PickLinesEditor's `submitOnSave`) or only
+  // saves it (the arrangement board's pencil, where sending is the truck
+  // icon). Only the wording changes: the button must not say "ושלח" over a
+  // save that sends nothing.
   sends: boolean;
   confirming: boolean;
   onClose: () => void;

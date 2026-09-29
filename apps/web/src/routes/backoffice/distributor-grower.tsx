@@ -116,7 +116,9 @@ function groupPickLines(lines: PickLineRow[]): FamilyGroupedRow[] {
 // two actions: a pencil that opens GrowerPickDialog — the exact same
 // PickLinesEditor the grower's own screen and the arrangement board's
 // pencil already use, since save_pick_lines already accepts "the owning
-// grower, or backoffice" — and a bell that resends the pick reminder.
+// grower, or backoffice" — and a bell that resends the pick reminder. The
+// pencil's "שמור" also SUBMITS the pick, as on the grower's own screen, which
+// is what turns the name green.
 //
 // Replaced a master-detail layout (pick a grower on the left, edit their
 // pick on the right) with this flat, always-expandable list: the earlier
@@ -568,6 +570,12 @@ export default function DistributorAsGrowerPage() {
           setPickDialogGrower(null);
         }}
         readOnly={!dayView.isLive}
+        // Saving here also SENDS the pick, the same as the grower's own
+        // screen. This screen has no truck icon (that lives on the arrangement
+        // board), so without this a distributor could fill in a grower's pick
+        // but never submit it — and the grower's name above, which is green
+        // exactly when the pick is submitted (`isDone`), could never turn green.
+        submitOnSave
       />
 
       <Dialog

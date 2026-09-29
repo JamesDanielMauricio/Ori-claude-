@@ -65,12 +65,13 @@ export function ActionBar({
   // NOT applied to "מחק": deleting a record has nothing to do with whether
   // its form has unsaved edits.
   dirty?: boolean;
-  // Keeps "שמור" clickable when nothing has been edited, for the one host
-  // whose save does more than write the draft back: the grower's own picking
-  // screen, where "שמור" is also what sends a draft pick to the distributor.
-  // A grower whose saved numbers are already right still needs a button that
-  // sends them. "בטל שינויים" is unaffected — with no edits there is still
-  // nothing to discard. Defaults to false, so every other bar is unchanged.
+  // Keeps "שמור" clickable when nothing has been edited, for the hosts whose
+  // save does more than write the draft back: the grower's own picking screen
+  // and the distributor's "בשם מגדל" popup, where "שמור" is also what sends a
+  // draft pick. A pick whose saved numbers are already right still needs a
+  // button that sends them. "בטל שינויים" is unaffected — with no edits there
+  // is still nothing to discard. Defaults to false, so every other bar is
+  // unchanged.
   canSaveUnchanged?: boolean;
   canDelete?: boolean;
   // Pins the bar to the bottom of whatever is scrolling it, instead of

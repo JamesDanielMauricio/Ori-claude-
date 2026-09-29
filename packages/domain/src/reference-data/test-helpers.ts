@@ -46,6 +46,9 @@ export interface CreateTestProductVarietyOptions {
   familyId: string;
   name?: string;
   version?: number;
+  // The variety's overbooking allowance (product_varieties.no_overbooking); left at the column's
+  // default of 0 when omitted. Lets a test build a product that has an allowance but no picking.
+  noOverbooking?: number;
 }
 
 export async function createTestProductVariety(options: CreateTestProductVarietyOptions) {
@@ -55,6 +58,9 @@ export async function createTestProductVariety(options: CreateTestProductVariety
       familyId: options.familyId,
       name: options.name ?? `זן בדיקה ${randomUUID()}`,
       version: options.version ?? 1,
+      ...(options.noOverbooking === undefined
+        ? {}
+        : { noOverbooking: options.noOverbooking.toString() }),
     })
     .returning();
   if (!variety) throw new Error("failed to create test product variety");

@@ -5,7 +5,74 @@ A running log of non-obvious decisions made about `packages/db`'s schema — the
 
 ---
 
-## 2026-09-30 (latest) — The arrangement board's truck icon closes a pick and reopens it
+## 2026-09-30 (latest) — The shop lists only products that have picking; customers and
+## distributors are shown different lists
+
+**Context.** The customer shop (`get_orderable_catalog_for_customer`) listed a variety when
+`pallets_picked + leftover_pallets + no_overbooking > pallets ordered` — the PRD's out-of-stock
+formula, computed by `shop_variety_orderability`. `no_overbooking` is a buffer above picking, but
+the sum also passes when there is no picking at all: a product nobody had picked, with no
+leftover and an overbooking allowance of 3, gives `0 + 0 + 3 > 0`, so it was listed to every
+customer and could be ordered up to 3 pallets although no grower had any. The rule asked for is
+that the shop only shows products that have more than 0 picking, picking being pallets picked
+plus leftover, added up over every grower's line for the day. Two follow-up decisions were made
+the same day, after being told what each would do: a product a customer already ordered is hidden
+from that customer too once its picking drops to 0, and a fully ordered product (leftover +
+pallets + overbooking <= everything ordered) stays hidden from customers but is shown to
+distributors.
+
+**What changed (`0063_shop-lists-only-picked-products.sql`, then
+`0064_shop-visibility-by-role.sql`, which replaces the same function again and makes 0063 safe to
+skip).** "Picking" below always means pallets picked + leftover, summed over every grower for that
+day, whatever the state of the pick (a draft counts, as it does in `shop_variety_orderability`);
+overbooking is not picking.
+
+- **A customer's own screen lists a variety when it has picking and it is not fully ordered.**
+  The one exception, kept on purpose: a variety that has picking and is already in the customer's
+  own order stays even when fully ordered, so they can still see and change what they ordered.
+  Without it, the product a customer just took the last pallets of would vanish from their own
+  screen, and their next save would delete that line.
+- **A variety whose picking has dropped to 0 is hidden from a customer even if it is in their
+  order.** The order screen sends back only the rows it shows and `submit_order` removes every
+  line it is not sent, so the customer's next save removes that line (deletes it, or zeroes it if
+  something is arranged against it — which cannot happen at 0 picking, because `save_pick_lines`
+  refuses to lower picking below what is arranged, P0006). This was accepted knowingly. If the
+  grower raises picking again before any save, the line is still there and the product reappears
+  with it.
+- **A distributor (backoffice) is shown every variety that has picking**, fully ordered or not
+  (`is_orderable` comes back false, which the screen draws as "אזל מהמלאי"), plus every line
+  already in the order being looked at whatever its picking. Staff may deliberately order past
+  what is left — `submit_order` applies the customer's ceiling only to direct customer
+  submissions — and until now could not even find such a product. The order-line rule means a save
+  from the distributor's screen never removes a line the distributor cannot see.
+- **The list a caller gets is chosen by their role, read from their profile
+  (`current_role()`), never by a parameter.** A customer cannot ask for the distributor's list;
+  `p_customer_company_id` is still refused for everyone but backoffice.
+- **A variety with no picking is in neither list**, overbooking allowance or not — except that it
+  stays on a distributor's screen when it is already in the order being looked at.
+- **Nothing else moves.** Same signature, same 15 columns, same values, same order for every row
+  both versions return; `is_orderable`, `max_orderable_for_customer` and `submit_order` are
+  untouched, so a product WITH picking can still be ordered up to picking plus its overbooking
+  allowance. `shop_variety_orderability` is not touched either (its return shape would have needed
+  a drop-and-recreate).
+
+**What this deliberately does _not_ do.** It does not narrow what `submit_order` accepts: a direct
+API call for a product with no picking but an overbooking allowance is still accepted, as before,
+because nothing on either screen can reach it. And it does not keep a hidden zero-picking order
+line alive through a customer's save (an alternative: have `submit_order` skip lines whose
+variety has no picking) — that would be a change to `submit_order`, and it was not asked for.
+
+**How it was checked.** Databases built from every migration, seeded identically at 0062, 0063
+and 0064 (28 hand-written scenarios plus 600 pseudo-random products), and compared row by row for
+customers, a distributor, a grower and outsiders against a rule worked out separately in JS: only
+the intended rows leave or arrive, everything else is identical and in the same order; 14
+deliberately broken versions of 0064 are each caught; the real web app was driven in Chromium
+against the same database (shop lists, ordering, a live update when a grower picks, the
+distributor ordering a fully ordered product, a customer saving with a hidden zero-picking line).
+
+---
+
+## 2026-09-30 — The arrangement board's truck icon closes a pick and reopens it
 ## (`set_pick_closed`); it no longer submits or reverts
 
 **Context.** Since 0044 the truck icon beside the pencil in `GrowerSupplyColumn` toggled a pick

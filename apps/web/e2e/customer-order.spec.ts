@@ -67,10 +67,18 @@ test.describe("Customer — order + history", () => {
     cleanupFns.push(() => deleteTestUser(growerUser.userId));
 
     // A second variety in the SAME family as the grower's first product —
-    // added to the grower's in-season list but never picked, so it stays
-    // at zero supply. This is what makes the family "mixed": one variety
+    // added to the grower's in-season list but never picked, so it has no
+    // picking at all. This is what makes the family "mixed": one variety
     // with real supply, one without.
-    const depletedVariety = await createTestProductVariety({ familyId: grower.familyId });
+    //
+    // It also carries an overbooking allowance of 3, which used to be enough
+    // on its own to list it (0 picked + 0 leftover + 3 overbooking > 0
+    // ordered, migration 0018's formula) and let customers order it. The shop
+    // shows only products that have picking, so it must stay hidden anyway.
+    const depletedVariety = await createTestProductVariety({
+      familyId: grower.familyId,
+      noOverbooking: 3,
+    });
     cleanupFns.push(() => deleteTestProductVariety(depletedVariety.id));
     await db.insert(growerProducts).values({ companyId: grower.companyId, productVarietyId: depletedVariety.id });
 
@@ -114,9 +122,9 @@ test.describe("Customer — order + history", () => {
     await expect(page).toHaveURL(/\/customer\/order$/);
 
     // Mixed family: this fixture's family holds two varieties, and the
-    // depleted one (zero supply, not in this customer's cart) must not
-    // render while its in-stock sibling — and therefore the family itself —
-    // still does.
+    // depleted one (no picking — overbooking allowance or not — and not in
+    // this customer's cart) must not render while its in-stock sibling — and
+    // therefore the family itself — still does.
     //
     // Scoped to this test's own family rather than counting rows across the
     // whole page. initiate_business_day bootstraps a pick for EVERY eligible

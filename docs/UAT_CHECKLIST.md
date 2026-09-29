@@ -99,9 +99,17 @@ here.
 
 ## 4. Place / Edit Today's Order (customer) (`reference/prd/place-edit-today-s-order.md`)
 
-- [ ] A customer sees today's orderable catalog grouped by product family; a variety with zero
-      supply across all growers does not appear, but its family still shows if a sibling variety in
-      that family has supply.
+- [ ] A customer sees today's orderable catalog grouped by product family; a variety with no
+      picking across all growers (pallets picked + leftover = 0) does not appear, but its family still
+      shows if a sibling variety in that family has picking.
+- [ ] Leftover counts as picking: a variety with 0 pallets picked but some leftover appears. A
+      variety that has picking at only one of two growers appears once, not twice.
+- [ ] An overbooking allowance alone does not put a product in the shop: a variety with 0 picked, 0
+      leftover and an overbooking allowance of 3 does not appear. The moment a grower picks 1 pallet
+      of it, it appears (live, without a reload) and the customer can order up to 4 (1 + 3).
+- [ ] The distributor's "בשם לקוח" order screen for a customer lists every product that has picking,
+      including fully ordered ones (flagged "אזל מהמלאי", quantity typed freely), and every line already
+      in that customer's order even when its picking is 0. Saving there never removes a line.
 - [ ] Setting a pallet count and comment, then Save, opens a confirmation dialog showing the
       correct family/variety/pallet count summary before anything is actually submitted.
 - [ ] Pressing "שלח הזמנה" (Send Order) submits without a visible page freeze or reload — the
@@ -109,10 +117,13 @@ here.
       reload (proves it round-tripped to the server, not just local state).
 - [ ] The customer can continue editing and re-submitting after the first submission, on the same
       open day.
-- [ ] A variety that goes out of stock (someone else's order plus this customer's own combined
-      demand exceeds supply) **after** this customer already added it to their own cart stays
-      visible to them (the per-customer carve-out) — but is not orderable by a customer who hasn't
-      already got it in their cart.
+- [ ] A variety that has picking but becomes fully ordered (picking + overbooking <= everything
+      ordered, someone else's order plus this customer's own combined) **after** this customer
+      already added it to their own cart stays visible to them, flagged "אזל מהמלאי" (the per-customer
+      carve-out) — a customer who hasn't got it in their order does not see it at all.
+- [ ] If the grower later lowers a product's picking to 0, it disappears from the screen of the
+      customer who ordered it too. Their next save removes that order line (agreed). If the grower
+      raises picking again before they save, the product is back with their quantity on it.
 - [ ] Once the distributor closes the shop for the day, attempting to submit/edit the order fails
       with a visible, sensible error — never a silent accept into a shop that's actually closed.
 - [ ] `/customer/history` shows past orders, newest first; clicking one shows its line items with

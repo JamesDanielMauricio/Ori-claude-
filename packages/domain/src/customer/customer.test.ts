@@ -132,20 +132,20 @@ describe("customer ordering module", () => {
   it("get_orderable_catalog_for_customer applies the family-survives-if-any-variety-orderable rule and the per-customer carve-out for a mixed family", async () => {
     const grower = await createTestGrowerWithProduct();
     cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
-    const depletedVariety = await createTestProductVariety({
+    const soldOutVariety = await createTestProductVariety({
       familyId: grower.familyId,
-      name: `Depleted ${randomUUID()}`,
+      name: `Sold out ${randomUUID()}`,
     });
-    cleanupFns.push(() => deleteTestProductVariety(depletedVariety.id));
+    cleanupFns.push(() => deleteTestProductVariety(soldOutVariety.id));
     const day = await createOpenTestDay(admin.userId);
 
     // In-stock variety: 10 picked, nobody has ordered it yet.
     const pick = await pickLine(day.id, grower.companyId, grower.varietyId, 10);
-    // Depleted variety: also picked (so it's genuinely "in today's shop",
-    // not just absent), but zero supply.
+    // Sold-out variety: 3 picked — it has picking, so it is genuinely in today's shop — and customer 2
+    // orders all 3 below, so nothing is left of it.
     await db
       .insert(dailyPickProducts)
-      .values({ dailyPickId: pick.id, productVarietyId: depletedVariety.id, palletsPicked: "0" });
+      .values({ dailyPickId: pick.id, productVarietyId: soldOutVariety.id, palletsPicked: "3" });
 
     // Both customer fixtures — AND their sign-ins — are created up front,
     // before any assertion runs, so this day's cleanup (pushed right
@@ -159,8 +159,16 @@ describe("customer ordering module", () => {
     const client2 = await signedInCustomer(customer2.companyId);
     cleanupFns.push(() => deleteTestTradingDay(day.id));
 
-    // Customer 1: empty cart. Should see the in-stock variety and NOT the
-    // depleted one — but the family itself must still appear (via the
+    // Customer 2 has all 3 pallets of the sold-out variety in their own order.
+    // Direct-inserted rather than submitted through the RPC. The line this
+    // test needs is one placed while the variety still had stock — the whole
+    // point of the carve-out is that it survives the stock running out — and
+    // arranging it directly also stops a test about the CATALOG's carve-out
+    // from failing whenever submit_order's own rules change.
+    await createTestOrderProductLine(day.id, customer2.companyId, soldOutVariety.id, 3);
+
+    // Customer 1: empty order. Should see the in-stock variety and NOT the
+    // sold-out one — but the family itself must still appear (via the
     // in-stock variety), never dropped wholesale.
     const catalog1 = await client1.rpc(
       "get_orderable_catalog_for_customer",
@@ -169,23 +177,16 @@ describe("customer ordering module", () => {
     expect(catalog1.error).toBeNull();
     const family1Rows = catalog1.data!.filter((row) => row.family_id === grower.familyId);
     expect(family1Rows).toHaveLength(1);
-    expect(family1Rows[0]).toMatchObject({ variety_id: grower.varietyId, is_orderable: true, pallets_ordered: 0 });
+    expect(family1Rows[0]).toMatchObject({
+      variety_id: grower.varietyId,
+      is_orderable: true,
+      pallets_ordered: 0,
+    });
 
-    // Customer 2: already has 3 pallets of the depleted variety in their
-    // own order (placed before it went out of stock). The carve-out means
-    // THEY still see it — is_orderable: false, but present — while the
-    // in-stock variety is also present on its own merits. Neither
-    // customer's view affects the other's.
-    // Direct-inserted rather than submitted through the RPC. The line this
-    // test needs is one placed while the variety still had stock — the whole
-    // point of the carve-out is that it survives the stock running out. Since
-    // migration 0042 submit_order refuses a line above
-    // max_orderable_for_customer, which for a zero-supply variety is 0, so
-    // the RPC can no longer create this precondition at all. Arranging it
-    // directly also stops a test about the CATALOG's carve-out from failing
-    // whenever submit_order's own rules change.
-    await createTestOrderProductLine(day.id, customer2.companyId, depletedVariety.id, 3);
-
+    // Customer 2: the carve-out means THEY still see the sold-out variety —
+    // is_orderable: false, but present, with their 3 pallets — while the
+    // in-stock variety is also present on its own merits. Neither customer's
+    // view affects the other's.
     const catalog2 = await client2.rpc(
       "get_orderable_catalog_for_customer",
       toOrderableCatalogRpcArgs({ tradingDayId: day.id }),
@@ -195,19 +196,174 @@ describe("customer ordering module", () => {
     expect(family2Rows).toHaveLength(2);
     expect(family2Rows).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ variety_id: grower.varietyId, is_orderable: true, pallets_ordered: 0 }),
-        expect.objectContaining({ variety_id: depletedVariety.id, is_orderable: false, pallets_ordered: 3 }),
+        expect.objectContaining({
+          variety_id: grower.varietyId,
+          is_orderable: true,
+          pallets_ordered: 0,
+        }),
+        expect.objectContaining({
+          variety_id: soldOutVariety.id,
+          is_orderable: false,
+          pallets_ordered: 3,
+        }),
       ]),
     );
 
     // Customer 1's own view is unaffected by customer 2's carve-out — the
-    // depleted variety still doesn't show for them.
+    // sold-out variety still doesn't show for them.
     const catalog1Again = await client1.rpc(
       "get_orderable_catalog_for_customer",
       toOrderableCatalogRpcArgs({ tradingDayId: day.id }),
     );
-    expect(catalog1Again.data!.some((row) => row.variety_id === depletedVariety.id)).toBe(false);
+    expect(catalog1Again.data!.some((row) => row.variety_id === soldOutVariety.id)).toBe(false);
+
+    // A distributor is shown fully ordered products too (customers are not): reading customer 1's
+    // catalog as backoffice lists the sold-out variety, flagged not orderable.
+    const staffCatalog = await admin.client.rpc(
+      "get_orderable_catalog_for_customer",
+      toOrderableCatalogRpcArgs({ tradingDayId: day.id, customerCompanyId: customer1.companyId }),
+    );
+    expect(staffCatalog.error).toBeNull();
+    const staffRows = staffCatalog.data!.filter((row) => row.family_id === grower.familyId);
+    expect(staffRows).toHaveLength(2);
+    expect(staffRows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ variety_id: grower.varietyId, is_orderable: true }),
+        expect.objectContaining({
+          variety_id: soldOutVariety.id,
+          is_orderable: false,
+          pallets_ordered: 0,
+        }),
+      ]),
+    );
   }, 30000);
+
+  it("get_orderable_catalog_for_customer shows customers only products that have picking and are not fully ordered (an overbooking allowance never counts), and shows distributors every product that has picking", async () => {
+    const grower = await createTestGrowerWithProduct();
+    cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
+    // One extra variety per case, all in the same family as the grower's own.
+    const extraVariety = async (label: string) => {
+      const variety = await createTestProductVariety({
+        familyId: grower.familyId,
+        name: `${label} ${randomUUID()}`,
+      });
+      cleanupFns.push(() => deleteTestProductVariety(variety.id));
+      return variety;
+    };
+    const leftoverOnly = await extraVariety("Leftover only");
+    const overbookingOnly = await extraVariety("Overbooking only");
+    const fullyOrdered = await extraVariety("Fully ordered");
+    const emptiedAfterOrder = await extraVariety("Ordered, picking since 0");
+    const day = await createOpenTestDay(admin.userId);
+
+    // grower.varietyId: 10 pallets picked — has picking.
+    const pick = await pickLine(day.id, grower.companyId, grower.varietyId, 10);
+    // Leftover only: nothing picked today, 4 pallets carried over. Leftover IS picking.
+    await db.insert(dailyPickProducts).values({
+      dailyPickId: pick.id,
+      productVarietyId: leftoverOnly.id,
+      palletsPicked: "0",
+      leftoverPallets: "4",
+    });
+    // Overbooking only: no picking and no leftover, but an overbooking allowance of 3. That alone used
+    // to be enough (0 + 0 + 3 > 0) to list it to every customer and let them order up to 3 pallets.
+    await db
+      .insert(dailyPickProducts)
+      .values({ dailyPickId: pick.id, productVarietyId: overbookingOnly.id, palletsPicked: "0" });
+    await db
+      .update(productVarieties)
+      .set({ noOverbooking: "3" })
+      .where(eq(productVarieties.id, overbookingOnly.id));
+    // Fully ordered: 3 picked, and customer 2 orders all 3 below. It has picking, so it is in the shop —
+    // there is just nothing left of it.
+    await db
+      .insert(dailyPickProducts)
+      .values({ dailyPickId: pick.id, productVarietyId: fullyOrdered.id, palletsPicked: "3" });
+    // A product customer 2 ordered while it had stock and whose picking has since dropped to 0.
+    await db
+      .insert(dailyPickProducts)
+      .values({ dailyPickId: pick.id, productVarietyId: emptiedAfterOrder.id, palletsPicked: "0" });
+
+    // Fixtures and sign-ins first, the day's cleanup last — see the first test in this file.
+    const customer1 = await createTestCustomer(day.id);
+    const customer2 = await createTestCustomer(day.id);
+    const client1 = await signedInCustomer(customer1.companyId);
+    const client2 = await signedInCustomer(customer2.companyId);
+    cleanupFns.push(() => deleteTestTradingDay(day.id));
+    await createTestOrderProductLine(day.id, customer2.companyId, fullyOrdered.id, 3);
+    await createTestOrderProductLine(day.id, customer2.companyId, emptiedAfterOrder.id, 2);
+
+    const listedFor = async (client: SupabaseClient<Database>, customerCompanyId?: string) => {
+      const catalog = await client.rpc(
+        "get_orderable_catalog_for_customer",
+        toOrderableCatalogRpcArgs({ tradingDayId: day.id, customerCompanyId }),
+      );
+      expect(catalog.error).toBeNull();
+      return catalog
+        .data!.filter((row) => row.family_id === grower.familyId)
+        .map((row) => row.variety_id);
+    };
+
+    // Customer 1, empty order: only what has picking AND still has room. Not the overbooking-only
+    // product, not the fully ordered one, and not the one whose picking dropped to 0.
+    const listed1 = await listedFor(client1);
+    expect(listed1).toHaveLength(2);
+    expect(listed1).toEqual(expect.arrayContaining([grower.varietyId, leftoverOnly.id]));
+
+    // Customer 2: the fully ordered product stays on their screen — it has picking and it is their own
+    // order, so they can still see and change it. The product whose picking dropped to 0 does NOT,
+    // although it is in their order: a product with no picking is not part of the shop. (Because the
+    // order screen sends back only the rows it shows and submit_order removes any line that isn't sent,
+    // their next save removes that line. That is decided behaviour, not an accident.)
+    const listed2 = await listedFor(client2);
+    expect(listed2).toHaveLength(3);
+    expect(listed2).toEqual(
+      expect.arrayContaining([grower.varietyId, leftoverOnly.id, fullyOrdered.id]),
+    );
+
+    // A distributor (backoffice) reading customer 1's list is shown every product that has picking —
+    // fully ordered ones too — but still not the overbooking-only product, and not customer 2's
+    // zero-picking line, which is not in customer 1's order.
+    const staff1 = await listedFor(admin.client, customer1.companyId);
+    expect(staff1).toHaveLength(3);
+    expect(staff1).toEqual(
+      expect.arrayContaining([grower.varietyId, leftoverOnly.id, fullyOrdered.id]),
+    );
+
+    // Reading customer 2's list also shows their zero-picking line, so a save from the distributor's
+    // screen can never remove a line the distributor cannot see.
+    const staff2 = await listedFor(admin.client, customer2.companyId);
+    expect(staff2).toHaveLength(4);
+    expect(staff2).toEqual(
+      expect.arrayContaining([
+        grower.varietyId,
+        leftoverOnly.id,
+        fullyOrdered.id,
+        emptiedAfterOrder.id,
+      ]),
+    );
+
+    // The moment a grower picks 1 pallet of the overbooking-only product it appears — and it can be
+    // ordered up to picking + overbooking (1 + 3), which is what the overbooking allowance is for.
+    await db
+      .update(dailyPickProducts)
+      .set({ palletsPicked: "1" })
+      .where(
+        and(
+          eq(dailyPickProducts.dailyPickId, pick.id),
+          eq(dailyPickProducts.productVarietyId, overbookingOnly.id),
+        ),
+      );
+    const afterPick = await client1.rpc(
+      "get_orderable_catalog_for_customer",
+      toOrderableCatalogRpcArgs({ tradingDayId: day.id }),
+    );
+    expect(afterPick.error).toBeNull();
+    expect(afterPick.data!.find((row) => row.variety_id === overbookingOnly.id)).toMatchObject({
+      is_orderable: true,
+      max_orderable_for_customer: 4,
+    });
+  }, 45000);
 
   it("submit_order is one transaction — upserts, prunes lines omitted from the new submission, stamps submission, and logs exactly one audit row per call", async () => {
     const grower = await createTestGrowerWithProduct();
@@ -385,6 +541,16 @@ describe("customer ordering module", () => {
     expect(observerCatalog.error).toBeNull();
     const varietyRow = observerCatalog.data!.find((row) => row.variety_id === grower.varietyId);
     expect(varietyRow).toBeUndefined();
+
+    // The distributor still sees it: fully ordered products are hidden from customers, not from staff.
+    const staffCatalog = await admin.client.rpc(
+      "get_orderable_catalog_for_customer",
+      toOrderableCatalogRpcArgs({ tradingDayId: day.id, customerCompanyId: observer.companyId }),
+    );
+    expect(staffCatalog.error).toBeNull();
+    expect(staffCatalog.data!.find((row) => row.variety_id === grower.varietyId)).toMatchObject({
+      is_orderable: false,
+    });
   }, 30000);
 
   it("get_orderable_catalog_for_customer and submit_order let backoffice act on a customer's behalf, but reject the same parameter from a customer", async () => {

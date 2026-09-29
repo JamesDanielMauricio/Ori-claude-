@@ -442,6 +442,20 @@
       "when": 1789506000000,
       "tag": "0062_close-and-reopen-pick",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1789592400000,
+      "tag": "0063_shop-lists-only-picked-products",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1789678800000,
+      "tag": "0064_shop-visibility-by-role",
+      "breakpoints": true
     }
   ]
 }

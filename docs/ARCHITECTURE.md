@@ -368,6 +368,11 @@ history, and the v1.3 submission audit log. Two things were the explicit point o
   after the customer added it stays visible to *them*) is preserved by reading the caller's own
   `daily_orders`/`daily_order_products` rows under their own session (`security invoker`, RLS
   already scopes this to "your own order"), not by a second parameter or a special case.
+  Since migrations 0063/0064 that one filter also requires the variety to have picking — pallets
+  picked plus leftover, summed across growers, more than 0 — so an overbooking allowance alone no
+  longer lists a product, and customers and distributors are shown different lists (customers: has
+  picking and not fully ordered; distributors: everything that has picking, fully ordered or not),
+  chosen by the caller's role (see `SCHEMA_DECISIONS.md`, 2026-09-30).
 - **`submit_order`** (R1/R3/R4) is one transaction replacing the source's 5-action,
   dash-packed `save_order_line` workflow (`"<order-id>-<pallets>-<comment>-<line-id>"`, split on
   `-` — a real, documented fragility: an unescaped `-` in a customer's comment corrupts the

@@ -28,6 +28,10 @@ export interface PickReviewFamily {
 // deliberate: every family is open and there is no chevron. This is a
 // summary to read top to bottom before confirming, and a family that had to
 // be opened to be checked is one that would go unchecked.
+//
+// The customer's order confirmation is styled to match this one — same
+// cards, same scroll area — so a change to how this looks belongs there too
+// (components/customer/submission-confirmation-dialog.tsx).
 export function PickConfirmationDialog({
   open,
   families,

@@ -519,6 +519,21 @@ export function PickLinesEditor({
       <div className="flex flex-col gap-3">
         {families.map((family) => {
           const expanded = expandedFamilyIds.has(family.familyId);
+          // How many varieties in this family already carry a pick or a
+          // leftover. Shown as a chip on the collapsed row so anyone scrolling
+          // a long list can see which families hold stock without opening each
+          // one — the same chip, for the same reason, as OrderProductList's
+          // `filledCount`. It reads the draft, so it follows typing instead of
+          // waiting for a save.
+          //
+          // נקטף or עודף, the same quantity test reviewFamilies applies below
+          // (a comment alone doesn't count here). A carried-over leftover
+          // (migration 0050) is real supply the distributor can arrange from,
+          // exactly like a fresh pick, so a family holding only leftover is not
+          // an empty one.
+          const pickedCount = family.varieties.filter(
+            (variety) => Number(variety.pallets || 0) > 0 || Number(variety.leftover || 0) > 0,
+          ).length;
           return (
             <div
               key={family.familyId}
@@ -554,6 +569,11 @@ export function PickLinesEditor({
                 <p className="min-w-0 flex-1 truncate text-sm font-semibold text-ink">
                   {family.familyName}
                 </p>
+                {pickedCount > 0 && (
+                  <span className="animate-pop-in shrink-0 rounded-full bg-accent px-2 py-0.5 text-xs font-bold text-accent-ink">
+                    {pickedCount}
+                  </span>
+                )}
               </button>
               {/* Height-animated rather than mounted/unmounted (globals.css
                   `.accordion-panel`), and `inert` while collapsed so a closed

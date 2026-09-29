@@ -428,6 +428,13 @@
       "when": 1789333200000,
       "tag": "0060_live-updates-broadcast",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1789419600000,
+      "tag": "0061_quiet-reference-data",
+      "breakpoints": true
     }
   ]
 }

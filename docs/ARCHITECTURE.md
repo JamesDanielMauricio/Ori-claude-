@@ -397,7 +397,8 @@ full-page reload — the source's submit button froze the page for 1–3 seconds
 reload, a failure mode this shape makes structurally impossible rather than something to remember
 to avoid. Other people's changes reach the screen live, without polling: migration 0060 has the
 database broadcast one "something changed" message per saved transaction on a private Supabase
-Realtime channel (the message names a table, never a row), and `apps/web/src/lib/live-updates.ts`
+Realtime channel (the message names a table, never a row; reference data — users, products,
+companies — is left out by migration 0061), and `apps/web/src/lib/live-updates.ts`
 answers by re-running every query on screen — `get_orderable_catalog_for_customer` included —
 through the caller's own RLS-governed session. A device listens only while the app is on screen —
 Supabase counts a message per listening device, looking or not — and on returning it re-joins

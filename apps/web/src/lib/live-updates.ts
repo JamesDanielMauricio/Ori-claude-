@@ -11,7 +11,9 @@ import { createClient } from "./supabase/client";
 //
 // How: the database sends a tiny "something changed" message on one private
 // Supabase Realtime channel whenever a transaction writes one of those tables
-// (packages/db/migrations/0060_live-updates-broadcast.sql). This listens on
+// (packages/db/migrations/0060_live-updates-broadcast.sql) — except reference
+// data that nobody needs the instant it changes: users, products, and
+// grower / customer / transporter details (0061). This listens on
 // that channel and, on any message, invalidates every React Query query. That
 // refetches the ones currently mounted (i.e. on screen) and marks the rest
 // stale, so they refetch the next time a screen mounts them — which is also

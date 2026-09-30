@@ -1,11 +1,15 @@
+import { useMemo } from "react";
+
 import { Icon } from "@/components/ui/icon";
 import { ProductThumbnail } from "@/components/ui/product-thumbnail";
 
 import {
   formatPallets,
   formatPickupTime,
+  growerCarries,
   type GrowerFamilyGroup,
   type GrowerSupply,
+  listedFamilies,
   type PickSelection,
 } from "./board-data";
 
@@ -69,12 +73,11 @@ export function GrowerSupplyColumn({
   filterVariety?: { varietyId: string; varietyName: string } | null;
   onClearFilter?: () => void;
 }) {
+  // "Carry" means have supply of it (growerCarries) — a grower whose only line
+  // for the variety is a blank 0 / 0 one did not bring it, and its card would
+  // have nothing to show for it when opened.
   const visibleGrowers = filterVariety
-    ? growers.filter((grower) =>
-        grower.families.some((family) =>
-          family.lines.some((line) => line.varietyId === filterVariety.varietyId),
-        ),
-      )
+    ? growers.filter((grower) => growerCarries(grower, filterVariety.varietyId))
     : growers;
 
   return (
@@ -160,6 +163,12 @@ function GrowerRow({
   // leftover counts as real supply the same as a fresh pick (see board-data.ts).
   const free = grower.picked + grower.leftover - grower.allocated;
   const holdsSelection = selection?.growerId === grower.growerId;
+  // Only the lines with supply are listed (see hasSupply): every in-season
+  // product has a blank line from the moment the day starts, and a card of
+  // 0 / 0 rows hides the one or two the distributor came for. Keyed on
+  // `families` rather than `grower` because selecting a product re-creates
+  // every grower object (markSelected) but leaves this array alone.
+  const listed = useMemo(() => listedFamilies(grower.families), [grower.families]);
 
   return (
     <li
@@ -187,7 +196,7 @@ function GrowerRow({
           <span className="min-w-0 flex-1">
             <span
               className={`block truncate text-sm font-semibold ${
-                // Tinted when this grower has the selected variety at all,
+                // Tinted when this grower has supply of the selected variety,
                 // and marked below when it is *this* grower's line that is
                 // actually selected.
                 grower.hasSelected ? "text-accent" : "text-ink"
@@ -271,15 +280,19 @@ function GrowerRow({
       <div className="accordion-panel" data-open={expanded}>
         <div>
           <div className="border-t border-border bg-surface-muted/50 px-4 py-3" inert={!expanded}>
-            {grower.families.map((family) => (
-              <GrowerFamilyBlock
-                key={family.familyId}
-                family={family}
-                growerId={grower.growerId}
-                selection={selection}
-                onSelect={onSelect}
-              />
-            ))}
+            {listed.length === 0 ? (
+              <p className="text-xs text-ink-muted">אין מוצרים שנקטפו או עודפים.</p>
+            ) : (
+              listed.map((family) => (
+                <GrowerFamilyBlock
+                  key={family.familyId}
+                  family={family}
+                  growerId={grower.growerId}
+                  selection={selection}
+                  onSelect={onSelect}
+                />
+              ))
+            )}
           </div>
         </div>
       </div>

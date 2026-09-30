@@ -160,7 +160,11 @@ the distributor — this exercises the actual close-out sequence.
       (correcting counts, recording what's left).
 - [ ] **Arrangement workspace** (`/backoffice/arrangement`) — pooled supply and pooled demand by
       variety are both visible and correct; a variety where demand exceeds supply is visually
-      flagged.
+      flagged. An expanded grower card lists only the products that grower has picking for
+      (pallets picked + leftover), or has pallets arranged from — not the blank 0 / 0 line every
+      in-season product starts the day with; a grower with none shows "אין מוצרים שנקטפו או
+      עודפים". The "who has this?" filter and the green highlight follow the same rule, and the
+      pencil's pick editor still lists every line.
 - [ ] **New Arrangement** (`/backoffice/new-arrangement`) — pairing a grower's pick line to a
       customer's order line succeeds within each line's own remaining ceiling, and is rejected
       (with a clear message, not a silent no-op) if it would exceed either side's ceiling.

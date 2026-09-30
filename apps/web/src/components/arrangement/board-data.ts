@@ -181,7 +181,7 @@ export interface GrowerSupply {
   leftover: number;
   allocated: number;
   families: GrowerFamilyGroup[];
-  /** True when any of this grower's lines carries the selected variety. */
+  /** True when this grower has supply of the selected variety — see growerCarries. */
   hasSelected: boolean;
 }
 
@@ -560,6 +560,61 @@ export function buildBoard({
 }
 
 /**
+ * Whether one of a grower's pick lines is worth listing on the board.
+ *
+ * Starting the day (initiate_business_day, then sync_grower_picks) gives every
+ * grower a blank line for every product in their season, so a card that listed
+ * every line was mostly rows reading 0 / 0 — what the grower COULD bring, not
+ * what they have. The distributor arranges from what they have: pallets picked
+ * plus leftover carried in — "picking", which is what the shop lists a product
+ * by and the ceiling check_arrangement_allocation arranges against.
+ *
+ * A line with something arranged against it is listed whatever its supply.
+ * That cannot happen while the day is open (a pick can't be lowered below what
+ * is arranged), but it does once the day has closed: close_out_pick_leftovers
+ * rewrites leftover to picked + carried-in - arranged, so a line served wholly
+ * from carried-in stock ends the day at 0 picked and 0 leftover with pallets
+ * arranged against it — and the sidebar's date picker can show that day. Hiding
+ * the line would hide real arrangements.
+ */
+export function hasSupply(line: GrowerPickLine): boolean {
+  return line.picked + line.leftover > 0 || line.allocated > 0;
+}
+
+/**
+ * The families an expanded grower card lists: only the lines that have supply
+ * (see hasSupply), and no family left with nothing under it. Order is kept.
+ *
+ * This filters what is SHOWN, nothing else. The grower's totals, the
+ * selection (findPickLine) and the pick editor behind the pencil all still see
+ * every line — the editor has to, or a blank line could never be given a
+ * quantity.
+ */
+export function listedFamilies(families: GrowerFamilyGroup[]): GrowerFamilyGroup[] {
+  const listed: GrowerFamilyGroup[] = [];
+  for (const family of families) {
+    const lines = family.lines.filter(hasSupply);
+    if (lines.length === 0) continue;
+    // The same object back when nothing was dropped, so an unchanged family
+    // stays an unchanged prop.
+    listed.push(lines.length === family.lines.length ? family : { ...family, lines });
+  }
+  return listed;
+}
+
+/**
+ * Whether this grower has supply of a variety. A blank line for it does not
+ * count. It is the same test the card applies to what it lists, so a grower
+ * that is highlighted, or kept in the "who has this?" list, always shows that
+ * product when opened.
+ */
+export function growerCarries(grower: GrowerSupply, varietyId: string): boolean {
+  return grower.families.some((family) =>
+    family.lines.some((line) => line.varietyId === varietyId && hasSupply(line)),
+  );
+}
+
+/**
  * Marks which grower/customer cards touch the selected variety.
  *
  * Split out of `buildBoard` on purpose: selecting a different product must
@@ -573,9 +628,7 @@ export function markSelected(board: Board, varietyId: string | null): Board {
     products: board.products,
     growers: board.growers.map((grower) => ({
       ...grower,
-      hasSelected: grower.families.some((family) =>
-        family.lines.some((line) => line.varietyId === varietyId),
-      ),
+      hasSelected: growerCarries(grower, varietyId),
     })),
     customers: board.customers.map((customer) => ({
       ...customer,

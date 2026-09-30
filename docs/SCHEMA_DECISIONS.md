@@ -5,7 +5,74 @@ A running log of non-obvious decisions made about `packages/db`'s schema — the
 
 ---
 
-## 2026-09-30 (latest) — The shop lists only products that have picking; customers and
+## 2026-09-30 (latest) — Closing the business day no longer waits for a price on every product
+
+**Context.** `close_arrangement` fills in the price of every arrangement record as part of the
+close (`populate_arrangement_prices`, migration `0022`): the record's own price if it has one,
+else its product's fixed price, else the midpoint of the product's price range. A record with no
+price whose product had neither a fixed price nor a full range made the function raise
+`INVALID_STATE` (`P0007`, "cannot close arrangement — <product> has no price or price range
+configured"), and the whole close rolled back — a deliberate rule when it was written, so an
+arrangement could never be finalised with partial pricing. In use, one unpriced product kept the
+day open: the distributor could not end the day until they had found that product and priced it.
+The rule asked for is that the day closes even if a product has no price.
+
+**What changed (`0065_close-day-without-prices.sql`).** `populate_arrangement_prices` no longer
+raises. It prices exactly the records it could price before, the same way, and skips the ones it
+could not: those close with `price` left `null`. Nothing is invented for them. Same signature and
+return value (how many records it priced), so `close_arrangement` itself is untouched — only its
+description changed.
+
+- **Still priced:** a record with no price of its own whose product has a fixed price (that
+  price) or a full range with both ends set (the midpoint). A fixed price wins over a range, and a
+  price set on the record itself is never overwritten. `price_type` is copied from the product onto
+  a record that gets priced.
+- **Left empty:** a record with no price of its own whose product has no fixed price and no full
+  range — including a range with only one end. Its `price_type` is left alone too.
+- **Downstream needs nothing:** the customers' end-of-day message already leaves the amount out
+  when a line's price is empty (`compose_order_details_text`, `0052`), as it does on every day that
+  hides prices from customers. Nothing else reads a closed record's saved price in a way that
+  needs one.
+- **The shop's "see prices" setting is not involved.** It only decides whether customers are shown
+  a price; neither the old rule nor the new one looks at it.
+
+**Accepted knowingly.** A day can now close with arrangement lines that have no price, and once
+the arrangement is closed nothing in the app can fill one in (`update_arrangement_record` refuses a
+closed arrangement; the price dialog edits the product, not past records). The alternative is
+exactly what this change removes: asking for the price before the day may end.
+
+**What this deliberately does _not_ do.** It does not record, on the `end_the_day` session or
+anywhere else, which records closed without a price (`draftPicksForceClosed` in that session's
+metadata is the precedent if that is ever wanted). It does not change how a price is set or edited
+on the arrangement board or the Products screen.
+
+**One guarantee lost its test.** `close_arrangement` is still all-or-nothing (R4) — it is one
+PL/pgSQL function, so one transaction — but the old `arrangement.test.ts` case proved that by
+forcing this very pricing failure, and no other step of the close can be made to fail with
+ordinary test data (there is no negative-stock check and no unique-session rule to trip).
+Injecting a failure needs a trigger, which is not safe against a shared project, so that test now
+asserts the new rule instead, and the rollback was re-proved once on a throwaway database (below).
+
+**How it was checked.** Databases built from every migration (PostgreSQL 17 in WASM, no contact
+with the hosted project), one at `0064` and one with `0065`. The real day flow — create
+arrangement records, close the shop, close the day, as the real roles — was run on both for the
+reported case (one unpriced product); a day where nothing was in the way (identical result, byte
+for byte, before and after); a mixed day (fixed price, price 0, full range, range with one end,
+unpriced, unpriced with a price type, a price set on the record); hidden prices; and a day with no
+records. The new result was compared with an expectation worked out separately in JS. Also
+checked: an earlier day's records are not touched; a grower, a customer and a profile-less account
+cannot call it; an early close and a second close fail as before; the message prints no amount for
+an empty price; a failure injected into the last statement of the close still undoes everything
+before it, prices included; only `populate_arrangement_prices` changed code, only two descriptions
+changed, and no table, column, policy, grant or function permission moved. Twelve deliberately
+broken versions of `0065` (old rule kept, condition dropped, one-end range accepted, record price
+overwritten, every day priced, lower end instead of midpoint, range beats price, price 0 treated as
+none, role check removed, price type not copied, wrong count, migration not applied) are each
+caught.
+
+---
+
+## 2026-09-30 — The shop lists only products that have picking; customers and
 ## distributors are shown different lists
 
 **Context.** The customer shop (`get_orderable_catalog_for_customer`) listed a variety when
@@ -457,7 +524,8 @@ double-click resends WhatsApp and creates a duplicate session.
   `0015`: `populate_arrangement_prices` (fills any un-priced arrangement record from its
   variety's fixed price or price-range midpoint; raises `INVALID_STATE`/`P0007` — aborting
   everything in the same call, including the mass pick-close and leftover computation that ran
-  earlier in the same function — if a record's variety has neither) and
+  earlier in the same function — if a record's variety has neither; reversed by `0065`, see the
+  newest entry) and
   `build_notification_outbox`. The source's seven App Settings field resets and its separate
   WhatsApp-eligibility boolean computation have no equivalent here — there is no App Settings
   singleton to reset (R2), and the outbox's payload already carries `can_see_prices` per
@@ -472,6 +540,10 @@ function body means a pricing failure prevents the close from happening at all, 
 arrangement record a genuinely unpriceable variety, calling `close_arrangement`, and confirming
 the trading day's phase, the arrangement's status, and every pick's status are still unchanged
 afterward — the whole function body rolled back, not just the one statement that raised.
+
+_Update 2026-09-30: `0065` reversed the "a pricing failure prevents the close" half of this — a
+product with no price no longer stops the close, and that test now asserts the opposite. Doing
+the pricing inside the same transaction as the close still stands. See the newest entry._
 
 ---
 

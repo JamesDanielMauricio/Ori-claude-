@@ -93,7 +93,7 @@ export const ARRANGEMENT_ERROR_CODES = {
   NOT_FOUND: "P0002",
   /** current_role() <> 'backoffice'. */
   FORBIDDEN: "42501",
-  /** create/update/delete_arrangement_record called once the arrangement is closed, or populate_arrangement_prices found a record it can't price. */
+  /** create/update/delete_arrangement_record called once the arrangement is closed. (populate_arrangement_prices used to raise this for a record it couldn't price; migration 0065 removed that — such a record now closes with no price.) */
   INVALID_STATE: "P0007",
   /** A non-positive quantity, or a pick/order line pair spanning different trading days or varieties. */
   INVALID_INPUT: "P0008",

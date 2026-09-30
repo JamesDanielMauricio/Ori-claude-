@@ -10,7 +10,6 @@ import {
   signInTestUser,
 } from "@ori/domain/auth/testing";
 import {
-  LIFECYCLE_ERROR_CODES,
   toInitiateBusinessDayRpcArgs,
   toUpdatePickProductPalletsRpcArgs,
 } from "@ori/domain/lifecycle-engine";
@@ -299,12 +298,18 @@ describe("arrangement module", () => {
     expect(recreated.error).toBeNull();
   }, 30000);
 
-  it("close_arrangement is all-or-nothing: an arrangement record whose variety has no price or price range configured rolls back the entire transaction", async () => {
-    const { day, pickProductId, orderProductId } = await setUpDayWithSupplyAndDemand(5, 5);
+  it("close_arrangement closes the day even when an arranged product has no price or price range, leaving that record's price empty", async () => {
+    const { day, customer, pickProductId, orderProductId } = await setUpDayWithSupplyAndDemand(
+      5,
+      5,
+    );
 
     // createTestGrowerWithProduct's variety has neither `price` nor a
-    // price_range_from/to pair set — a genuine, pre-existing data gap, not
-    // a contrived failure injection (see docs/SCHEMA_DECISIONS.md).
+    // price_range_from/to pair set — exactly what close_arrangement used to
+    // refuse with INVALID_STATE (P0007), keeping the day open until the
+    // product was priced. The distributor's rule is now that the day always
+    // closes (migration 0065; see docs/SCHEMA_DECISIONS.md), so this is an
+    // ordinary close.
     const created = await admin.client.rpc(
       "create_arrangement_record",
       toCreateArrangementRecordRpcArgs({
@@ -314,72 +319,92 @@ describe("arrangement module", () => {
       }),
     );
     expect(created.error).toBeNull();
+    const recordId = created.data!.id;
+
+    // The customer's order must be submitted (status <> 'open') for
+    // build_notification_outbox to include them, as in the priced test below —
+    // the outbox is written AFTER the pricing step, which is part of what
+    // this test wants to see still happen.
+    await db
+      .update(dailyOrders)
+      .set({ status: "submitted" })
+      .where(
+        and(eq(dailyOrders.tradingDayId, day.id), eq(dailyOrders.customerCompanyId, customer.id)),
+      );
 
     const closeShop = await admin.client.rpc("close_shop");
     expect(closeShop.error).toBeNull();
 
     const closeArrangement = await admin.client.rpc("close_arrangement");
-    expect(closeArrangement.error).not.toBeNull();
-    expect(closeArrangement.error?.code).toBe(LIFECYCLE_ERROR_CODES.INVALID_STATE);
+    expect(closeArrangement.error).toBeNull();
 
-    // Prove the whole function body rolled back, not just the pricing
-    // step: the day is still shop_closed (not closed), the arrangement is
-    // still open, and the picks close_arrangement mass-closes earlier in
-    // its own body are still NOT closed — every statement before the
-    // pricing failure is undone along with it.
+    // The day really closed: the trading day, its arrangement and every pick.
     const { data: dayAfter } = await admin.client
       .from("trading_days")
       .select("phase")
       .eq("id", day.id)
       .single();
-    expect(dayAfter?.phase).toBe("shop_closed");
+    expect(dayAfter?.phase).toBe("closed");
 
     const { data: arrangementAfter } = await admin.client
       .from("daily_arrangements")
       .select("status")
       .eq("trading_day_id", day.id)
       .single();
-    expect(arrangementAfter?.status).toBe("open");
+    expect(arrangementAfter?.status).toBe("closed");
 
     const { data: picksAfter } = await admin.client
       .from("daily_picks")
       .select("status")
       .eq("trading_day_id", day.id);
-    expect(picksAfter?.every((row) => row.status !== "closed")).toBe(true);
+    expect(picksAfter?.length).toBeGreaterThan(0);
+    expect(picksAfter?.every((row) => row.status === "closed")).toBe(true);
 
-    // Everything close_arrangement's body runs AFTER the pricing step —
-    // the notification_outbox writes and the lifecycle_sessions insert
-    // itself — never happened either. Unlike the source (where the
-    // Session is Action 1, created BEFORE any side effects — see
-    // reference/prd/lifecycle-invariants.md's Invariant 5 — so a
-    // partial-failure Session can legitimately exist there), this
-    // rebuild's Session insert is the function's LAST statement, so its
-    // absence here is a direct, load-bearing proof of the rollback, not
-    // just a side observation. Filtered to close_arrangement's own
-    // session_type ('end_the_day') — the earlier, successful close_shop
-    // call above legitimately left its own 'close_shop' session behind.
+    // Nothing was invented for the record that could not be priced: its price
+    // is still empty.
+    const { data: recordAfter } = await admin.client
+      .from("arrangement_records")
+      .select("price")
+      .eq("id", recordId)
+      .single();
+    expect(recordAfter?.price).toBeNull();
+
+    // Every step of close_arrangement that runs AFTER the pricing step
+    // happened too: the end_the_day session (the function's LAST statement)
+    // was logged once, and the notification_outbox rows were written. Both
+    // are filtered to close_arrangement's own session_type / template_keys —
+    // the close_shop call above and setUpDayWithSupplyAndDemand's open_shop
+    // legitimately left rows of their own behind.
     const { count: sessionCount } = await admin.client
       .from("lifecycle_sessions")
       .select("id", { count: "exact", head: true })
       .eq("trading_day_id", day.id)
       .eq("session_type", "end_the_day");
-    expect(sessionCount).toBe(0);
+    expect(sessionCount).toBe(1);
 
-    // Scoped to close_arrangement's own template_keys, not "zero rows for
-    // this day" outright — setUpDayWithSupplyAndDemand's own open_shop
-    // call already legitimately (and separately) committed a shop_open
-    // row per active customer (id 4) before this test ever calls
-    // close_arrangement; that row isn't part of what's being rolled back
-    // here, the same reasoning as session_count's session_type filter
-    // just above.
     const { data: outboxRows } = await admin.client
       .from("notification_outbox")
-      .select("template_key")
+      .select("template_key, payload")
       .eq("trading_day_id", day.id);
     const closeArrangementRows = outboxRows?.filter((row) =>
       ["close_arrangement_customer", "close_arrangement_grower"].includes(row.template_key),
     );
-    expect(closeArrangementRows).toHaveLength(0);
+    expect(closeArrangementRows?.map((row) => row.template_key).sort()).toEqual([
+      "close_arrangement_customer",
+      "close_arrangement_grower",
+    ]);
+
+    // The customer's line carries no price — the shop was opened with
+    // can_see_prices on, so a price WOULD be there if the record had one —
+    // rather than a made-up figure; compose_order_details_text then leaves
+    // the amount out of the message.
+    const customerRow = closeArrangementRows?.find(
+      (row) => row.template_key === "close_arrangement_customer",
+    );
+    const customerLines = (customerRow?.payload as { lines: Array<{ price: number | null }> })
+      .lines;
+    expect(customerLines).toHaveLength(1);
+    expect(customerLines[0]?.price).toBeNull();
   }, 30000);
 
   it("close_arrangement populates a priced arrangement record's price from the variety's fixed price, and writes a notification_outbox row for the customer", async () => {

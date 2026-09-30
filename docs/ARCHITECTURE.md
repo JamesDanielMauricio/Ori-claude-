@@ -470,17 +470,17 @@ Arrangement transaction. Three things were the explicit point of this module:
 - **`close_arrangement`** (R4) is extended, not replaced: `packages/db/migrations/0022`'s
   `create or replace function public.close_arrangement()` adds two more statements to the
   existing Phase-4 body from `0015` — `populate_arrangement_prices` (fills any un-priced
-  arrangement record from its variety's fixed price or price-range midpoint, and raises
-  `INVALID_STATE`/`P0007` if a record's variety has neither, aborting the whole call) and
+  arrangement record from its variety's fixed price or price-range midpoint; a record whose
+  variety has neither is left with its price empty and never blocks the close — `0022` raised
+  `INVALID_STATE`/`P0007` there and aborted the whole call, until `0065` reversed that) and
   `build_notification_outbox` (writes one durable `notification_outbox` row per grower/customer
   company with arranged pallets, replacing the source's synchronous WhatsApp dispatch). Because
   a `plpgsql` function called from inside another runs in the same transaction by default,
   status change, mass pick-close, leftover computation, price population, and the outbox writes
-  all land together or not at all — proven directly in
-  `packages/domain/src/arrangement/arrangement.test.ts` by forcing a real pricing failure (an
-  arrangement record whose variety has no price or price range configured) and asserting the
-  trading day's phase, the arrangement's status, and every pick's status are all still
-  unchanged afterward, not just that the RPC call itself returned an error.
+  all land together or not at all. That was once proven in
+  `packages/domain/src/arrangement/arrangement.test.ts` by forcing the pricing failure; with
+  that failure gone, the guarantee rests on the single-transaction construction and was
+  re-proved on a throwaway database (see `docs/SCHEMA_DECISIONS.md`, 2026-09-30).
 
 `notification_outbox` (R4's external-system carve-out) is a small, durable queue table — no
 outbound HTTP call happens inside `close_arrangement`'s transaction at all, so a flaky WhatsApp

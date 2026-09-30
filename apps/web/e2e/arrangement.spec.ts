@@ -85,13 +85,14 @@ test.describe("Backoffice — arrangement workspace", () => {
     cleanupFns.push(() => deleteTestUser(admin.userId));
     const adminClient = await signInTestUser(admin.email, admin.password);
 
-    // Priced, unlike every other spec's fixture: this test closes the day at
-    // the end, and close_arrangement refuses to close one holding a record it
-    // cannot price. The ✓ that pushes surplus to a non-ordering customer
-    // writes a quantity and no price, so without a catalog price to fall back
-    // on that record makes the close fail (P0007). Deliberately NOT the 12.5
-    // typed into the records table below, so the assertion that the typed
-    // price survives a quantity-only press still proves something.
+    // Priced, unlike every other spec's fixture, so the close at the end has a
+    // catalog price to fall back on: the ✓ that pushes surplus to a
+    // non-ordering customer writes a quantity and no price, and
+    // close_arrangement fills that in from the product. (A product with no
+    // price no longer stops the close — migration 0065 — it just leaves the
+    // record's price empty.) Deliberately NOT the 12.5 typed into the records
+    // table below, so the assertion that the typed price survives a
+    // quantity-only press still proves something.
     const grower = await createTestGrowerWithProduct({ price: 9.9 });
     cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
     // The board addresses growers by name — see selectGrowerProduct.

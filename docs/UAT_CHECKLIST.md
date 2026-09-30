@@ -166,7 +166,9 @@ the distributor — this exercises the actual close-out sequence.
       (with a clear message, not a silent no-op) if it would exceed either side's ceiling.
 - [ ] **Close Arrangement** — pressing it is disabled until the day has actually reached
       "shop closed"; once pressed, every grower's pick locks (no further edits possible), prices
-      populate on every arrangement record, and the day drops out of the "currently open" view.
+      populate on every arrangement record whose product has a price or a full price range, and
+      the day drops out of the "currently open" view. A product with no price does not block the
+      close: its record simply closes with no price (and no amount in the customer's message).
 - [ ] **Customer Order Status** (`/backoffice/distributor-customer`): a backoffice user can see
       every active customer's order status for the day, open a customer, edit or create their order
       on their behalf (same underlying editor as the customer's own order screen), and send a

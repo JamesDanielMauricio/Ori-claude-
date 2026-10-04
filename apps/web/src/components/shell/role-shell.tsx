@@ -97,7 +97,14 @@ export function RoleShell({ navItems, children }: RoleShellProps) {
         // themes the sidebar and the page are only one step apart in lightness
         // (white beside off-white, near-black beside charcoal), so this line
         // is what divides them.
-        className="hidden w-64 shrink-0 border-e border-border bg-surface p-5 text-ink md:sticky md:top-0 md:flex md:h-dvh md:flex-col md:gap-5"
+        //
+        // `md:overflow-y-auto md:overflow-x-hidden`: the sidebar is exactly one
+        // screen tall and nothing in it can shrink, so on a screen shorter than
+        // its content (under ~390px: some phones held sideways, which are wider
+        // than `md` and so get this sidebar, not the phone menu) the sign-out
+        // button fell off the bottom with no way to scroll to it. Now what does
+        // not fit scrolls; where it all fits, nothing changes.
+        className="hidden w-64 shrink-0 border-e border-border bg-surface p-5 text-ink md:sticky md:top-0 md:flex md:h-dvh md:flex-col md:gap-5 md:overflow-y-auto md:overflow-x-hidden"
       >
         {/* The logo alone and centred, as at the top of the backoffice
             sidebar. Wrapped rather than placed straight in this column: a

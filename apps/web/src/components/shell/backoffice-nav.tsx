@@ -242,7 +242,16 @@ function DesktopRail() {
       data-surface="rail"
       // `border-e`: a hairline on the edge that faces the content — see the
       // same note in RoleShell.
-      className="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col border-e border-border bg-surface text-ink md:flex"
+      //
+      // `overflow-y-auto overflow-x-hidden`: the rail is exactly one screen
+      // tall, and the logo, the day panel and the footer around the nav list
+      // add up to ~515px of fixed height. On a screen shorter than that (a
+      // phone held sideways is ~390px — it is wider than `md`, so it gets this
+      // rail rather than the phone menu) they could not shrink, so everything
+      // past the bottom edge — settings, sign-out — was cut off with no way to
+      // scroll to it. Now whatever does not fit scrolls. Where it all fits
+      // there is nothing to scroll and nothing changes.
+      className="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col overflow-y-auto overflow-x-hidden border-e border-border bg-surface text-ink md:flex"
     >
       <div className="px-5 pb-4 pt-5">
         {/* Centred: with no name beside it, the logo reads as the rail's
@@ -255,7 +264,16 @@ function DesktopRail() {
 
       <BusinessDayPanel />
 
-      <div className="flex-1 overflow-y-auto px-3 py-4">
+      {/* `flex-1 overflow-y-auto` is what lets the nav list take the room left
+          over and scroll inside it — right on a tall screen, where that is a
+          generous window. On a short one it is the problem: the fixed blocks
+          above and below take their room first and this list, allowed to
+          shrink to nothing, got none, so no destination was reachable at all
+          (measured: all twelve links gone below ~520px). At 600px and under
+          it keeps its natural height instead and the rail scrolls as one list;
+          one scroller, not a small one inside another. (`md:` because the rail
+          only exists from `md` up; below that this whole nav is `hidden`.) */}
+      <div className="flex-1 overflow-y-auto px-3 py-4 md:[@media(max-height:37.5rem)]:flex-none">
         <NavGroups />
       </div>
 

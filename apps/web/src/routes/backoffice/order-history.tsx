@@ -2,7 +2,6 @@ import { todayIsoDate } from "@ori/shared/dates";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
-import { inputClassName } from "@/components/reference-data/form-field";
 import { ListDetailLayout } from "@/components/reference-data/list-detail-layout";
 import { RecordList } from "@/components/reference-data/record-list";
 import { StatusPill } from "@/components/ui/card";
@@ -20,7 +19,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { createClient } from "@/lib/supabase/client";
-import { useTradingDayView } from "@/lib/trading-day-view";
+import { useSelectedTradingDay, useTradingDayView } from "@/lib/trading-day-view";
 import { formatVarietyName } from "@/lib/variety-label";
 
 interface OrderRow {
@@ -47,6 +46,10 @@ const STATUS_LABEL: Record<OrderRow["status"], string> = {
   submitted: "נשלח",
 };
 
+// The date shown in the header — the same long form the Arrangement screen
+// shows under its own title.
+const DATE_LABEL_FORMAT = new Intl.DateTimeFormat("he-IL", { dateStyle: "long" });
+
 // Arrangement and Orders History by Date (PRD:
 // backoffice/order-history-distributor-view.md — "arranged history" tab):
 // pick a date, see every customer's order for that date and, per line,
@@ -57,23 +60,28 @@ const STATUS_LABEL: Record<OrderRow["status"], string> = {
 // is what actually enforces that, not a client-side filter.
 export default function ArrangedOrderHistoryPage() {
   const supabase = createClient();
-  // Opens on the day the sidebar is on — the live day, or the one pinned in
-  // its calendar — like every other date-aware backoffice screen, until a
-  // date is picked here. It used to open on the calendar's today, which is
-  // often not a trading day at all (the live day can be dated for delivery,
-  // or be yesterday's after midnight), so the screen's first view was "no
-  // trading day on this date" with the day everyone was working on one
-  // click away in the sidebar.
+  // Shows the day the sidebar is on — the live day, or the date pinned in its
+  // calendar — like every other date-aware backoffice screen. The sidebar's
+  // calendar is the one place a date is chosen: this screen used to carry a
+  // date field of its own as well, which marked nothing (every day looked
+  // alike whether or not it had trading) and disagreed with the sidebar as
+  // soon as either was changed.
   //
-  // Today stays the fallback when the sidebar has no day to offer (nothing
-  // open, nothing pinned). `null` while the sidebar's own day is still
-  // loading, so the screen waits for it instead of flashing today's empty
-  // state first.
+  // `selectedDate` matters for a pinned date that has NO trading day: the
+  // sidebar then has no day row to offer (dayView.day is null), and this
+  // screen must answer "no trading day on this date" for that date — not
+  // quietly show today's instead. Today stays the fallback only when the
+  // sidebar has nothing at all (nothing open, nothing pinned). `null` while
+  // the sidebar's own day is still loading, so the screen waits for it
+  // instead of flashing today's empty state first.
   const dayView = useTradingDayView();
-  const [pickedDate, setPickedDate] = useState<string | null>(null);
+  const { selectedDate } = useSelectedTradingDay();
   const date =
-    pickedDate ?? dayView.day?.trade_date ?? (dayView.isLoading ? null : todayIsoDate());
-  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+    dayView.day?.trade_date ?? selectedDate ?? (dayView.isLoading ? null : todayIsoDate());
+  // The open order, remembered together with its day: when the sidebar
+  // moves to another date, the old day's order stops being selected (and
+  // stops loading its lines) without anything here having to reset it.
+  const [selection, setSelection] = useState<{ dayId: string; orderId: string } | null>(null);
 
   const dayQuery = useQuery({
     queryKey: ["order-history", "trading-day", date],
@@ -91,6 +99,7 @@ export default function ArrangedOrderHistoryPage() {
     },
   });
   const dayId = dayQuery.data?.id;
+  const selectedOrderId = selection !== null && selection.dayId === dayId ? selection.orderId : null;
 
   const ordersQuery = useQuery({
     queryKey: ["order-history", "orders", dayId],
@@ -157,21 +166,14 @@ export default function ArrangedOrderHistoryPage() {
         title="היסטוריית הזמנות"
         subtitle="מה הוזמן מול מה סודר בפועל, לכל יום מסחר — לבירור מחלוקות. קריאה בלבד."
         actions={
-          <div className="flex items-center gap-2">
-            <label htmlFor="historyDate" className="text-sm font-medium text-ink-muted">
-              תאריך
-            </label>
-            <input
-              id="historyDate"
-              type="date"
-              value={date ?? ""}
-              onChange={(event) => {
-                setPickedDate(event.target.value);
-                setSelectedOrderId(null);
-              }}
-              className={inputClassName}
-            />
-          </div>
+          // Which date this is, on the screen itself: the sidebar shows it
+          // too, but on a phone the sidebar is folded away in the menu.
+          date !== null && (
+            <span className="flex items-center gap-1.5 text-sm font-medium text-ink-muted">
+              <Icon name="calendar" className="h-4 w-4" />
+              {DATE_LABEL_FORMAT.format(new Date(date))}
+            </span>
+          )
         }
       />
 
@@ -191,7 +193,7 @@ export default function ArrangedOrderHistoryPage() {
           <EmptyState
             icon="calendar"
             title="אין יום מסחר בתאריך זה"
-            hint="בחר תאריך אחר בבורר שלמעלה כדי לראות את ההזמנות שנרשמו בו."
+            hint="בחר תאריך אחר בלוח השנה שבסרגל הצד כדי לראות את ההזמנות שנרשמו בו."
           />
         </div>
       ) : (
@@ -208,7 +210,9 @@ export default function ArrangedOrderHistoryPage() {
                 icon="briefcase"
                 items={listItems}
                 selectedId={selectedOrderId}
-                onSelect={setSelectedOrderId}
+                onSelect={(orderId) => {
+                  if (dayId) setSelection({ dayId, orderId });
+                }}
                 loading={ordersQuery.isLoading}
                 searchPlaceholder="חיפוש לקוח"
                 emptyLabel="אין הזמנות ליום זה."

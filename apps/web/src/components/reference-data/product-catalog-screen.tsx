@@ -372,14 +372,22 @@ export function ProductCatalogScreen({
       // there is one copy of each family on this screen rather than one per
       // variety — which also means a family edit doesn't leave ~600 stale
       // duplicates behind in this cache until it refetches.
-      const { data, error } = await supabase
-        .from("product_varieties")
-        .select(
-          "id, family_id, name, sizes, pack_type, price, price_range_from, price_range_to, price_type, no_overbooking, highlight_price_fluctuations, is_seasonal_available, number_of_orders_per_customer, version, created_at",
-        )
-        .order("name");
-      if (error) throw error;
-      return data as ProductVariety[];
+      //
+      // Paged (see fetchAllRows): the catalog is ~900 varieties, close to
+      // PostgREST's 1,000-row cap, which cuts a longer answer short without
+      // an error — past it, the varieties that sort last would quietly
+      // vanish from this screen. `id` breaks ties between same-named
+      // varieties so no row can land on two pages or none.
+      return fetchAllRows<ProductVariety>((from, to) =>
+        supabase
+          .from("product_varieties")
+          .select(
+            "id, family_id, name, sizes, pack_type, price, price_range_from, price_range_to, price_type, no_overbooking, highlight_price_fluctuations, is_seasonal_available, number_of_orders_per_customer, version, created_at",
+          )
+          .order("name")
+          .order("id")
+          .range(from, to),
+      );
     },
   });
 

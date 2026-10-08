@@ -195,17 +195,22 @@ export default function DistributorAsGrowerPage() {
   const catalogQuery = useQuery({
     queryKey: ["grower-oversight", "product-catalog"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("product_varieties")
-        .select("id, name, sizes, product_families(name)")
-        .order("name");
-      if (error) throw error;
-      return data as Array<{
+      // Paged for the same reason as growers-with-products below: the
+      // catalog (~900 varieties) is near PostgREST's 1,000-row cap, which
+      // truncates silently. `id` breaks ties between same-named varieties.
+      return fetchAllRows<{
         id: string;
         name: string;
         sizes: string | null;
         product_families: { name: string } | null;
-      }>;
+      }>((from, to) =>
+        supabase
+          .from("product_varieties")
+          .select("id, name, sizes, product_families(name)")
+          .order("name")
+          .order("id")
+          .range(from, to),
+      );
     },
   });
 

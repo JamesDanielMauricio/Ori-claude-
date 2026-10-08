@@ -14,9 +14,22 @@ import {
   deleteTestGrowerWithProduct,
   deleteTestTradingDay,
 } from "@ori/domain/lifecycle-engine/testing";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { chooseOption } from "./choose-option";
+
+// The customer's order history lists 60 trading days at a time, newest first
+// (routes/customer/history.tsx). On a database with more days than that, a
+// seeded day can sit behind one or more "הצג עוד" clicks — click until the
+// row shows (or the list ends, which fails the expect: the day isn't there).
+async function revealHistoryRow(page: Page, row: Locator) {
+  const showMore = page.getByRole("button", { name: "הצג עוד" });
+  await expect(row.or(showMore).first()).toBeVisible();
+  while (!(await row.isVisible())) {
+    await showMore.click();
+    await expect(row.or(showMore).first()).toBeVisible();
+  }
+}
 
 // Direct, measured verification of the source's own documented perf
 // findings (st4ck spec "Performance Issues — Identified Bugs & Fixes"),
@@ -158,8 +171,8 @@ test.describe("Performance verification — measured against the source's docume
     // Hebrew month — see history.tsx's shortDateLabel.
     const rowA = page.getByRole("button", { name: "1.7.26" });
     const rowB = page.getByRole("button", { name: "2.7.26" });
-    await expect(rowA).toBeVisible();
-    await expect(rowB).toBeVisible();
+    await revealHistoryRow(page, rowA);
+    await revealHistoryRow(page, rowB);
 
     // Clicking a row now navigates to /customer/order?orderId=... (a
     // read-only view, since both days are closed) instead of opening an

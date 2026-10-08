@@ -463,6 +463,13 @@
       "when": 1789765200000,
       "tag": "0065_close-day-without-prices",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1789851600000,
+      "tag": "0066_rls-helpers-once-per-query",
+      "breakpoints": true
     }
   ]
 }

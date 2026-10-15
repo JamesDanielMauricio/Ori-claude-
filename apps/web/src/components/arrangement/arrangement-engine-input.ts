@@ -1,7 +1,8 @@
 // What the arrangement engine reads, out of what the database returns — no
 // React, no Supabase. The queries themselves are the screen's
-// (routes/backoffice/new-arrangement.tsx); this file reshapes their rows into
-// arrangement-engine.ts's terms, so that the reshaping can be tested.
+// (routes/backoffice/new-arrangement.tsx) and arrangement-history-query.ts's;
+// this file reshapes their rows into arrangement-engine.ts's terms, and runs
+// the engine on the day on screen (proposeForDay), so that both can be tested.
 //
 // Stock is read the way the app itself counts it — and leftover_pallets means
 // two different things depending on the day (migration 0050):
@@ -16,7 +17,14 @@
 //
 // Replayed over the owner's October days, reading closed days this way gives
 // exactly the proof of concept's results, which counted picked pallets only.
-import type { CustomerFacts, DayToPropose, HistoryDay } from "./arrangement-engine";
+import {
+  learnFrom,
+  proposeArrangement,
+  type CustomerFacts,
+  type DayToPropose,
+  type HistoryDay,
+} from "./arrangement-engine";
+import type { ProposalLine } from "./arrangement-proposal";
 import { parsePallets, type BoardOrder, type BoardPick, type BoardRecord } from "./board-data";
 
 type FamilyRow = { family_id: string } | null;
@@ -220,6 +228,49 @@ export function dayToPropose({
   }
 
   return { date: tradeDate, lots, orders: ordered, arranged };
+}
+
+/**
+ * "הצע סידור" on the day on screen: the engine's proposal, worked out from the
+ * day as it stands and what the history taught (arrangement-history-query.ts).
+ *
+ * The day's own products' families are added to the history's: a product
+ * first sold today is in no past day, and without its family it would be
+ * judged with no habits at all.
+ *
+ * Every line comes back marked suggested, so that each later read of the day
+ * holds it to what the customer still has on order (see resolveProposal).
+ */
+export function proposeForDay({
+  tradeDate,
+  picks,
+  orders,
+  records,
+  learnedFrom,
+}: {
+  tradeDate: string;
+  picks: readonly BoardPick[];
+  orders: readonly BoardOrder[];
+  records: readonly BoardRecord[];
+  learnedFrom: {
+    history: readonly HistoryDay[];
+    familyOf: Readonly<Record<string, string>>;
+    customers: Readonly<Record<string, CustomerFacts>>;
+  };
+}): ProposalLine[] {
+  const familyOf: Record<string, string> = { ...learnedFrom.familyOf };
+  for (const pick of picks) {
+    for (const line of pick.daily_pick_products) {
+      if (line.product_varieties)
+        familyOf[line.product_varieties.id] = line.product_varieties.family_id;
+    }
+  }
+  return proposeArrangement({
+    day: dayToPropose({ tradeDate, picks, orders, records }),
+    learned: learnFrom(learnedFrom.history, familyOf),
+    familyOf,
+    customers: learnedFrom.customers,
+  }).map((line) => ({ ...line, origin: "suggested" as const }));
 }
 
 /**

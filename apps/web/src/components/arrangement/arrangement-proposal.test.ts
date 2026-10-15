@@ -7,6 +7,7 @@ import {
   saveRefusalMessage,
   resolveProposal,
   setProposalCell,
+  typeIntoProposal,
   type ProposalLine,
 } from "./arrangement-proposal";
 import type { BoardCompany, BoardOrder, BoardPick, BoardRecord } from "./board-data";
@@ -344,7 +345,7 @@ describe("a suggested line whose order has changed since", () => {
     quantity: number,
   ) => ({
     ...line(growerId, varietyId, customerId, quantity),
-    suggested: true,
+    origin: "suggested" as const,
   });
   const ordersWithLychee = (pallets: string | null) =>
     orders.map((order) =>
@@ -378,7 +379,7 @@ describe("a suggested line whose order has changed since", () => {
     });
 
     expect(resolved.allocations).toEqual([
-      { pickLineId: "line-a-lychee", customerId: CUSTOMER_1, quantity: 2 },
+      { pickLineId: "line-a-lychee", customerId: CUSTOMER_1, quantity: 2, forOrder: true },
     ]);
     expect(resolved.noLongerOrdered).toBe(1);
   });
@@ -388,7 +389,7 @@ describe("a suggested line whose order has changed since", () => {
     const resolved = resolve([suggested(GROWER_A, LEMON, CUSTOMER_2, 3)]);
 
     expect(resolved.allocations).toEqual([
-      { pickLineId: "line-a-lemon", customerId: CUSTOMER_2, quantity: 1 },
+      { pickLineId: "line-a-lemon", customerId: CUSTOMER_2, quantity: 1, forOrder: true },
     ]);
   });
 
@@ -396,7 +397,7 @@ describe("a suggested line whose order has changed since", () => {
     const resolved = resolve([suggested(GROWER_A, LYCHEE, CUSTOMER_1, 3)]);
 
     expect(resolved.allocations).toEqual([
-      { pickLineId: "line-a-lychee", customerId: CUSTOMER_1, quantity: 3 },
+      { pickLineId: "line-a-lychee", customerId: CUSTOMER_1, quantity: 3, forOrder: true },
     ]);
     expect(resolved.noLongerOrdered).toBe(0);
   });
@@ -410,6 +411,66 @@ describe("a suggested line whose order has changed since", () => {
 
     expect(resolve(typed).allocations).toEqual([
       { pickLineId: "line-a-lemon", customerId: CUSTOMER_3, quantity: 2 },
+    ]);
+  });
+});
+
+// A suggested cell the distributor corrects keeps what it was for: filling
+// the customer's order. The number typed stands; the order must still exist.
+describe("a corrected suggestion", () => {
+  const offered: ProposalLine[] = [
+    { ...line(GROWER_A, LYCHEE, CUSTOMER_1, 3), origin: "suggested" },
+    { ...line(GROWER_B, LEMON, CUSTOMER_2, 1), origin: "suggested" },
+  ];
+  const lychees1 = { growerId: GROWER_A, varietyId: LYCHEE, customerId: CUSTOMER_1 };
+
+  it("is marked as a correction, and a number typed into an empty cell is not", () => {
+    const corrected = setProposalCell(offered, lychees1, 7);
+    const pushed = setProposalCell(
+      offered,
+      { growerId: GROWER_A, varietyId: LEMON, customerId: CUSTOMER_3 },
+      2,
+    );
+
+    expect(corrected[0]).toEqual({ ...line(GROWER_A, LYCHEE, CUSTOMER_1, 7), origin: "corrected" });
+    expect(pushed.at(-1)).toEqual(line(GROWER_A, LEMON, CUSTOMER_3, 2));
+  });
+
+  it("keeps the number typed, above the order included", () => {
+    const corrected = setProposalCell(offered, lychees1, 7);
+
+    expect(resolve(corrected).allocations).toContainEqual({
+      pickLineId: "line-a-lychee",
+      customerId: CUSTOMER_1,
+      quantity: 7,
+      forOrder: true,
+    });
+  });
+
+  it("is dropped once the customer has withdrawn the order it was for", () => {
+    const corrected = setProposalCell(offered, lychees1, 2);
+    const withdrawn = orders.map((order) =>
+      order.id === "order-1" ? { ...order, daily_order_products: [] } : order,
+    );
+
+    const resolved = resolveProposal({ lines: corrected, picks, orders: withdrawn, records: [] });
+
+    expect(resolved.allocations.map((allocation) => allocation.customerId)).not.toContain(
+      CUSTOMER_1,
+    );
+    expect(resolved.noLongerOrdered).toBe(1);
+  });
+
+  it("marks what was suggested or corrected as for an order, and a typed push as not", () => {
+    const lines: ProposalLine[] = [
+      ...setProposalCell(offered, lychees1, 2),
+      line(GROWER_A, LEMON, CUSTOMER_3, 1),
+    ];
+
+    expect(resolveProposal({ lines, picks, orders, records: [] }).allocations).toEqual([
+      { pickLineId: "line-a-lychee", customerId: CUSTOMER_1, quantity: 2, forOrder: true },
+      { pickLineId: "line-b-lemon", customerId: CUSTOMER_2, quantity: 1, forOrder: true },
+      { pickLineId: "line-a-lemon", customerId: CUSTOMER_3, quantity: 1 },
     ]);
   });
 });
@@ -698,6 +759,77 @@ describe("a proposal while it is being corrected", () => {
   });
 });
 
+// A number typed into the grid while a proposal is open — where it goes.
+describe("typeIntoProposal", () => {
+  const typedInto = (
+    pickLineId: string,
+    customerId: string,
+    quantity: number,
+    recordId: string | null = null,
+  ) => ({ pickLineId, customerId, quantity, recordId });
+  // Suggested for customer 2 on grower B's lemons, where customer 2 already
+  // has two pallets saved: hidden behind the record, never offered.
+  const hidden: ProposalLine = { ...line(GROWER_B, LEMON, CUSTOMER_2, 1), origin: "suggested" };
+  const suggested: ProposalLine = { ...line(GROWER_A, LYCHEE, CUSTOMER_1, 3), origin: "suggested" };
+
+  it("keeps a number typed into an empty cell in the proposal, as a correction, and writes nothing", () => {
+    expect(typeIntoProposal([suggested], picks, typedInto("line-a-lychee", CUSTOMER_1, 4))).toEqual(
+      {
+        lines: [{ ...line(GROWER_A, LYCHEE, CUSTOMER_1, 4), origin: "corrected" }],
+        saveNow: false,
+      },
+    );
+  });
+
+  it("writes a cell with an allocation saved in it at once, and lets go of any suggestion behind it", () => {
+    const typed = typeIntoProposal(
+      [hidden, suggested],
+      picks,
+      typedInto("line-b-lemon", CUSTOMER_2, 3, "record-1"),
+    );
+
+    expect(typed).toEqual({ lines: [suggested], saveNow: true });
+    // Emptied afterwards, the cell stays empty: nothing comes back into it.
+    expect(resolve(typed?.lines ?? [], []).allocations).toEqual([
+      { pickLineId: "line-a-lychee", customerId: CUSTOMER_1, quantity: 3, forOrder: true },
+    ]);
+  });
+
+  it("refuses a number for a lot the proposal cannot address, with nothing saved in it", () => {
+    const orphanPicks: BoardPick[] = [
+      {
+        ...picks[0]!,
+        daily_pick_products: [
+          { ...pickLine("line-orphan", "pick-a", LEMON, "3"), product_varieties: null },
+        ],
+      },
+    ];
+
+    expect(
+      typeIntoProposal([suggested], orphanPicks, typedInto("line-orphan", CUSTOMER_1, 2)),
+    ).toBeNull();
+  });
+
+  it("still writes a saved cell on such a lot, leaving the proposal as it was", () => {
+    const orphanPicks: BoardPick[] = [
+      {
+        ...picks[0]!,
+        daily_pick_products: [
+          { ...pickLine("line-orphan", "pick-a", LEMON, "3"), product_varieties: null },
+        ],
+      },
+    ];
+
+    expect(
+      typeIntoProposal(
+        [suggested],
+        orphanPicks,
+        typedInto("line-orphan", CUSTOMER_1, 0, "record-x"),
+      ),
+    ).toEqual({ lines: [suggested], saveNow: true });
+  });
+});
+
 // What the banner says when a save is refused — the one place a refusal is
 // put into words, so the wording can be checked without a database.
 describe("saveRefusalMessage", () => {
@@ -708,7 +840,7 @@ describe("saveRefusalMessage", () => {
     customerCompanyId,
   });
 
-  it("says that cells filled meanwhile have left the proposal, names them, and that it can be saved again", () => {
+  it("says that cells changed meanwhile have left the proposal, names them, and that it can be saved again", () => {
     const message = saveRefusalMessage({
       error: {
         code: "P0006",
@@ -722,8 +854,19 @@ describe("saveRefusalMessage", () => {
     });
 
     expect(message).toBe(
-      `לא נשמר דבר: תאים אלה שובצו בינתיים, והם ירדו מההצעה — ${LEMON} (גולדי) ← בני שיווק, ${LYCHEE} (אברהמי אהוד) ← אבי הפצה. אפשר לשמור שוב.`,
+      `לא נשמר דבר: תאים אלה השתנו בינתיים — שובצו, או שההזמנה שלהם בוטלה — והם ירדו מההצעה: ${LEMON} (גולדי) ← בני שיווק, ${LYCHEE} (אברהמי אהוד) ← אבי הפצה. אפשר לשמור שוב.`,
     );
+  });
+
+  it("still says what happened when a conflict names no cell", () => {
+    expect(
+      saveRefusalMessage({
+        error: { code: "P0006" },
+        picks,
+        names,
+        reason: "ignored for a conflict",
+      }),
+    ).toBe("לא נשמר דבר: חלק מהתאים השתנו בינתיים, והם ירדו מההצעה. אפשר לשמור שוב.");
   });
 
   it("names the one cell any other refusal was about, with the reason", () => {

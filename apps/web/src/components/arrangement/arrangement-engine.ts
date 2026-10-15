@@ -144,32 +144,49 @@ export function ownerPriority(general: number, product: number): number {
 export function dealInRounds(
   supply: number,
   orders: readonly RankedOrder[],
+  /**
+   * Whether these pallets per customer can all be put on lots. By default
+   * whenever they add up to no more than the stock; proposeArrangement passes
+   * an exact check when saved cells shut some customers out of some lots.
+   */
+  canPlace: (granted: Readonly<Record<string, number>>) => boolean = (granted) =>
+    Object.values(granted).reduce((sum, pallets) => sum + pallets, 0) <= supply,
 ): Record<string, number> {
   const granted: Record<string, number> = {};
   for (const order of orders) granted[order.customerId] = 0;
 
-  if (orders.reduce((sum, order) => sum + order.quantity, 0) <= supply) {
-    for (const order of orders) granted[order.customerId] = order.quantity;
-    return granted;
-  }
+  const everything: Record<string, number> = {};
+  for (const order of orders) everything[order.customerId] = order.quantity;
+  if (canPlace(everything)) return everything;
 
   // Earliest first, then best rank first: the sort is stable, so of two equal
-  // ranks the earlier order stays ahead.
+  // ranks the earlier order stays ahead — and of two equal in both, the one
+  // with the lower id, so the outcome never rests on the order rows arrive in.
   const ranked = [...orders]
-    .sort((a, b) => compareTimes(a.orderedAt, b.orderedAt))
+    .sort(
+      (a, b) => compareTimes(a.orderedAt, b.orderedAt) || compareText(a.customerId, b.customerId),
+    )
     .sort((a, b) => compareRanks(b.rank, a.rank));
 
-  let remaining = supply;
-  while (remaining > 0) {
-    const waiting = ranked.filter((order) => (granted[order.customerId] ?? 0) < order.quantity);
-    if (waiting.length === 0) break;
-    for (const order of waiting) {
-      if (remaining <= 0) break;
-      granted[order.customerId] = (granted[order.customerId] ?? 0) + 1;
-      remaining -= 1;
+  // One pallet at a time, round after round. A customer who cannot be given
+  // one more — no lot open to them has room for it beside everyone else's —
+  // drops out of the rounds, and the pallet goes to the next in line.
+  const out = new Set<string>();
+  for (;;) {
+    let gave = false;
+    for (const order of ranked) {
+      const now = granted[order.customerId] ?? 0;
+      if (out.has(order.customerId) || now >= order.quantity) continue;
+      const next = { ...granted, [order.customerId]: now + 1 };
+      if (!canPlace(next)) {
+        out.add(order.customerId);
+        continue;
+      }
+      granted[order.customerId] = now + 1;
+      gave = true;
     }
+    if (!gave) return granted;
   }
-  return granted;
 }
 
 /**
@@ -259,7 +276,20 @@ export function assignLots(
   lots: readonly LotToFill[],
   shares: ReadonlyArray<{ customerId: string; quantity: number }>,
 ): Array<{ growerId: string; customerId: string; quantity: number }> {
-  const left = lots.map((lot) => ({ ...lot, left: Math.floor(lot.available) }));
+  const wanted = shares.reduce((sum, share) => sum + share.quantity, 0);
+  const greedy = mostStockFirst(lots, shares);
+  if (greedy.reduce((sum, cell) => sum + cell.quantity, 0) >= wanted) return greedy;
+  // The rule of thumb left pallets over although lots had room for them —
+  // a customer took the lot another could not do without. Place exactly.
+  return maximumPlacement(lots, shares).cells;
+}
+
+/** The owner's rule as it stands: see assignLots. */
+function mostStockFirst(
+  lots: readonly LotToFill[],
+  shares: ReadonlyArray<{ customerId: string; quantity: number }>,
+): Array<{ growerId: string; customerId: string; quantity: number }> {
+  const left = sortedLots(lots).map((lot) => ({ ...lot, left: Math.floor(lot.available) }));
   const cells: Array<{ growerId: string; customerId: string; quantity: number }> = [];
   const reach = (customerId: string) =>
     left
@@ -267,7 +297,12 @@ export function assignLots(
       .reduce((sum, lot) => sum + Math.max(0, lot.left), 0);
   const order = shares
     .map((share) => ({ share, reach: reach(share.customerId) }))
-    .sort((a, b) => a.reach - b.reach || b.share.quantity - a.share.quantity)
+    .sort(
+      (a, b) =>
+        a.reach - b.reach ||
+        b.share.quantity - a.share.quantity ||
+        compareText(a.share.customerId, b.share.customerId),
+    )
     .map(({ share }) => share);
 
   for (const share of order) {
@@ -276,13 +311,7 @@ export function assignLots(
       let best: (typeof left)[number] | undefined;
       for (const lot of left) {
         if (lot.left <= 0 || lot.takenBy?.has(share.customerId)) continue;
-        if (
-          !best ||
-          lot.left > best.left ||
-          (lot.left === best.left && lot.growerId > best.growerId)
-        ) {
-          best = lot;
-        }
+        if (!best || lot.left > best.left) best = lot;
       }
       if (!best) break;
       const take = Math.min(need, best.left);
@@ -292,6 +321,93 @@ export function assignLots(
     }
   }
   return cells;
+}
+
+/**
+ * As many pallets placed as the lots allow, each customer only on lots open
+ * to them: a maximum flow from customers to lots, found one pallet at a time
+ * along augmenting paths — moving an earlier pallet to another lot when that
+ * frees room for this one. A day's product has a handful of lots and a few
+ * dozen pallets, so this is instant.
+ */
+function maximumPlacement(
+  lots: readonly LotToFill[],
+  shares: ReadonlyArray<{ customerId: string; quantity: number }>,
+): { cells: Array<{ growerId: string; customerId: string; quantity: number }>; placed: number } {
+  const lotList = sortedLots(lots).map((lot) => ({ lot, room: Math.floor(lot.available) }));
+  const customers = [...shares]
+    .filter((share) => share.quantity > 0)
+    .sort((a, b) => b.quantity - a.quantity || compareText(a.customerId, b.customerId));
+  // flow[c][l] = pallets of customer c on lot l
+  const flow = customers.map(() => lotList.map(() => 0));
+  const used = lotList.map(() => 0);
+  const open = (c: number, l: number) => !lotList[l]!.lot.takenBy?.has(customers[c]!.customerId);
+
+  // One more pallet for customer `start`: search lots it may use; a full lot
+  // may still be entered if a customer already on it can move elsewhere.
+  function augment(start: number): boolean {
+    const seenLot = new Set<number>();
+    const seenCustomer = new Set<number>([start]);
+    const fromCustomerOfLot = new Map<number, number>();
+    const queue: number[] = [start];
+    const cameFromLot = new Map<number, number>();
+    while (queue.length > 0) {
+      const c = queue.shift()!;
+      for (let l = 0; l < lotList.length; l += 1) {
+        if (seenLot.has(l) || !open(c, l)) continue;
+        seenLot.add(l);
+        fromCustomerOfLot.set(l, c);
+        if (used[l]! < lotList[l]!.room) {
+          // Walk back, moving one pallet along each step.
+          let lot = l;
+          let customer = c;
+          for (;;) {
+            flow[customer]![lot]! += 1;
+            const previousLot = cameFromLot.get(customer);
+            if (previousLot === undefined) break;
+            flow[customer]![previousLot]! -= 1;
+            lot = previousLot;
+            customer = fromCustomerOfLot.get(lot)!;
+          }
+          used[l]! += 1;
+          return true;
+        }
+        for (let other = 0; other < customers.length; other += 1) {
+          if (seenCustomer.has(other) || flow[other]![l]! <= 0) continue;
+          seenCustomer.add(other);
+          cameFromLot.set(other, l);
+          queue.push(other);
+        }
+      }
+    }
+    return false;
+  }
+
+  let placed = 0;
+  customers.forEach((share, c) => {
+    for (let unit = 0; unit < share.quantity; unit += 1) {
+      if (!augment(c)) break;
+      placed += 1;
+    }
+  });
+
+  const cells: Array<{ growerId: string; customerId: string; quantity: number }> = [];
+  customers.forEach((share, c) => {
+    lotList.forEach(({ lot }, l) => {
+      const quantity = flow[c]![l]!;
+      if (quantity > 0)
+        cells.push({ growerId: lot.growerId, customerId: share.customerId, quantity });
+    });
+  });
+  return { cells, placed };
+}
+
+/** Most pallets first, then grower id — the order lots are tried in, everywhere. */
+function sortedLots(lots: readonly LotToFill[]): LotToFill[] {
+  return [...lots].sort(
+    (a, b) =>
+      Math.floor(b.available) - Math.floor(a.available) || compareText(b.growerId, a.growerId),
+  );
 }
 
 /**
@@ -376,7 +492,21 @@ export function proposeArrangement({
     }
     if (wanting.length === 0) continue;
 
-    const dealt = dealInRounds(supply, wanting);
+    // Saved cells shut some customers out of some lots: then whether a set of
+    // pallets per customer can be placed is a real question, asked exactly.
+    // Otherwise any set within the stock can be, and dealInRounds' default
+    // stands.
+    const shutOut = lots.some((lot) => wanting.some((order) => lot.takenBy.has(order.customerId)));
+    const dealt = shutOut
+      ? dealInRounds(supply, wanting, (granted) => {
+          const shares = Object.entries(granted).map(([customerId, quantity]) => ({
+            customerId,
+            quantity,
+          }));
+          const wantedNow = shares.reduce((sum, share) => sum + share.quantity, 0);
+          return maximumPlacement(lots, shares).placed >= wantedNow;
+        })
+      : dealInRounds(supply, wanting);
     const shares = wanting
       .map((order) => ({ customerId: order.customerId, quantity: dealt[order.customerId] ?? 0 }))
       .filter((share) => share.quantity > 0);
@@ -408,6 +538,11 @@ export function proposeArrangement({
 function isNewcomer(since: string | null, date: string): boolean {
   if (!since) return false;
   return (Date.parse(date) - Date.parse(since)) / DAY_MS < NEWCOMER_DAYS;
+}
+
+/** Plain code-point order, so the result is the same on every machine. */
+function compareText(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 /** Earlier first; a time that cannot be read goes after every one that can. */

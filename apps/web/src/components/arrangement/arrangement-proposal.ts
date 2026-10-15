@@ -27,14 +27,23 @@ export interface ProposalLine {
   customerId: string;
   quantity: number;
   /**
-   * Worked out by the engine against the orders as they stood, rather than
-   * typed by the distributor. A suggested line only ever fills an order, so
-   * it is held to what the customer still has on order each time the day is
-   * read again (see resolveProposal); a typed one is the distributor's own
-   * decision — a push to someone who did not order included — and is left as
-   * typed.
+   * Where the line came from, when not typed into an empty cell:
+   *
+   *   suggested  worked out by the engine against the orders as they stood.
+   *              It only ever fills an order, so each time the day is read
+   *              again it is held to what the customer still has on order
+   *              (see resolveProposal) — cut when the order was reduced,
+   *              dropped when it was withdrawn.
+   *   corrected  a suggested cell the distributor typed a number over. The
+   *              number stands as typed, but it was still meant to fill the
+   *              order, so it is dropped if the order is withdrawn.
+   *
+   * A line with neither is the distributor's own decision — a push to someone
+   * who did not order included — and is left as typed. Saving tells the
+   * database which cells were for an order (`forOrder`), so it can refuse one
+   * whose order went in the moments before the save.
    */
-  suggested?: boolean;
+  origin?: "suggested" | "corrected";
 }
 
 export interface ResolvedProposal {
@@ -49,8 +58,9 @@ export interface ResolvedProposal {
    */
   unplaceable: number;
   /**
-   * Suggested lines dropped or cut because the customer's order has since
-   * been withdrawn or reduced, or the rest of it arranged.
+   * Suggested or corrected lines dropped, or suggested lines cut, because the
+   * customer's order has since been withdrawn or reduced, or the rest of it
+   * arranged.
    */
   noLongerOrdered: number;
 }
@@ -134,6 +144,8 @@ export function resolveProposal({
       owed.set(key, (owed.get(key) ?? 0) + pallets);
     }
   }
+  // Who has an order at all for a product — what a corrected line needs.
+  const hasOrder = new Set(owed.keys());
   for (const record of records) {
     const ownerId = orderLineOwner.get(record.daily_order_product_id) ?? record.customer_company_id;
     arrangedCells.add(`${record.daily_pick_product_id}${SEP}${ownerId}`);
@@ -168,8 +180,8 @@ export function resolveProposal({
     }
 
     let quantity = line.quantity;
-    if (line.suggested) {
-      const key = `${line.customerId}${SEP}${line.varietyId}`;
+    const key = `${line.customerId}${SEP}${line.varietyId}`;
+    if (line.origin === "suggested") {
       const left = Math.max(0, Math.floor(owed.get(key) ?? 0));
       if (left < quantity) {
         noLongerOrdered += 1;
@@ -177,13 +189,18 @@ export function resolveProposal({
       }
       if (quantity <= 0) continue;
       owed.set(key, left - quantity);
+    } else if (line.origin === "corrected" && !hasOrder.has(key)) {
+      noLongerOrdered += 1;
+      continue;
     }
 
     const existing = byCell.get(cell);
+    const forOrder = line.origin !== undefined || existing?.forOrder === true;
     byCell.set(cell, {
       pickLineId,
       customerId: line.customerId,
       quantity: (existing?.quantity ?? 0) + quantity,
+      ...(forOrder ? { forOrder: true } : {}),
     });
   }
 
@@ -249,6 +266,11 @@ export function setProposalCell(
     line.growerId === cell.growerId &&
     line.varietyId === cell.varietyId &&
     line.customerId === cell.customerId;
+  // Typed over what the engine suggested (or over an earlier correction of
+  // it), the number is a correction: it stands as typed, but it is still for
+  // the customer's order. Typed into a cell with nothing suggested, it is the
+  // distributor's own.
+  const corrects = lines.some((line) => isCell(line) && line.origin !== undefined);
   const typed: ProposalLine[] =
     quantity > 0
       ? [
@@ -257,6 +279,7 @@ export function setProposalCell(
             varietyId: cell.varietyId,
             customerId: cell.customerId,
             quantity,
+            ...(corrects ? { origin: "corrected" as const } : {}),
           },
         ]
       : [];
@@ -271,10 +294,47 @@ export function setProposalCell(
 }
 
 /**
+ * A number typed into the grid while a proposal is open: the proposal's lines
+ * once it is applied, and whether it is also to be written to the database
+ * now.
+ *
+ * A cell with nothing saved in it is the proposal's. The number is a change to
+ * it — see setProposalCell — and waits for "שמור לסידור" with the rest.
+ *
+ * A cell with an allocation saved in it is never the proposal's, so the number
+ * is written at once, as it always is. The proposal lets go of the cell too: a
+ * suggestion for it sits hidden behind the record (resolveProposal lands
+ * nothing on a filled cell), and emptying the cell must leave it empty rather
+ * than bring that suggestion back.
+ *
+ * Null when the number has nowhere to go: a lot with nothing saved in it whose
+ * product did not come back, which has no row to have been typed into (see
+ * lotOfPickLine).
+ */
+export function typeIntoProposal(
+  lines: ProposalLine[],
+  picks: BoardPick[],
+  write: { pickLineId: string; customerId: string; quantity: number; recordId: string | null },
+): { lines: ProposalLine[]; saveNow: boolean } | null {
+  const lot = lotOfPickLine(picks, write.pickLineId);
+  if (write.recordId) {
+    return {
+      lines: lot ? setProposalCell(lines, { ...lot, customerId: write.customerId }, 0) : lines,
+      saveNow: true,
+    };
+  }
+  if (!lot) return null;
+  return {
+    lines: setProposalCell(lines, { ...lot, customerId: write.customerId }, write.quantity),
+    saveNow: false,
+  };
+}
+
+/**
  * The cells a refused save names. save_arrangement_proposal (migration 0068)
  * puts them in the error's DETAIL, as JSON: the one allocation that failed,
- * or — when cells were filled after the proposal was read — every one of
- * them under `cells`. Anything else names no cell.
+ * or — when cells changed after the proposal was read — every one of them
+ * under `cells`. Anything else names no cell.
  */
 export function refusedCells(
   details: string | null | undefined,
@@ -330,9 +390,11 @@ export function cellLabel(
  * naming the cells the refusal named. `reason` is the screen's own wording of
  * the error's code (new-arrangement.tsx's describeRpcError).
  *
- * A conflict (P0006) is the one refusal that mends itself: the cells somebody
- * filled meanwhile drop out of the proposal on the re-read that follows, so
- * the message says the rest can simply be saved again.
+ * A conflict (P0006) is the one refusal that mends itself. It names cells that
+ * changed after the proposal was read: somebody filled them, or the order a
+ * suggested cell was for was withdrawn. Either way they drop out of the
+ * proposal on the re-read that follows (see resolveProposal), so the message
+ * says the rest can simply be saved again.
  */
 export function saveRefusalMessage({
   error,
@@ -349,7 +411,9 @@ export function saveRefusalMessage({
     .map((cell) => cellLabel(cell, picks, names))
     .join(", ");
   if (error.code === ARRANGEMENT_ERROR_CODES.CONFLICT) {
-    return `לא נשמר דבר: תאים אלה שובצו בינתיים, והם ירדו מההצעה — ${cells}. אפשר לשמור שוב.`;
+    return cells
+      ? `לא נשמר דבר: תאים אלה השתנו בינתיים — שובצו, או שההזמנה שלהם בוטלה — והם ירדו מההצעה: ${cells}. אפשר לשמור שוב.`
+      : "לא נשמר דבר: חלק מהתאים השתנו בינתיים, והם ירדו מההצעה. אפשר לשמור שוב.";
   }
   return cells ? `לא נשמר דבר. ${cells}: ${reason}` : `לא נשמר דבר. ${reason}`;
 }

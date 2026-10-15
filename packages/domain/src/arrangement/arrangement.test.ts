@@ -1,7 +1,21 @@
 import { db } from "@ori/db";
-import { companies, dailyOrders, notificationOutbox, productVarieties } from "@ori/db/schema";
-import type { Database } from "@ori/db/supabase-types";
 import {
+  arrangementRecords,
+  companies,
+  dailyArrangements,
+  dailyOrderProducts,
+  dailyOrders,
+  dailyPickProducts,
+  dailyPicks,
+  growerProducts,
+  notificationOutbox,
+  productVarieties,
+  tradingDays,
+} from "@ori/db/schema";
+import type { Database, Json } from "@ori/db/supabase-types";
+import { createServiceRoleClient } from "@ori/domain/auth";
+import {
+  createAnonClient,
   createTestCompany,
   createTestProfile,
   deleteTestCompany,
@@ -16,10 +30,12 @@ import {
 import {
   createTestGrowerWithProduct,
   createTestOrderProductLine,
+  createTestTradingDay,
   deleteTestGrowerWithProduct,
   deleteTestTradingDay,
   getDailyPickForGrower,
   getPickProductLine,
+  type TestGrowerWithProduct,
 } from "@ori/domain/lifecycle-engine/testing";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { and, eq } from "drizzle-orm";
@@ -268,6 +284,134 @@ describe("arrangement module", () => {
     return company;
   }
 
+  // The call as a browser would send it, for input the typed helper would not
+  // let through.
+  function saveRaw(tradingDayId: string, allocations: Json) {
+    return admin.client.rpc("save_arrangement_proposal", {
+      p_trading_day_id: tradingDayId,
+      p_allocations: allocations,
+    });
+  }
+
+  // Another grower, created BEFORE the day for the same two reasons as above:
+  // initiate_business_day gives them a pick, and the day goes before they do.
+  async function anotherGrower() {
+    const grower = await createTestGrowerWithProduct();
+    cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
+    return grower;
+  }
+
+  async function pickLineOn(
+    tradingDayId: string,
+    grower: TestGrowerWithProduct,
+    productVarietyId: string,
+  ) {
+    const pick = await getDailyPickForGrower(tradingDayId, grower.companyId);
+    const line = await getPickProductLine(pick!.id, productVarietyId);
+    return line!.id;
+  }
+
+  // A second lot of a product the day already has: the grower takes the
+  // product up too, the day's picks are brought up to date, and they pick
+  // `palletsPicked` of it.
+  async function addLotOfSameProduct(
+    tradingDayId: string,
+    grower: TestGrowerWithProduct,
+    productVarietyId: string,
+    palletsPicked: number,
+  ) {
+    await db.insert(growerProducts).values({ companyId: grower.companyId, productVarietyId });
+    const synced = await admin.client.rpc("update_growers_data");
+    expect(synced.error).toBeNull();
+    const lineId = await pickLineOn(tradingDayId, grower, productVarietyId);
+    const updatePallets = await admin.client.rpc(
+      "update_pick_product_pallets",
+      toUpdatePickProductPalletsRpcArgs({ dailyPickProductId: lineId, palletsPicked }),
+    );
+    expect(updatePallets.error).toBeNull();
+    return lineId;
+  }
+
+  async function orderLinesOf(tradingDayId: string, customerCompanyId: string) {
+    return db
+      .select({
+        id: dailyOrderProducts.id,
+        productVarietyId: dailyOrderProducts.productVarietyId,
+        palletsOrdered: dailyOrderProducts.palletsOrdered,
+      })
+      .from(dailyOrderProducts)
+      .innerJoin(dailyOrders, eq(dailyOrders.id, dailyOrderProducts.dailyOrderId))
+      .where(
+        and(
+          eq(dailyOrders.tradingDayId, tradingDayId),
+          eq(dailyOrders.customerCompanyId, customerCompanyId),
+        ),
+      );
+  }
+
+  // An earlier day, over but for its arrangement, which is still open: a pick
+  // line of the grower's on it, to which the day under test must not reach.
+  async function setUpEarlierDay(growerCompanyId: string, productVarietyId: string) {
+    const day = await createTestTradingDay({
+      initiatedByUserId: admin.userId,
+      phase: "closed",
+      tradeDate: "2020-01-01",
+    });
+    cleanupFns.push(() => deleteTestTradingDay(day.id));
+    await db.insert(dailyArrangements).values({ tradingDayId: day.id });
+    const [pick] = await db
+      .insert(dailyPicks)
+      .values({ tradingDayId: day.id, growerCompanyId })
+      .returning();
+    const [line] = await db
+      .insert(dailyPickProducts)
+      .values({ dailyPickId: pick!.id, productVarietyId, palletsPicked: "5" })
+      .returning();
+    return { day, pickProductId: line!.id };
+  }
+
+  // A signed-in user the way a half-finished invitation leaves one: an Auth
+  // account with no profile, so current_role() is NULL for them.
+  async function signedInWithoutProfile() {
+    const email = `test-${crypto.randomUUID()}@example.test`;
+    const password = `Correct-Horse-${crypto.randomUUID()}`;
+    const created = await createServiceRoleClient().auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+    });
+    expect(created.error).toBeNull();
+    cleanupFns.push(() => deleteTestUser(created.data.user!.id));
+    return signInTestUser(email, password);
+  }
+
+  // What a save has to wait on: runs `hold` in a transaction of its own, starts
+  // the save while that transaction is still open, gives the save a second to
+  // run into whatever `hold` took, then runs `finish` and commits.
+  type Held = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+  async function saveWhileHeld(
+    tradingDayId: string,
+    allocations: Json,
+    hold: (tx: Held) => Promise<unknown>,
+    finish: (tx: Held) => Promise<unknown> = async () => undefined,
+  ) {
+    let returned = false;
+    let returnedWhileHeld = false;
+    let saving: Promise<Awaited<ReturnType<typeof saveRaw>>> | undefined;
+    await db.transaction(async (tx) => {
+      await hold(tx);
+      saving = Promise.resolve(saveRaw(tradingDayId, allocations)).then((result) => {
+        returned = true;
+        return result;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      returnedWhileHeld = returned;
+      await finish(tx);
+    });
+    return { saved: await saving!, returnedWhileHeld };
+  }
+
   it("save_arrangement_proposal saves every cell, a push included, and says how many", async () => {
     const pushedTo = await customerWhoOrdersNothing();
     const { day, pickProductId, customer } = await setUpDayWithSupplyAndDemand(5, 3);
@@ -371,6 +515,625 @@ describe("arrangement module", () => {
       cells: [{ index: 1, dailyPickProductId: pickProductId, customerCompanyId: withdrawn.id }],
     });
     expect(await recordsOn(pickProductId)).toEqual([]);
+  }, 30000);
+
+  it("save_arrangement_proposal holds one customer to their order across two lots of the same product, saves nothing, and names the second cell", async () => {
+    const secondGrower = await anotherGrower();
+    const {
+      day,
+      grower,
+      pickProductId: firstLot,
+      customer,
+    } = await setUpDayWithSupplyAndDemand(5, 6);
+    const secondLot = await addLotOfSameProduct(day.id, secondGrower, grower.varietyId, 5);
+
+    // 4 + 4 against an order of 6: each cell fits its lot and the order on its
+    // own, the two together do not.
+    const saved = await admin.client.rpc(
+      "save_arrangement_proposal",
+      toSaveArrangementProposalRpcArgs({
+        tradingDayId: day.id,
+        allocations: [
+          { dailyPickProductId: firstLot, customerCompanyId: customer.id, quantityPallets: 4 },
+          { dailyPickProductId: secondLot, customerCompanyId: customer.id, quantityPallets: 4 },
+        ],
+      }),
+    );
+
+    expect(saved.error?.code).toBe(ARRANGEMENT_ERROR_CODES.OVER_ALLOCATION);
+    expect(saved.error?.message).toContain("pallets ordered");
+    expect(JSON.parse(saved.error?.details ?? "{}")).toEqual({
+      index: 1,
+      dailyPickProductId: secondLot,
+      customerCompanyId: customer.id,
+      quantityPallets: 4,
+    });
+    expect(await recordsOn(firstLot)).toEqual([]);
+    expect(await recordsOn(secondLot)).toEqual([]);
+  }, 30000);
+
+  it("save_arrangement_proposal refuses a push to a customer with no order for the day, saves nothing, and names that cell", async () => {
+    const { day, pickProductId, customer } = await setUpDayWithSupplyAndDemand(5, 3);
+    // Joined after the shop opened, so open_shop gave them no order header.
+    const latecomer = await createTestCompany(`לקוח בדיקה ${crypto.randomUUID()}`, "customer");
+    cleanupFns.push(() => deleteTestCompany(latecomer.id));
+
+    const saved = await admin.client.rpc(
+      "save_arrangement_proposal",
+      toSaveArrangementProposalRpcArgs({
+        tradingDayId: day.id,
+        allocations: [
+          { dailyPickProductId: pickProductId, customerCompanyId: customer.id, quantityPallets: 3 },
+          {
+            dailyPickProductId: pickProductId,
+            customerCompanyId: latecomer.id,
+            quantityPallets: 1,
+          },
+        ],
+      }),
+    );
+
+    expect(saved.error?.code).toBe(ARRANGEMENT_ERROR_CODES.NOT_FOUND);
+    expect(JSON.parse(saved.error?.details ?? "{}")).toMatchObject({
+      index: 1,
+      dailyPickProductId: pickProductId,
+      customerCompanyId: latecomer.id,
+    });
+    expect(await recordsOn(pickProductId)).toEqual([]);
+  }, 30000);
+
+  it("save_arrangement_proposal refuses anyone but backoffice, and saves nothing", async () => {
+    const { day, pickProductId, customer } = await setUpDayWithSupplyAndDemand(5, 3);
+    const customerProfile = await createTestProfile({ companyId: customer.id, role: "customer" });
+    cleanupFns.push(() => deleteTestUser(customerProfile.userId));
+
+    const outsiders = [
+      [
+        "a customer",
+        await signInTestUser(customerProfile.email, customerProfile.password),
+        /FORBIDDEN/,
+      ],
+      ["a user with no profile", await signedInWithoutProfile(), /FORBIDDEN/],
+      // Turned away before the function runs at all.
+      ["a visitor who is not signed in", createAnonClient(), /permission denied/],
+    ] as const;
+
+    for (const [who, client, refusal] of outsiders) {
+      const saved = await client.rpc(
+        "save_arrangement_proposal",
+        toSaveArrangementProposalRpcArgs({
+          tradingDayId: day.id,
+          allocations: [
+            {
+              dailyPickProductId: pickProductId,
+              customerCompanyId: customer.id,
+              quantityPallets: 3,
+            },
+          ],
+        }),
+      );
+      expect(saved.error?.code, who).toBe(ARRANGEMENT_ERROR_CODES.FORBIDDEN);
+      expect(saved.error?.message, who).toMatch(refusal);
+    }
+    expect(await recordsOn(pickProductId)).toEqual([]);
+  }, 30000);
+
+  it("save_arrangement_proposal refuses an arrangement that closed since the proposal was read, and saves nothing", async () => {
+    const { day, pickProductId, customer } = await setUpDayWithSupplyAndDemand(5, 3);
+    const closeShop = await admin.client.rpc("close_shop");
+    expect(closeShop.error).toBeNull();
+    const closeArrangement = await admin.client.rpc("close_arrangement");
+    expect(closeArrangement.error).toBeNull();
+
+    const saved = await admin.client.rpc(
+      "save_arrangement_proposal",
+      toSaveArrangementProposalRpcArgs({
+        tradingDayId: day.id,
+        allocations: [
+          { dailyPickProductId: pickProductId, customerCompanyId: customer.id, quantityPallets: 3 },
+        ],
+      }),
+    );
+
+    expect(saved.error?.code).toBe(ARRANGEMENT_ERROR_CODES.INVALID_STATE);
+    expect(await recordsOn(pickProductId)).toEqual([]);
+  }, 30000);
+
+  it("save_arrangement_proposal refuses a trading day that does not exist", async () => {
+    const saved = await saveRaw(crypto.randomUUID(), [
+      {
+        dailyPickProductId: crypto.randomUUID(),
+        customerCompanyId: crypto.randomUUID(),
+        quantityPallets: 1,
+      },
+    ]);
+
+    expect(saved.error?.code).toBe(ARRANGEMENT_ERROR_CODES.NOT_FOUND);
+  }, 30000);
+
+  it("save_arrangement_proposal refuses a pick line that is on another day, names it, and saves nothing on either day", async () => {
+    const { day, grower, customer, pickProductId } = await setUpDayWithSupplyAndDemand(5, 3);
+    // The customer has an order and an open arrangement waits on the earlier
+    // day, so nothing but the day check stands between this cell and a save.
+    const earlier = await setUpEarlierDay(grower.companyId, grower.varietyId);
+    await createTestOrderProductLine(earlier.day.id, customer.id, grower.varietyId, 3);
+
+    const saved = await saveRaw(day.id, [
+      { dailyPickProductId: pickProductId, customerCompanyId: customer.id, quantityPallets: 1 },
+      {
+        dailyPickProductId: earlier.pickProductId,
+        customerCompanyId: customer.id,
+        quantityPallets: 1,
+      },
+    ]);
+
+    expect(saved.error?.code).toBe(ARRANGEMENT_ERROR_CODES.NOT_FOUND);
+    expect(JSON.parse(saved.error?.details ?? "{}")).toEqual({
+      pickLineIds: [earlier.pickProductId],
+    });
+    expect(await recordsOn(pickProductId)).toEqual([]);
+    expect(await recordsOn(earlier.pickProductId)).toEqual([]);
+  }, 30000);
+
+  it("save_arrangement_proposal refuses a forOrder that is not true or false, naming every such allocation by position, and saves nothing", async () => {
+    const { day, pickProductId, customer } = await setUpDayWithSupplyAndDemand(5, 3);
+    const cell = {
+      dailyPickProductId: pickProductId,
+      customerCompanyId: customer.id,
+      quantityPallets: 1,
+    };
+
+    const saved = await saveRaw(day.id, [
+      cell,
+      { ...cell, forOrder: "true" },
+      { ...cell, forOrder: 1 },
+      { ...cell, forOrder: null },
+      { ...cell, forOrder: true },
+      { ...cell, forOrder: false },
+    ]);
+
+    expect(saved.error?.code).toBe(ARRANGEMENT_ERROR_CODES.INVALID_INPUT);
+    expect(JSON.parse(saved.error?.details ?? "{}")).toEqual({ indexes: [1, 2, 3] });
+    expect(await recordsOn(pickProductId)).toEqual([]);
+  }, 30000);
+
+  it("save_arrangement_proposal refuses an allocation that is not a pick line, a customer and a whole number of pallets above zero, naming every one by position, and saves nothing", async () => {
+    const { day, pickProductId, customer } = await setUpDayWithSupplyAndDemand(5, 3);
+    const cell = {
+      dailyPickProductId: pickProductId,
+      customerCompanyId: customer.id,
+      quantityPallets: 1,
+    };
+
+    const saved = await saveRaw(day.id, [
+      cell,
+      { ...cell, quantityPallets: 0 },
+      { ...cell, quantityPallets: -2 },
+      { ...cell, quantityPallets: 1.5 },
+      { ...cell, quantityPallets: "2" },
+      { dailyPickProductId: pickProductId, customerCompanyId: customer.id },
+      { ...cell, dailyPickProductId: "not-a-uuid" },
+      { ...cell, dailyPickProductId: `${pickProductId}0` },
+      { ...cell, dailyPickProductId: `0${pickProductId}` },
+      { ...cell, customerCompanyId: `${customer.id}0` },
+      { ...cell, customerCompanyId: `0${customer.id}` },
+      { ...cell, dailyPickProductId: null },
+      { ...cell, customerCompanyId: null },
+      { quantityPallets: 1, customerCompanyId: customer.id },
+      { quantityPallets: 1, dailyPickProductId: pickProductId },
+      7,
+    ]);
+
+    expect(saved.error?.code).toBe(ARRANGEMENT_ERROR_CODES.INVALID_INPUT);
+    expect(JSON.parse(saved.error?.details ?? "{}")).toEqual({
+      indexes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+    });
+    expect(await recordsOn(pickProductId)).toEqual([]);
+  }, 30000);
+
+  it("save_arrangement_proposal refuses allocations that are not a list, and saves nothing", async () => {
+    const { day, pickProductId, customer } = await setUpDayWithSupplyAndDemand(5, 3);
+    const cell = {
+      dailyPickProductId: pickProductId,
+      customerCompanyId: customer.id,
+      quantityPallets: 1,
+    };
+
+    // The last is a single allocation, sent without the list round it.
+    for (const [what, notAList] of [
+      ["an empty object", {}],
+      ["text", "text"],
+      ["a number", 7],
+      ["nothing", null],
+      ["one allocation", cell],
+    ] as const) {
+      const saved = await saveRaw(day.id, notAList);
+      expect(saved.error?.code, what).toBe(ARRANGEMENT_ERROR_CODES.INVALID_INPUT);
+    }
+    expect(await recordsOn(pickProductId)).toEqual([]);
+  }, 30000);
+
+  it("save_arrangement_proposal refuses a cell that appears twice, naming it, and saves nothing", async () => {
+    const pushedTo = await customerWhoOrdersNothing();
+    const { day, pickProductId, customer } = await setUpDayWithSupplyAndDemand(5, 3);
+
+    // The first and the third are the same cell; the second is another
+    // customer on the same pick line, which is not a repeat.
+    const saved = await saveRaw(day.id, [
+      { dailyPickProductId: pickProductId, customerCompanyId: customer.id, quantityPallets: 1 },
+      { dailyPickProductId: pickProductId, customerCompanyId: pushedTo.id, quantityPallets: 1 },
+      { dailyPickProductId: pickProductId, customerCompanyId: customer.id, quantityPallets: 2 },
+    ]);
+
+    expect(saved.error?.code).toBe(ARRANGEMENT_ERROR_CODES.INVALID_INPUT);
+    expect(JSON.parse(saved.error?.details ?? "{}")).toEqual({
+      cells: [{ dailyPickProductId: pickProductId, customerCompanyId: customer.id }],
+    });
+    expect(await recordsOn(pickProductId)).toEqual([]);
+  }, 30000);
+
+  it("save_arrangement_proposal reads ids in capitals as the same ids, saving the cell and counting a repeat", async () => {
+    const { day, pickProductId, customer } = await setUpDayWithSupplyAndDemand(5, 3);
+    const inCapitals = {
+      dailyPickProductId: pickProductId.toUpperCase(),
+      customerCompanyId: customer.id.toUpperCase(),
+      quantityPallets: 2,
+    };
+
+    // The same cell written both ways is a repeat, and nothing is saved.
+    const repeated = await saveRaw(day.id, [
+      { dailyPickProductId: pickProductId, customerCompanyId: customer.id, quantityPallets: 1 },
+      inCapitals,
+    ]);
+    expect(repeated.error?.code).toBe(ARRANGEMENT_ERROR_CODES.INVALID_INPUT);
+    expect(await recordsOn(pickProductId)).toEqual([]);
+
+    const saved = await saveRaw(day.id, [inCapitals]);
+    expect(saved.error).toBeNull();
+    expect(saved.data).toBe(1);
+    const records = await recordsOn(pickProductId);
+    expect(records.map((record) => record.customer_company_id)).toEqual([customer.id]);
+  }, 30000);
+
+  it("save_arrangement_proposal refuses every cell already filled, whether the record's order line or the record's own customer says so, and saves nothing", async () => {
+    const copiedTo = await customerWhoOrdersNothing();
+    const empty = await customerWhoOrdersNothing();
+    const { day, pickProductId, customer } = await setUpDayWithSupplyAndDemand(5, 3);
+    const typed = await admin.client.rpc("arrange_to_customer", {
+      p_daily_pick_product_id: pickProductId,
+      p_customer_company_id: customer.id,
+      p_quantity_pallets: 1,
+    });
+    expect(typed.error).toBeNull();
+    // The record hangs off the customer's order line but names another
+    // customer as its own, as the grid also reads it.
+    const copied = await admin.client
+      .from("arrangement_records")
+      .update({ customer_company_id: copiedTo.id })
+      .eq("id", typed.data!.id);
+    expect(copied.error).toBeNull();
+
+    const saved = await admin.client.rpc(
+      "save_arrangement_proposal",
+      toSaveArrangementProposalRpcArgs({
+        tradingDayId: day.id,
+        allocations: [
+          { dailyPickProductId: pickProductId, customerCompanyId: empty.id, quantityPallets: 1 },
+          { dailyPickProductId: pickProductId, customerCompanyId: copiedTo.id, quantityPallets: 1 },
+          { dailyPickProductId: pickProductId, customerCompanyId: customer.id, quantityPallets: 1 },
+        ],
+      }),
+    );
+
+    expect(saved.error?.code).toBe(ARRANGEMENT_ERROR_CODES.CONFLICT);
+    expect(JSON.parse(saved.error?.details ?? "{}")).toEqual({
+      cells: [
+        { index: 1, dailyPickProductId: pickProductId, customerCompanyId: copiedTo.id },
+        { index: 2, dailyPickProductId: pickProductId, customerCompanyId: customer.id },
+      ],
+    });
+    const records = await recordsOn(pickProductId);
+    expect(records.map((record) => record.id)).toEqual([typed.data!.id]);
+    expect(records.map((record) => Number(record.quantity_pallets))).toEqual([1]);
+  }, 30000);
+
+  it("save_arrangement_proposal saves a cell marked for an order the customer still has, and leaves the order as it was", async () => {
+    const { day, pickProductId, customer, orderProductId } = await setUpDayWithSupplyAndDemand(
+      5,
+      3,
+    );
+
+    const saved = await admin.client.rpc(
+      "save_arrangement_proposal",
+      toSaveArrangementProposalRpcArgs({
+        tradingDayId: day.id,
+        allocations: [
+          {
+            dailyPickProductId: pickProductId,
+            customerCompanyId: customer.id,
+            quantityPallets: 3,
+            forOrder: true,
+          },
+        ],
+      }),
+    );
+
+    expect(saved.error).toBeNull();
+    expect(saved.data).toBe(1);
+    const records = await recordsOn(pickProductId);
+    expect(records.map((record) => Number(record.quantity_pallets))).toEqual([3]);
+    const lines = await orderLinesOf(day.id, customer.id);
+    expect(lines.map((line) => [line.id, Number(line.palletsOrdered)])).toEqual([
+      [orderProductId, 3],
+    ]);
+  }, 30000);
+
+  it("save_arrangement_proposal saves a cell with no mark, or marked false, as a push to a customer who ordered nothing, giving them a zero-pallet order line", async () => {
+    const unmarked = await customerWhoOrdersNothing();
+    const markedFalse = await customerWhoOrdersNothing();
+    const { day, grower, pickProductId } = await setUpDayWithSupplyAndDemand(5, 3);
+    expect(await orderLinesOf(day.id, unmarked.id)).toEqual([]);
+    expect(await orderLinesOf(day.id, markedFalse.id)).toEqual([]);
+
+    const saved = await saveRaw(day.id, [
+      { dailyPickProductId: pickProductId, customerCompanyId: unmarked.id, quantityPallets: 2 },
+      {
+        dailyPickProductId: pickProductId,
+        customerCompanyId: markedFalse.id,
+        quantityPallets: 1,
+        forOrder: false,
+      },
+    ]);
+
+    expect(saved.error).toBeNull();
+    expect(saved.data).toBe(2);
+    const records = await recordsOn(pickProductId);
+    for (const [pushedTo, pallets] of [
+      [unmarked, 2],
+      [markedFalse, 1],
+    ] as const) {
+      const lines = await orderLinesOf(day.id, pushedTo.id);
+      expect(lines.map((line) => [line.productVarietyId, Number(line.palletsOrdered)])).toEqual([
+        [grower.varietyId, 0],
+      ]);
+      const theirs = records.filter((record) => record.customer_company_id === pushedTo.id);
+      expect(theirs.map((record) => Number(record.quantity_pallets))).toEqual([pallets]);
+    }
+  }, 30000);
+
+  it("save_arrangement_proposal refuses a cell marked for an order whose line was left at zero, and saves nothing", async () => {
+    // What a withdrawn order leaves behind when something was arranged against it.
+    const withdrawn = await customerWhoOrdersNothing();
+    const { day, grower, pickProductId, customer } = await setUpDayWithSupplyAndDemand(5, 3);
+    await createTestOrderProductLine(day.id, withdrawn.id, grower.varietyId, 0);
+
+    const saved = await saveRaw(day.id, [
+      {
+        dailyPickProductId: pickProductId,
+        customerCompanyId: customer.id,
+        quantityPallets: 2,
+        forOrder: true,
+      },
+      {
+        dailyPickProductId: pickProductId,
+        customerCompanyId: withdrawn.id,
+        quantityPallets: 1,
+        forOrder: true,
+      },
+    ]);
+
+    expect(saved.error?.code).toBe(ARRANGEMENT_ERROR_CODES.CONFLICT);
+    expect(JSON.parse(saved.error?.details ?? "{}")).toEqual({
+      cells: [{ index: 1, dailyPickProductId: pickProductId, customerCompanyId: withdrawn.id }],
+    });
+    expect(await recordsOn(pickProductId)).toEqual([]);
+  }, 30000);
+
+  it("save_arrangement_proposal refuses a cell marked for an order when the customer's order is for another product, and saves nothing", async () => {
+    const otherGrower = await anotherGrower();
+    const { day, grower, customer } = await setUpDayWithSupplyAndDemand(5, 3);
+    // The customer ordered the first grower's product, not this one.
+    const otherLine = await pickLineOn(day.id, otherGrower, otherGrower.varietyId);
+    const updatePallets = await admin.client.rpc(
+      "update_pick_product_pallets",
+      toUpdatePickProductPalletsRpcArgs({ dailyPickProductId: otherLine, palletsPicked: 5 }),
+    );
+    expect(updatePallets.error).toBeNull();
+    expect((await orderLinesOf(day.id, customer.id)).map((line) => line.productVarietyId)).toEqual([
+      grower.varietyId,
+    ]);
+
+    const saved = await saveRaw(day.id, [
+      {
+        dailyPickProductId: otherLine,
+        customerCompanyId: customer.id,
+        quantityPallets: 1,
+        forOrder: true,
+      },
+    ]);
+
+    expect(saved.error?.code).toBe(ARRANGEMENT_ERROR_CODES.CONFLICT);
+    expect(JSON.parse(saved.error?.details ?? "{}")).toEqual({
+      cells: [{ index: 0, dailyPickProductId: otherLine, customerCompanyId: customer.id }],
+    });
+    expect(await recordsOn(otherLine)).toEqual([]);
+  }, 30000);
+
+  it("save_arrangement_proposal refuses a cell marked for an order the customer had only on an earlier day, and saves nothing", async () => {
+    const withdrawn = await customerWhoOrdersNothing();
+    const { day, grower, pickProductId } = await setUpDayWithSupplyAndDemand(5, 3);
+    const earlier = await setUpEarlierDay(grower.companyId, grower.varietyId);
+    await createTestOrderProductLine(earlier.day.id, withdrawn.id, grower.varietyId, 4);
+
+    const saved = await saveRaw(day.id, [
+      {
+        dailyPickProductId: pickProductId,
+        customerCompanyId: withdrawn.id,
+        quantityPallets: 1,
+        forOrder: true,
+      },
+    ]);
+
+    expect(saved.error?.code).toBe(ARRANGEMENT_ERROR_CODES.CONFLICT);
+    expect(await recordsOn(pickProductId)).toEqual([]);
+    expect(await orderLinesOf(day.id, withdrawn.id)).toEqual([]);
+  }, 30000);
+
+  it("save_arrangement_proposal saves a customer's cell on one lot though they already hold a cell on another lot of the same product", async () => {
+    const secondGrower = await anotherGrower();
+    const {
+      day,
+      grower,
+      pickProductId: firstLot,
+      customer,
+    } = await setUpDayWithSupplyAndDemand(5, 6);
+    const secondLot = await addLotOfSameProduct(day.id, secondGrower, grower.varietyId, 5);
+    const typed = await admin.client.rpc("arrange_to_customer", {
+      p_daily_pick_product_id: firstLot,
+      p_customer_company_id: customer.id,
+      p_quantity_pallets: 2,
+    });
+    expect(typed.error).toBeNull();
+
+    const saved = await admin.client.rpc(
+      "save_arrangement_proposal",
+      toSaveArrangementProposalRpcArgs({
+        tradingDayId: day.id,
+        allocations: [
+          { dailyPickProductId: secondLot, customerCompanyId: customer.id, quantityPallets: 3 },
+        ],
+      }),
+    );
+
+    expect(saved.error).toBeNull();
+    expect(saved.data).toBe(1);
+    expect((await recordsOn(firstLot)).map((record) => Number(record.quantity_pallets))).toEqual([
+      2,
+    ]);
+    expect((await recordsOn(secondLot)).map((record) => Number(record.quantity_pallets))).toEqual([
+      3,
+    ]);
+  }, 30000);
+
+  it("save_arrangement_proposal waits for a close that is under way, and is refused once the arrangement has closed", async () => {
+    const { day, pickProductId, customer } = await setUpDayWithSupplyAndDemand(5, 3);
+
+    // As close_arrangement does: the trading day locked first, the
+    // arrangement closed last.
+    const { saved, returnedWhileHeld } = await saveWhileHeld(
+      day.id,
+      [{ dailyPickProductId: pickProductId, customerCompanyId: customer.id, quantityPallets: 3 }],
+      (tx) => tx.select().from(tradingDays).where(eq(tradingDays.id, day.id)).for("update"),
+      (tx) =>
+        tx
+          .update(dailyArrangements)
+          .set({ status: "closed", closedAt: new Date() })
+          .where(eq(dailyArrangements.tradingDayId, day.id)),
+    );
+
+    expect(returnedWhileHeld).toBe(false);
+    expect(saved.error?.code).toBe(ARRANGEMENT_ERROR_CODES.INVALID_STATE);
+    expect(await recordsOn(pickProductId)).toEqual([]);
+  }, 30000);
+
+  it("save_arrangement_proposal waits while a pick line is being lowered, and is held to the lowered figure", async () => {
+    const { day, pickProductId, customer } = await setUpDayWithSupplyAndDemand(5, 3);
+
+    // 3 pallets fit the 5 picked; they do not fit the 1 the grower lowers it to.
+    const { saved, returnedWhileHeld } = await saveWhileHeld(
+      day.id,
+      [{ dailyPickProductId: pickProductId, customerCompanyId: customer.id, quantityPallets: 3 }],
+      (tx) =>
+        tx
+          .update(dailyPickProducts)
+          .set({ palletsPicked: "1" })
+          .where(eq(dailyPickProducts.id, pickProductId)),
+    );
+
+    expect(returnedWhileHeld).toBe(false);
+    expect(saved.error?.code).toBe(ARRANGEMENT_ERROR_CODES.OVER_ALLOCATION);
+    expect(await recordsOn(pickProductId)).toEqual([]);
+  }, 30000);
+
+  it("save_arrangement_proposal waits while a customer's order is being changed, and refuses a cell marked for the order that went", async () => {
+    const { day, pickProductId, customer, orderProductId } = await setUpDayWithSupplyAndDemand(
+      5,
+      3,
+    );
+
+    // As submit_order does: the customer's order header locked, then its lines
+    // changed — here the customer withdraws the line.
+    const { saved, returnedWhileHeld } = await saveWhileHeld(
+      day.id,
+      [
+        {
+          dailyPickProductId: pickProductId,
+          customerCompanyId: customer.id,
+          quantityPallets: 3,
+          forOrder: true,
+        },
+      ],
+      (tx) =>
+        tx
+          .select()
+          .from(dailyOrders)
+          .where(
+            and(
+              eq(dailyOrders.tradingDayId, day.id),
+              eq(dailyOrders.customerCompanyId, customer.id),
+            ),
+          )
+          .for("update"),
+      (tx) =>
+        tx
+          .update(dailyOrderProducts)
+          .set({ palletsOrdered: "0" })
+          .where(eq(dailyOrderProducts.id, orderProductId)),
+    );
+
+    expect(returnedWhileHeld).toBe(false);
+    expect(saved.error?.code).toBe(ARRANGEMENT_ERROR_CODES.CONFLICT);
+    expect(JSON.parse(saved.error?.details ?? "{}")).toEqual({
+      cells: [{ index: 0, dailyPickProductId: pickProductId, customerCompanyId: customer.id }],
+    });
+    expect(await recordsOn(pickProductId)).toEqual([]);
+  }, 30000);
+
+  it("save_arrangement_proposal refuses a cell another writer filled while it waited for the arrangement, and leaves their record as it was", async () => {
+    const { day, pickProductId, customer, orderProductId } = await setUpDayWithSupplyAndDemand(
+      5,
+      3,
+    );
+    const [arrangement] = await db
+      .select()
+      .from(dailyArrangements)
+      .where(eq(dailyArrangements.tradingDayId, day.id));
+
+    // Another writer holds the arrangement (as every arrangement-record writer
+    // does), and fills the cell before letting go.
+    const { saved, returnedWhileHeld } = await saveWhileHeld(
+      day.id,
+      [{ dailyPickProductId: pickProductId, customerCompanyId: customer.id, quantityPallets: 3 }],
+      (tx) =>
+        tx
+          .select()
+          .from(dailyArrangements)
+          .where(eq(dailyArrangements.id, arrangement!.id))
+          .for("update"),
+      (tx) =>
+        tx.insert(arrangementRecords).values({
+          dailyArrangementId: arrangement!.id,
+          dailyPickProductId: pickProductId,
+          dailyOrderProductId: orderProductId,
+          customerCompanyId: customer.id,
+          quantityPallets: "1",
+        }),
+    );
+
+    expect(returnedWhileHeld).toBe(false);
+    expect(saved.error?.code).toBe(ARRANGEMENT_ERROR_CODES.CONFLICT);
+    const records = await recordsOn(pickProductId);
+    expect(records.map((record) => Number(record.quantity_pallets))).toEqual([1]);
   }, 30000);
 
   it("update_arrangement_record excludes its own prior quantity from the ceiling; delete_arrangement_record frees it back up", async () => {

@@ -133,7 +133,7 @@ describe("resolveProposal", () => {
       allocations: [{ pickLineId: "line-a-lychee", customerId: CUSTOMER_1, quantity: 3 }],
       alreadyArranged: 0,
       unplaceable: 0,
-      noLongerOrdered: 0,
+      heldToOrder: 0,
     });
   });
 
@@ -167,7 +167,7 @@ describe("resolveProposal", () => {
       allocations: [],
       alreadyArranged: 1,
       unplaceable: 0,
-      noLongerOrdered: 0,
+      heldToOrder: 0,
     });
   });
 
@@ -177,7 +177,7 @@ describe("resolveProposal", () => {
       allocations: [],
       alreadyArranged: 0,
       unplaceable: 1,
-      noLongerOrdered: 0,
+      heldToOrder: 0,
     });
   });
 
@@ -198,7 +198,7 @@ describe("resolveProposal", () => {
         orders,
         records: [],
       }),
-    ).toEqual({ allocations: [], alreadyArranged: 0, unplaceable: 1, noLongerOrdered: 0 });
+    ).toEqual({ allocations: [], alreadyArranged: 0, unplaceable: 1, heldToOrder: 0 });
   });
 
   it("cannot place a line for a customer who is not trading on the day", () => {
@@ -206,7 +206,7 @@ describe("resolveProposal", () => {
       allocations: [],
       alreadyArranged: 0,
       unplaceable: 1,
-      noLongerOrdered: 0,
+      heldToOrder: 0,
     });
   });
 
@@ -221,7 +221,7 @@ describe("resolveProposal", () => {
       allocations: [],
       alreadyArranged: 0,
       unplaceable: 3,
-      noLongerOrdered: 0,
+      heldToOrder: 0,
     });
   });
 
@@ -258,7 +258,7 @@ describe("resolveProposal", () => {
       allocations: [],
       alreadyArranged: 2,
       unplaceable: 0,
-      noLongerOrdered: 0,
+      heldToOrder: 0,
     });
   });
 });
@@ -300,7 +300,7 @@ describe("a proposal while its cells are being saved", () => {
       allocations: [{ pickLineId: "line-a-lychee", customerId: CUSTOMER_1, quantity: 3 }],
       alreadyArranged: 1,
       unplaceable: 0,
-      noLongerOrdered: 0,
+      heldToOrder: 0,
     });
   });
 
@@ -345,7 +345,7 @@ describe("a suggested line whose order has changed since", () => {
     quantity: number,
   ) => ({
     ...line(growerId, varietyId, customerId, quantity),
-    origin: "suggested" as const,
+    forOrder: "suggested" as const,
   });
   const ordersWithLychee = (pallets: string | null) =>
     orders.map((order) =>
@@ -367,7 +367,7 @@ describe("a suggested line whose order has changed since", () => {
     });
 
     expect(resolved.allocations).toEqual([]);
-    expect(resolved.noLongerOrdered).toBe(1);
+    expect(resolved.heldToOrder).toBe(1);
   });
 
   it("is cut to what is still on order once the order has been reduced", () => {
@@ -381,7 +381,7 @@ describe("a suggested line whose order has changed since", () => {
     expect(resolved.allocations).toEqual([
       { pickLineId: "line-a-lychee", customerId: CUSTOMER_1, quantity: 2, forOrder: true },
     ]);
-    expect(resolved.noLongerOrdered).toBe(1);
+    expect(resolved.heldToOrder).toBe(1);
   });
 
   it("counts what is already saved to the customer off another lot against the order", () => {
@@ -399,7 +399,123 @@ describe("a suggested line whose order has changed since", () => {
     expect(resolved.allocations).toEqual([
       { pickLineId: "line-a-lychee", customerId: CUSTOMER_1, quantity: 3, forOrder: true },
     ]);
-    expect(resolved.noLongerOrdered).toBe(0);
+    expect(resolved.heldToOrder).toBe(0);
+  });
+
+  it("is not counted as cut when the order covers it exactly", () => {
+    const resolved = resolve([suggested(GROWER_A, LYCHEE, CUSTOMER_1, 5)]);
+
+    expect(resolved.allocations).toEqual([
+      { pickLineId: "line-a-lychee", customerId: CUSTOMER_1, quantity: 5, forOrder: true },
+    ]);
+    expect(resolved.heldToOrder).toBe(0);
+  });
+
+  it("is cut to whole pallets when what is left of the order is part of a pallet over", () => {
+    const resolved = resolveProposal({
+      lines: [suggested(GROWER_A, LYCHEE, CUSTOMER_1, 3)],
+      picks,
+      orders: ordersWithLychee("2.5"),
+      records: [],
+    });
+
+    expect(resolved.allocations).toEqual([
+      { pickLineId: "line-a-lychee", customerId: CUSTOMER_1, quantity: 2, forOrder: true },
+    ]);
+    expect(resolved.heldToOrder).toBe(1);
+  });
+
+  it("is held to what is left of the order as the customer's lots are placed one after another", () => {
+    // Customer 2 ordered 3 lemons: grower A's lot takes 2, so 1 is left for B's.
+    const resolved = resolve(
+      [suggested(GROWER_A, LEMON, CUSTOMER_2, 2), suggested(GROWER_B, LEMON, CUSTOMER_2, 2)],
+      [],
+    );
+
+    expect(resolved.allocations).toEqual([
+      { pickLineId: "line-a-lemon", customerId: CUSTOMER_2, quantity: 2, forOrder: true },
+      { pickLineId: "line-b-lemon", customerId: CUSTOMER_2, quantity: 1, forOrder: true },
+    ]);
+    expect(resolved.heldToOrder).toBe(1);
+  });
+
+  it("counts a single pallet already saved to the customer against the order", () => {
+    const onePallet = { ...savedLemons, quantity_pallets: 1 };
+
+    expect(resolve([suggested(GROWER_A, LEMON, CUSTOMER_2, 3)], [onePallet]).allocations).toEqual([
+      { pickLineId: "line-a-lemon", customerId: CUSTOMER_2, quantity: 2, forOrder: true },
+    ]);
+  });
+
+  it("counts a saved allocation against the customer its order line names", () => {
+    // The record's own copy says customer 1; the order line it was arranged
+    // against is customer 2's, and that is whose order it fills.
+    const miscopied = { ...savedLemons, customer_company_id: CUSTOMER_1 };
+
+    expect(resolve([suggested(GROWER_A, LEMON, CUSTOMER_2, 3)], [miscopied]).allocations).toEqual([
+      { pickLineId: "line-a-lemon", customerId: CUSTOMER_2, quantity: 1, forOrder: true },
+    ]);
+  });
+
+  it("counts a saved allocation whose order line did not come back against the customer its own copy names", () => {
+    const orphaned = { ...savedLemons, daily_order_product_id: "an-order-line-not-in-this-read" };
+
+    expect(resolve([suggested(GROWER_A, LEMON, CUSTOMER_2, 3)], [orphaned]).allocations).toEqual([
+      { pickLineId: "line-a-lemon", customerId: CUSTOMER_2, quantity: 1, forOrder: true },
+    ]);
+  });
+
+  it("does not count a suggestion hidden behind a saved allocation against the order", () => {
+    // Customer 2 has 2 of their 3 lemons saved off grower B's lot. The
+    // suggestion for that same cell is never offered, so it takes nothing of
+    // the one pallet left, which grower A's lot may still be given.
+    const resolved = resolve([
+      suggested(GROWER_B, LEMON, CUSTOMER_2, 1),
+      suggested(GROWER_A, LEMON, CUSTOMER_2, 1),
+    ]);
+
+    expect(resolved).toEqual({
+      allocations: [
+        { pickLineId: "line-a-lemon", customerId: CUSTOMER_2, quantity: 1, forOrder: true },
+      ],
+      alreadyArranged: 1,
+      unplaceable: 0,
+      heldToOrder: 0,
+    });
+  });
+
+  it("still holds a suggestion to an order line whose product did not come back", () => {
+    const withoutProduct = ordersWithLychee("2").map((order) => ({
+      ...order,
+      daily_order_products: order.daily_order_products.map((item) => ({
+        ...item,
+        product_varieties: null,
+      })),
+    }));
+
+    const resolved = resolveProposal({
+      lines: [suggested(GROWER_A, LYCHEE, CUSTOMER_1, 3)],
+      picks,
+      orders: withoutProduct,
+      records: [],
+    });
+
+    expect(resolved.allocations).toEqual([
+      { pickLineId: "line-a-lychee", customerId: CUSTOMER_1, quantity: 2, forOrder: true },
+    ]);
+    expect(resolved.heldToOrder).toBe(1);
+  });
+
+  it("counts an order line whose pallets cannot be read as no order, as the grid does", () => {
+    const resolved = resolveProposal({
+      lines: [suggested(GROWER_A, LYCHEE, CUSTOMER_1, 3)],
+      picks,
+      orders: ordersWithLychee("n/a"),
+      records: [],
+    });
+
+    expect(resolved.allocations).toEqual([]);
+    expect(resolved.heldToOrder).toBe(1);
   });
 
   it("leaves a number the distributor typed alone: pushing stock to someone is theirs to decide", () => {
@@ -407,6 +523,7 @@ describe("a suggested line whose order has changed since", () => {
       [],
       { growerId: GROWER_A, varietyId: LEMON, customerId: CUSTOMER_3 },
       2,
+      false,
     );
 
     expect(resolve(typed).allocations).toEqual([
@@ -415,31 +532,47 @@ describe("a suggested line whose order has changed since", () => {
   });
 });
 
-// A suggested cell the distributor corrects keeps what it was for: filling
-// the customer's order. The number typed stands; the order must still exist.
-describe("a corrected suggestion", () => {
+// A number the distributor types for a customer who ordered that product is
+// for their order, whatever stood in the cell before: it is held to the order
+// as a suggestion is, except that the number typed is never cut.
+describe("a number typed for a customer's order", () => {
   const offered: ProposalLine[] = [
-    { ...line(GROWER_A, LYCHEE, CUSTOMER_1, 3), origin: "suggested" },
-    { ...line(GROWER_B, LEMON, CUSTOMER_2, 1), origin: "suggested" },
+    { ...line(GROWER_A, LYCHEE, CUSTOMER_1, 3), forOrder: "suggested" },
+    { ...line(GROWER_B, LEMON, CUSTOMER_2, 1), forOrder: "suggested" },
   ];
-  const lychees1 = { growerId: GROWER_A, varietyId: LYCHEE, customerId: CUSTOMER_1 };
-
-  it("is marked as a correction, and a number typed into an empty cell is not", () => {
-    const corrected = setProposalCell(offered, lychees1, 7);
-    const pushed = setProposalCell(
-      offered,
-      { growerId: GROWER_A, varietyId: LEMON, customerId: CUSTOMER_3 },
-      2,
+  const day = { picks, orders };
+  /** A number typed into the cell at (pick line, customer), on the day as read. */
+  const typedInto = (
+    lines: ProposalLine[],
+    pickLineId: string,
+    customerId: string,
+    quantity: number,
+    read = day,
+  ) => typeIntoProposal(lines, read, { pickLineId, customerId, quantity, recordId: null })?.lines;
+  const withdrawnLychee = orders.map((order) =>
+    order.id === "order-1" ? { ...order, daily_order_products: [] } : order,
+  );
+  const lemonsFor2 = (pallets: string) =>
+    orders.map((order) =>
+      order.id === "order-2"
+        ? { ...order, daily_order_products: [orderLine("ol-2-lemon", "order-2", LEMON, pallets)] }
+        : order,
     );
 
-    expect(corrected[0]).toEqual({ ...line(GROWER_A, LYCHEE, CUSTOMER_1, 7), origin: "corrected" });
-    expect(pushed.at(-1)).toEqual(line(GROWER_A, LEMON, CUSTOMER_3, 2));
+  it("is for the order when the customer ordered the product, and a push when they did not", () => {
+    expect(typedInto(offered, "line-a-lychee", CUSTOMER_1, 7)?.[0]).toEqual({
+      ...line(GROWER_A, LYCHEE, CUSTOMER_1, 7),
+      forOrder: "typed",
+    });
+    expect(typedInto(offered, "line-a-lemon", CUSTOMER_3, 2)?.at(-1)).toEqual(
+      line(GROWER_A, LEMON, CUSTOMER_3, 2),
+    );
   });
 
   it("keeps the number typed, above the order included", () => {
-    const corrected = setProposalCell(offered, lychees1, 7);
-
-    expect(resolve(corrected).allocations).toContainEqual({
+    expect(
+      resolve(typedInto(offered, "line-a-lychee", CUSTOMER_1, 7) ?? []).allocations,
+    ).toContainEqual({
       pickLineId: "line-a-lychee",
       customerId: CUSTOMER_1,
       quantity: 7,
@@ -448,22 +581,232 @@ describe("a corrected suggestion", () => {
   });
 
   it("is dropped once the customer has withdrawn the order it was for", () => {
-    const corrected = setProposalCell(offered, lychees1, 2);
-    const withdrawn = orders.map((order) =>
-      order.id === "order-1" ? { ...order, daily_order_products: [] } : order,
-    );
+    const typed = typedInto(offered, "line-a-lychee", CUSTOMER_1, 2) ?? [];
 
-    const resolved = resolveProposal({ lines: corrected, picks, orders: withdrawn, records: [] });
+    const resolved = resolveProposal({ lines: typed, picks, orders: withdrawnLychee, records: [] });
 
     expect(resolved.allocations.map((allocation) => allocation.customerId)).not.toContain(
       CUSTOMER_1,
     );
-    expect(resolved.noLongerOrdered).toBe(1);
+    expect(resolved.heldToOrder).toBe(1);
   });
 
-  it("marks what was suggested or corrected as for an order, and a typed push as not", () => {
+  it("is dropped when the order it was for has been left at no pallets", () => {
+    // A push saved to a customer leaves a line for no pallets behind; a line
+    // for no pallets is no order, as the save judges it.
+    const typed = typedInto(offered, "line-a-lychee", CUSTOMER_1, 2) ?? [];
+    const atNoPallets = orders.map((order) =>
+      order.id === "order-1"
+        ? { ...order, daily_order_products: [orderLine("ol-1-lychee", "order-1", LYCHEE, "0")] }
+        : order,
+    );
+
+    const resolved = resolveProposal({ lines: typed, picks, orders: atNoPallets, records: [] });
+
+    expect(resolved.allocations).toEqual([
+      { pickLineId: "line-b-lemon", customerId: CUSTOMER_2, quantity: 1, forOrder: true },
+    ]);
+    expect(resolved.heldToOrder).toBe(1);
+  });
+
+  it("stands as typed once the whole of the order has been arranged elsewhere", () => {
+    // All three of customer 2's lemons are saved off grower B's lot. The
+    // number typed for grower A's is still for the order; whether it fits is
+    // for the save to say, as for a number above the order.
+    const allOfIt = { ...savedLemons, quantity_pallets: 3 };
+    const typed = typedInto(
+      [{ ...line(GROWER_A, LEMON, CUSTOMER_2, 1), forOrder: "suggested" }],
+      "line-a-lemon",
+      CUSTOMER_2,
+      2,
+    );
+
+    const resolved = resolve(typed ?? [], [allOfIt]);
+
+    expect(resolved.allocations).toEqual([
+      { pickLineId: "line-a-lemon", customerId: CUSTOMER_2, quantity: 2, forOrder: true },
+    ]);
+    expect(resolved.heldToOrder).toBe(0);
+  });
+
+  it("is a push, and is saved, when typed into a cell whose suggestion went with the order", () => {
+    // The order for lychees was withdrawn and the screen has read it: the
+    // suggestion is no longer shown, the cell looks empty, and the distributor
+    // pushes two pallets into it.
+    const typed = typedInto(offered, "line-a-lychee", CUSTOMER_1, 2, {
+      picks,
+      orders: withdrawnLychee,
+    });
+
+    expect(
+      resolveProposal({ lines: typed ?? [], picks, orders: withdrawnLychee, records: [] }),
+    ).toEqual({
+      allocations: [
+        { pickLineId: "line-a-lychee", customerId: CUSTOMER_1, quantity: 2 },
+        { pickLineId: "line-b-lemon", customerId: CUSTOMER_2, quantity: 1, forOrder: true },
+      ],
+      alreadyArranged: 0,
+      unplaceable: 0,
+      heldToOrder: 0,
+    });
+  });
+
+  it("stays for the order when a suggestion is moved to another grower's lot", () => {
+    const suggestion: ProposalLine[] = [
+      { ...line(GROWER_A, LEMON, CUSTOMER_2, 1), forOrder: "suggested" },
+    ];
+    const moved = typedInto(
+      typedInto(suggestion, "line-a-lemon", CUSTOMER_2, 0) ?? [],
+      "line-b-lemon",
+      CUSTOMER_2,
+      1,
+    );
+
+    expect(resolve(moved ?? [], []).allocations).toEqual([
+      { pickLineId: "line-b-lemon", customerId: CUSTOMER_2, quantity: 1, forOrder: true },
+    ]);
+    // ...so it goes when the order goes, rather than being saved as a push.
+    const withdrawn = orders.map((order) =>
+      order.id === "order-2" ? { ...order, daily_order_products: [] } : order,
+    );
+    expect(
+      resolveProposal({ lines: moved ?? [], picks, orders: withdrawn, records: [] }).allocations,
+    ).toEqual([]);
+  });
+
+  it("stays for the order when a cell is emptied and typed into again", () => {
+    const retyped = typedInto(
+      typedInto(offered, "line-a-lychee", CUSTOMER_1, 0) ?? [],
+      "line-a-lychee",
+      CUSTOMER_1,
+      3,
+    );
+
+    expect(resolve(retyped ?? [], []).allocations).toContainEqual({
+      pickLineId: "line-a-lychee",
+      customerId: CUSTOMER_1,
+      quantity: 3,
+      forOrder: true,
+    });
+  });
+
+  it("is taken off the order before the suggestions, which get what is left", () => {
+    // Customer 2 ordered 3 lemons: 2 suggested off grower A's lot, 1 off B's.
+    // The distributor keeps B's at 1. The order then drops to 2: B's typed 1
+    // stands, so only 1 of A's suggested 2 is left — 2 in all, not 3.
+    const suggestion: ProposalLine[] = [
+      { ...line(GROWER_A, LEMON, CUSTOMER_2, 2), forOrder: "suggested" },
+      { ...line(GROWER_B, LEMON, CUSTOMER_2, 1), forOrder: "suggested" },
+    ];
+    const typed = typedInto(suggestion, "line-b-lemon", CUSTOMER_2, 1) ?? [];
+
+    const resolved = resolveProposal({ lines: typed, picks, orders: lemonsFor2("2"), records: [] });
+
+    expect(resolved.allocations).toEqual([
+      { pickLineId: "line-a-lemon", customerId: CUSTOMER_2, quantity: 1, forOrder: true },
+      { pickLineId: "line-b-lemon", customerId: CUSTOMER_2, quantity: 1, forOrder: true },
+    ]);
+    expect(resolved.heldToOrder).toBe(1);
+  });
+
+  it("is never cut itself when the order drops below it", () => {
+    const typed =
+      typedInto([], "line-a-lemon", CUSTOMER_2, 3, { picks, orders: lemonsFor2("3") }) ?? [];
+
+    const resolved = resolveProposal({ lines: typed, picks, orders: lemonsFor2("1"), records: [] });
+
+    expect(resolved.allocations).toEqual([
+      { pickLineId: "line-a-lemon", customerId: CUSTOMER_2, quantity: 3, forOrder: true },
+    ]);
+    expect(resolved.heldToOrder).toBe(0);
+  });
+
+  it("is a push when the customer's only line for the product is at no pallets", () => {
+    // A push saved earlier leaves a line for no pallets behind: no order.
+    const atNoPallets = orders.map((order) =>
+      order.id === "order-1"
+        ? { ...order, daily_order_products: [orderLine("ol-1-lychee", "order-1", LYCHEE, "0")] }
+        : order,
+    );
+    const typed = typedInto([], "line-a-lychee", CUSTOMER_1, 2, { picks, orders: atNoPallets });
+
+    expect(typed).toEqual([line(GROWER_A, LYCHEE, CUSTOMER_1, 2)]);
+    expect(
+      resolveProposal({ lines: typed ?? [], picks, orders: atNoPallets, records: [] }).allocations,
+    ).toEqual([{ pickLineId: "line-a-lychee", customerId: CUSTOMER_1, quantity: 2 }]);
+  });
+
+  it("counts a push against an order the customer places afterwards, before the suggestions", () => {
+    // Customer 2's order for lemons is withdrawn, so the suggestion on grower
+    // A's lot goes; the distributor pushes 2 off grower B's. The customer then
+    // orders 3 again: the suggestion comes back, but only for what the push
+    // leaves of the order — 1, not 3 — so the save stays within it.
+    const withdrawn = orders.map((order) =>
+      order.id === "order-2" ? { ...order, daily_order_products: [] } : order,
+    );
+    const lines = typedInto(
+      [{ ...line(GROWER_A, LEMON, CUSTOMER_2, 3), forOrder: "suggested" }],
+      "line-b-lemon",
+      CUSTOMER_2,
+      2,
+      { picks, orders: withdrawn },
+    );
+
+    const resolved = resolveProposal({ lines: lines ?? [], picks, orders, records: [] });
+
+    expect(resolved.allocations).toEqual([
+      { pickLineId: "line-a-lemon", customerId: CUSTOMER_2, quantity: 1, forOrder: true },
+      { pickLineId: "line-b-lemon", customerId: CUSTOMER_2, quantity: 2 },
+    ]);
+  });
+
+  it("gives a suggestion back what a lowered number no longer takes of the order", () => {
+    // Customer 2 ordered 3 lemons: 2 suggested off grower A's lot, 1 off B's.
+    // Typing 3 into A takes the whole order, so B's suggestion has nothing
+    // left; lowering A to 2 leaves 1 of the order, and B's suggestion fills
+    // it again. The suggestion fills whatever part of the order is not typed.
+    const suggestion: ProposalLine[] = [
+      { ...line(GROWER_A, LEMON, CUSTOMER_2, 2), forOrder: "suggested" },
+      { ...line(GROWER_B, LEMON, CUSTOMER_2, 1), forOrder: "suggested" },
+    ];
+    const allOfIt = typedInto(suggestion, "line-a-lemon", CUSTOMER_2, 3) ?? [];
+    const lowered = typedInto(allOfIt, "line-a-lemon", CUSTOMER_2, 2) ?? [];
+
+    expect(resolve(allOfIt, []).allocations).toEqual([
+      { pickLineId: "line-a-lemon", customerId: CUSTOMER_2, quantity: 3, forOrder: true },
+    ]);
+    expect(resolve(lowered, []).allocations).toEqual([
+      { pickLineId: "line-a-lemon", customerId: CUSTOMER_2, quantity: 2, forOrder: true },
+      { pickLineId: "line-b-lemon", customerId: CUSTOMER_2, quantity: 1, forOrder: true },
+    ]);
+  });
+
+  it("marks a cell as for an order when any of the lines that landed in it was", () => {
+    const fromEngine: ProposalLine = {
+      ...line(GROWER_A, LYCHEE, CUSTOMER_1, 1),
+      forOrder: "suggested",
+    };
+    const pushed = line(GROWER_A, LYCHEE, CUSTOMER_1, 1);
+    const forOrder = {
+      pickLineId: "line-a-lychee",
+      customerId: CUSTOMER_1,
+      quantity: 2,
+      forOrder: true,
+    };
+
+    for (const lines of [
+      [fromEngine, pushed],
+      [pushed, fromEngine],
+    ]) {
+      expect(resolveProposal({ lines, picks, orders, records: [] }).allocations).toEqual([
+        forOrder,
+      ]);
+    }
+  });
+
+  it("marks what was suggested or typed for an order as for an order, and a typed push as not", () => {
     const lines: ProposalLine[] = [
-      ...setProposalCell(offered, lychees1, 2),
+      ...(typedInto(offered, "line-a-lychee", CUSTOMER_1, 2) ?? []),
       line(GROWER_A, LEMON, CUSTOMER_3, 1),
     ];
 
@@ -526,6 +869,36 @@ describe("refusedCells", () => {
       expect(refusedCells(details)).toEqual([]);
     },
   );
+
+  it.each(["null", "7", '"text"', "true"])(
+    "names no cell when the detail is JSON but not an object (%s)",
+    (details) => {
+      expect(refusedCells(details)).toEqual([]);
+    },
+  );
+
+  it.each(["5", '"x"', '{"dailyPickProductId":"a","customerCompanyId":"b"}'])(
+    "names no cell when `cells` is not a list (%s)",
+    (cells) => {
+      expect(refusedCells(`{"cells":${cells}}`)).toEqual([]);
+    },
+  );
+
+  it("skips the entries of a conflict that do not name a cell, and keeps the ones that do", () => {
+    const details = JSON.stringify({
+      cells: [
+        null,
+        "text",
+        { dailyPickProductId: "line-a-lemon" },
+        { customerCompanyId: CUSTOMER_1 },
+        { dailyPickProductId: 7, customerCompanyId: CUSTOMER_1 },
+        { dailyPickProductId: "line-a-lemon", customerCompanyId: 7 },
+        { dailyPickProductId: "line-b-lemon", customerCompanyId: CUSTOMER_3 },
+      ],
+    });
+
+    expect(refusedCells(details)).toEqual([{ pickLineId: "line-b-lemon", customerId: CUSTOMER_3 }]);
+  });
 });
 
 describe("cellLabel", () => {
@@ -541,6 +914,43 @@ describe("cellLabel", () => {
     expect(cellLabel({ pickLineId: "line-gone", customerId: "customer-gone" }, picks, names)).toBe(
       "שורה שאינה ביום זה ← customer-gone",
     );
+  });
+
+  it("reads a product's size beside its name", () => {
+    const sized = picks.map((pick) => ({
+      ...pick,
+      daily_pick_products: pick.daily_pick_products.map((pickLine) =>
+        pickLine.id === "line-b-lemon"
+          ? { ...pickLine, product_varieties: { ...variety(LEMON, LEMON), sizes: "7" } }
+          : pickLine,
+      ),
+    }));
+
+    expect(cellLabel({ pickLineId: "line-b-lemon", customerId: CUSTOMER_2 }, sized, names)).toBe(
+      `${LEMON} 7 (גולדי) ← בני שיווק`,
+    );
+  });
+
+  it("names a lot whose product did not come back by its product id", () => {
+    const withoutProduct = picks.map((pick) => ({
+      ...pick,
+      daily_pick_products: pick.daily_pick_products.map((pickLine) =>
+        pickLine.id === "line-a-lychee" ? { ...pickLine, product_varieties: null } : pickLine,
+      ),
+    }));
+
+    expect(
+      cellLabel({ pickLineId: "line-a-lychee", customerId: CUSTOMER_1 }, withoutProduct, names),
+    ).toBe(`${LYCHEE} (אברהמי אהוד) ← אבי הפצה`);
+  });
+
+  it("names a grower it cannot name by the grower's id", () => {
+    const withoutGrower = new Map(names);
+    withoutGrower.delete(GROWER_B);
+
+    expect(
+      cellLabel({ pickLineId: "line-b-lemon", customerId: CUSTOMER_2 }, picks, withoutGrower),
+    ).toBe(`${LEMON} (${GROWER_B}) ← בני שיווק`);
   });
 });
 
@@ -586,7 +996,7 @@ describe("setProposalCell", () => {
   ];
 
   it("changes the quantity of a cell the proposal already holds, where it stands", () => {
-    expect(setProposalCell(offered, lychees1, 5)).toEqual([
+    expect(setProposalCell(offered, lychees1, 5, false)).toEqual([
       line(GROWER_A, LEMON, CUSTOMER_1, 1),
       line(GROWER_A, LYCHEE, CUSTOMER_1, 5),
       line(GROWER_B, LEMON, CUSTOMER_3, 2),
@@ -596,14 +1006,38 @@ describe("setProposalCell", () => {
   it("adds a cell the proposal had nothing in, after the ones it holds", () => {
     const added = { growerId: GROWER_A, varietyId: LYCHEE, customerId: CUSTOMER_3 };
 
-    expect(setProposalCell(offered, added, 2)).toEqual([
+    expect(setProposalCell(offered, added, 2, false)).toEqual([
       ...offered,
       line(GROWER_A, LYCHEE, CUSTOMER_3, 2),
     ]);
   });
 
+  it("marks the number typed as for the customer's order when told so, whatever stood in the cell", () => {
+    const suggestedOffer: ProposalLine[] = [
+      { ...line(GROWER_A, LYCHEE, CUSTOMER_1, 3), forOrder: "suggested" },
+    ];
+
+    expect(setProposalCell(suggestedOffer, lychees1, 5, true)).toEqual([
+      { ...line(GROWER_A, LYCHEE, CUSTOMER_1, 5), forOrder: "typed" },
+    ]);
+    expect(setProposalCell(offered, lychees1, 5, true)[1]).toEqual({
+      ...line(GROWER_A, LYCHEE, CUSTOMER_1, 5),
+      forOrder: "typed",
+    });
+  });
+
+  it("makes the number typed a push when told the customer has no order for it, whatever stood in the cell", () => {
+    const suggestedOffer: ProposalLine[] = [
+      { ...line(GROWER_A, LYCHEE, CUSTOMER_1, 3), forOrder: "suggested" },
+    ];
+
+    expect(setProposalCell(suggestedOffer, lychees1, 5, false)).toEqual([
+      line(GROWER_A, LYCHEE, CUSTOMER_1, 5),
+    ]);
+  });
+
   it("takes a cell out of the proposal when it is emptied", () => {
-    expect(setProposalCell(offered, lychees1, 0)).toEqual([
+    expect(setProposalCell(offered, lychees1, 0, false)).toEqual([
       line(GROWER_A, LEMON, CUSTOMER_1, 1),
       line(GROWER_B, LEMON, CUSTOMER_3, 2),
     ]);
@@ -616,11 +1050,13 @@ describe("setProposalCell", () => {
       line(GROWER_A, LYCHEE, CUSTOMER_1, 1),
     ];
 
-    expect(setProposalCell(doubled, lychees1, 2)).toEqual([
+    expect(setProposalCell(doubled, lychees1, 2, false)).toEqual([
       line(GROWER_A, LYCHEE, CUSTOMER_1, 2),
       line(GROWER_B, LEMON, CUSTOMER_3, 2),
     ]);
-    expect(setProposalCell(doubled, lychees1, 0)).toEqual([line(GROWER_B, LEMON, CUSTOMER_3, 2)]);
+    expect(setProposalCell(doubled, lychees1, 0, false)).toEqual([
+      line(GROWER_B, LEMON, CUSTOMER_3, 2),
+    ]);
   });
 
   it("touches that grower's lot for that customer and nothing next to it", () => {
@@ -636,6 +1072,7 @@ describe("setProposalCell", () => {
         neighbours,
         { growerId: GROWER_A, varietyId: LEMON, customerId: CUSTOMER_1 },
         4,
+        false,
       ),
     ).toEqual([
       line(GROWER_A, LEMON, CUSTOMER_1, 4),
@@ -647,7 +1084,7 @@ describe("setProposalCell", () => {
 
   it("leaves the proposal alone when the quantity is not a whole number of pallets", () => {
     for (const quantity of [2.5, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
-      expect(setProposalCell(offered, lychees1, quantity)).toEqual(offered);
+      expect(setProposalCell(offered, lychees1, quantity, false)).toEqual(offered);
     }
   });
 
@@ -660,8 +1097,8 @@ describe("setProposalCell", () => {
       line(GROWER_A, LYCHEE, CUSTOMER_1, 1),
     ];
     const before = structuredClone(given);
-    setProposalCell(given, lychees1, 5);
-    setProposalCell(given, lychees1, 0);
+    setProposalCell(given, lychees1, 5, false);
+    setProposalCell(given, lychees1, 0, false);
 
     expect(given).toEqual(before);
   });
@@ -675,9 +1112,13 @@ describe("a proposal while it is being corrected", () => {
 
   /** A number typed into the cell at (pick line, customer), as the screen applies it. */
   function typed(lines: ProposalLine[], pickLineId: string, customerId: string, quantity: number) {
-    const lot = lotOfPickLine(picks, pickLineId);
-    if (!lot) throw new Error(`no lot for ${pickLineId}`);
-    return setProposalCell(lines, { ...lot, customerId }, quantity);
+    const result = typeIntoProposal(
+      lines,
+      { picks, orders },
+      { pickLineId, customerId, quantity, recordId: null },
+    );
+    if (!result) throw new Error(`no lot for ${pickLineId}`);
+    return result.lines;
   }
 
   it("saves the number that was typed, in the cell it was typed into", () => {
@@ -769,22 +1210,24 @@ describe("typeIntoProposal", () => {
   ) => ({ pickLineId, customerId, quantity, recordId });
   // Suggested for customer 2 on grower B's lemons, where customer 2 already
   // has two pallets saved: hidden behind the record, never offered.
-  const hidden: ProposalLine = { ...line(GROWER_B, LEMON, CUSTOMER_2, 1), origin: "suggested" };
-  const suggested: ProposalLine = { ...line(GROWER_A, LYCHEE, CUSTOMER_1, 3), origin: "suggested" };
+  const hidden: ProposalLine = { ...line(GROWER_B, LEMON, CUSTOMER_2, 1), forOrder: "suggested" };
+  const suggested: ProposalLine = {
+    ...line(GROWER_A, LYCHEE, CUSTOMER_1, 3),
+    forOrder: "suggested",
+  };
+  const day = { picks, orders };
 
-  it("keeps a number typed into an empty cell in the proposal, as a correction, and writes nothing", () => {
-    expect(typeIntoProposal([suggested], picks, typedInto("line-a-lychee", CUSTOMER_1, 4))).toEqual(
-      {
-        lines: [{ ...line(GROWER_A, LYCHEE, CUSTOMER_1, 4), origin: "corrected" }],
-        saveNow: false,
-      },
-    );
+  it("keeps a number typed into an empty cell in the proposal, for the order it was typed for, and writes nothing", () => {
+    expect(typeIntoProposal([suggested], day, typedInto("line-a-lychee", CUSTOMER_1, 4))).toEqual({
+      lines: [{ ...line(GROWER_A, LYCHEE, CUSTOMER_1, 4), forOrder: "typed" }],
+      saveNow: false,
+    });
   });
 
   it("writes a cell with an allocation saved in it at once, and lets go of any suggestion behind it", () => {
     const typed = typeIntoProposal(
       [hidden, suggested],
-      picks,
+      day,
       typedInto("line-b-lemon", CUSTOMER_2, 3, "record-1"),
     );
 
@@ -806,7 +1249,11 @@ describe("typeIntoProposal", () => {
     ];
 
     expect(
-      typeIntoProposal([suggested], orphanPicks, typedInto("line-orphan", CUSTOMER_1, 2)),
+      typeIntoProposal(
+        [suggested],
+        { picks: orphanPicks, orders },
+        typedInto("line-orphan", CUSTOMER_1, 2),
+      ),
     ).toBeNull();
   });
 
@@ -823,7 +1270,7 @@ describe("typeIntoProposal", () => {
     expect(
       typeIntoProposal(
         [suggested],
-        orphanPicks,
+        { picks: orphanPicks, orders },
         typedInto("line-orphan", CUSTOMER_1, 0, "record-x"),
       ),
     ).toEqual({ lines: [suggested], saveNow: true });

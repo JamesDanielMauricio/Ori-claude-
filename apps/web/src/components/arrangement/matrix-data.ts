@@ -196,9 +196,10 @@ export interface ProposedAllocation {
   customerId: string;
   quantity: number;
   /**
-   * Meant to fill the customer's order (suggested, or a correction of a
-   * suggestion), as opposed to a push typed by the distributor. The save hands
-   * it on, so the database can refuse such a cell if the order has gone.
+   * Meant to fill the customer's order (suggested, or typed for a customer who
+   * had ordered the product), as opposed to a push typed by the distributor.
+   * The save hands it on, so the database can refuse such a cell if the order
+   * has gone.
    */
   forOrder?: boolean;
 }

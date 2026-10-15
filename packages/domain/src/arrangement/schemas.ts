@@ -97,8 +97,9 @@ const proposalAllocationSchema = z.object({
   customerCompanyId: z.string().uuid(),
   quantityPallets: z.number().int().positive(),
   // The cell is meant to fill the customer's order (the engine suggested it,
-  // or the distributor corrected a suggestion) rather than to push stock to
-  // them: the function refuses it if that order has gone by the time it runs.
+  // or the distributor typed it for a customer who had ordered the product)
+  // rather than to push stock to them: the function refuses it if that order
+  // has gone by the time it runs.
   forOrder: z.boolean().optional(),
 });
 

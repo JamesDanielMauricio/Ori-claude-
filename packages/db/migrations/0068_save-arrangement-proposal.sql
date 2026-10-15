@@ -31,13 +31,13 @@
 --      submit_order changes a customer's lines under that row's lock, so
 --      "this customer still has that order" stays true until commit.
 --
--- A cell marked forOrder was meant to fill the customer's order — the screen
--- suggested it, or the distributor corrected a suggestion. If that order has
--- gone (withdrawn in the moments since the proposal was read), the cell is
--- refused rather than saved: arrange_to_customer would otherwise make it a
--- push, and close_arrangement would then price and announce pallets the
--- customer took back. A cell without the mark is the distributor's own, push
--- or not, and is saved as it is.
+-- A cell marked forOrder was meant to fill the customer's order — the engine
+-- suggested it, or the distributor typed it for a customer who had ordered
+-- the product. If that order has gone (withdrawn in the moments since the
+-- proposal was read), the cell is refused rather than saved:
+-- arrange_to_customer would otherwise make it a push, and close_arrangement
+-- would then price and announce pallets the customer took back. A cell
+-- without the mark is a push the distributor typed, and is saved as it is.
 --
 -- p_allocations: [{ "dailyPickProductId": uuid, "customerCompanyId": uuid,
 --                   "quantityPallets": whole number above zero,
@@ -65,6 +65,11 @@ declare
   v_quantity numeric;
   v_state text;
   v_message text;
+  -- The allocations, typed: one entry per allocation, in the order given.
+  v_pick_line_ids uuid[];
+  v_customer_ids uuid[];
+  v_quantities numeric[];
+  v_for_order boolean[];
 begin
   -- `is distinct from`, not `<>`: a caller with no profile has a NULL role.
   if public.current_role() is distinct from 'backoffice' then
@@ -109,14 +114,30 @@ begin
       using errcode = 'P0008', detail = jsonb_build_object('indexes', v_bad)::text;
   end if;
 
+  -- Read into typed columns ONCE, and every statement below joins on those —
+  -- never on an id pulled out of the JSON inside the join. Under RLS Postgres
+  -- will not push a condition that calls a function it does not know to be
+  -- leakproof (->> and the cast to uuid are not) into the scan of a protected
+  -- table, so such a join cannot use the index and reads the whole table for
+  -- every cell: 72 cells × 82,000 pick lines took over 10 seconds against
+  -- October's data, past a signed-in caller's 8-second statement timeout.
+  select array_agg(a.pick_line_id order by a.ord),
+         array_agg(a.customer_id order by a.ord),
+         array_agg(a.quantity order by a.ord),
+         array_agg(coalesce(a.for_order, false) order by a.ord)
+    into v_pick_line_ids, v_customer_ids, v_quantities, v_for_order
+  from rows from (
+         jsonb_to_recordset(p_allocations)
+           as ("dailyPickProductId" uuid, "customerCompanyId" uuid, "quantityPallets" numeric, "forOrder" boolean)
+       ) with ordinality as a(pick_line_id, customer_id, quantity, for_order, ord);
+
   -- One entry per cell: a second would find the first's record and read as a
   -- conflict with itself.
   select jsonb_agg(jsonb_build_object('dailyPickProductId', d.pick_line_id, 'customerCompanyId', d.customer_id))
     into v_bad
   from (
-    select (e.elem ->> 'dailyPickProductId')::uuid as pick_line_id,
-           (e.elem ->> 'customerCompanyId')::uuid as customer_id
-    from jsonb_array_elements(p_allocations) as e(elem)
+    select a.pick_line_id, a.customer_id
+    from unnest(v_pick_line_ids, v_customer_ids) as a(pick_line_id, customer_id)
     group by 1, 2
     having count(*) > 1
   ) d;
@@ -125,13 +146,13 @@ begin
       using errcode = 'P0008', detail = jsonb_build_object('cells', v_bad)::text;
   end if;
 
-  select jsonb_agg(distinct e.elem ->> 'dailyPickProductId') into v_bad
-  from jsonb_array_elements(p_allocations) as e(elem)
+  select jsonb_agg(distinct a.pick_line_id) into v_bad
+  from unnest(v_pick_line_ids) as a(pick_line_id)
   where not exists (
     select 1
     from public.daily_pick_products dpp
     join public.daily_picks dp on dp.id = dpp.daily_pick_id
-    where dpp.id = (e.elem ->> 'dailyPickProductId')::uuid
+    where dpp.id = a.pick_line_id
       and dp.trading_day_id = p_trading_day_id
   );
   if v_bad is not null then
@@ -141,38 +162,35 @@ begin
 
   perform 1
   from public.daily_pick_products
-  where id in (
-    select (e.elem ->> 'dailyPickProductId')::uuid from jsonb_array_elements(p_allocations) as e(elem)
-  )
+  where id = any (v_pick_line_ids)
   order by id
   for share;
 
   perform 1
   from public.daily_orders
   where trading_day_id = p_trading_day_id
-    and customer_company_id in (
-      select (e.elem ->> 'customerCompanyId')::uuid from jsonb_array_elements(p_allocations) as e(elem)
-    )
+    and customer_company_id = any (v_customer_ids)
   order by id
   for update;
 
   -- Meant for an order that has gone since the proposal was read: the whole
   -- save is refused, naming every such cell at once.
   select jsonb_agg(jsonb_build_object(
-           'index', e.ord - 1,
-           'dailyPickProductId', e.elem ->> 'dailyPickProductId',
-           'customerCompanyId', e.elem ->> 'customerCompanyId') order by e.ord)
+           'index', a.ord - 1,
+           'dailyPickProductId', a.pick_line_id,
+           'customerCompanyId', a.customer_id) order by a.ord)
     into v_bad
-  from jsonb_array_elements(p_allocations) with ordinality as e(elem, ord)
-  where (e.elem -> 'forOrder') = 'true'::jsonb
+  from unnest(v_pick_line_ids, v_customer_ids, v_for_order) with ordinality
+         as a(pick_line_id, customer_id, for_order, ord)
+  join public.daily_pick_products dpp on dpp.id = a.pick_line_id
+  where a.for_order
     and not exists (
       select 1
-      from public.daily_pick_products dpp
-      join public.daily_order_products dop on dop.product_variety_id = dpp.product_variety_id
-      join public.daily_orders o on o.id = dop.daily_order_id
-      where dpp.id = (e.elem ->> 'dailyPickProductId')::uuid
-        and o.trading_day_id = p_trading_day_id
-        and o.customer_company_id = (e.elem ->> 'customerCompanyId')::uuid
+      from public.daily_orders o
+      join public.daily_order_products dop on dop.daily_order_id = o.id
+      where o.trading_day_id = p_trading_day_id
+        and o.customer_company_id = a.customer_id
+        and dop.product_variety_id = dpp.product_variety_id
         and dop.pallets_ordered > 0
     );
   if v_bad is not null then
@@ -184,19 +202,18 @@ begin
   -- every such cell at once. A cell's customer is read off its order line,
   -- and off the record's own copy as well, as the grid reads it.
   select jsonb_agg(jsonb_build_object(
-           'index', e.ord - 1,
-           'dailyPickProductId', e.elem ->> 'dailyPickProductId',
-           'customerCompanyId', e.elem ->> 'customerCompanyId') order by e.ord)
+           'index', a.ord - 1,
+           'dailyPickProductId', a.pick_line_id,
+           'customerCompanyId', a.customer_id) order by a.ord)
     into v_bad
-  from jsonb_array_elements(p_allocations) with ordinality as e(elem, ord)
+  from unnest(v_pick_line_ids, v_customer_ids) with ordinality as a(pick_line_id, customer_id, ord)
   where exists (
     select 1
     from public.arrangement_records ar
     left join public.daily_order_products dop on dop.id = ar.daily_order_product_id
     left join public.daily_orders o on o.id = dop.daily_order_id
-    where ar.daily_pick_product_id = (e.elem ->> 'dailyPickProductId')::uuid
-      and (o.customer_company_id = (e.elem ->> 'customerCompanyId')::uuid
-           or ar.customer_company_id = (e.elem ->> 'customerCompanyId')::uuid)
+    where ar.daily_pick_product_id = a.pick_line_id
+      and (o.customer_company_id = a.customer_id or ar.customer_company_id = a.customer_id)
   );
   if v_bad is not null then
     raise exception 'CONFLICT: % cell(s) of this proposal were filled after it was read', jsonb_array_length(v_bad)
@@ -209,12 +226,10 @@ begin
   -- single cell's.
   begin
     for v_index, v_pick_line_id, v_customer_id, v_quantity in
-      select e.ord - 1,
-             (e.elem ->> 'dailyPickProductId')::uuid,
-             (e.elem ->> 'customerCompanyId')::uuid,
-             (e.elem ->> 'quantityPallets')::numeric
-      from jsonb_array_elements(p_allocations) with ordinality as e(elem, ord)
-      order by e.ord
+      select a.ord - 1, a.pick_line_id, a.customer_id, a.quantity
+      from unnest(v_pick_line_ids, v_customer_ids, v_quantities) with ordinality
+             as a(pick_line_id, customer_id, quantity, ord)
+      order by a.ord
     loop
       select * into v_record
       from public.arrange_to_customer(v_pick_line_id, v_customer_id, v_quantity);

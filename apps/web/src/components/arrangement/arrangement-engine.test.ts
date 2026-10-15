@@ -9,6 +9,7 @@ import {
   proposeArrangement,
   type DayToPropose,
   type HistoryDay,
+  type LotToFill,
 } from "./arrangement-engine";
 
 // The rule set is the owner's own (Lior's spec of 2026-09-24 and the meeting
@@ -120,6 +121,55 @@ describe("dealInRounds", () => {
     expect(granted).toEqual({ "דירוג גבוה": 0, "קיבל הרבה": 1 });
   });
 
+  it("reads a rank that is shorter than another as zeros beyond its end", () => {
+    // "א" would win a tie on the id, so only the longer rank's second place can put "ב" ahead.
+    const short = { customerId: "א", quantity: 1, rank: [3], orderedAt: at };
+    const long = { customerId: "ב", quantity: 1, rank: [3, 1], orderedAt: at };
+
+    expect(dealInRounds(1, [short, long])).toEqual({ א: 0, ב: 1 });
+    expect(dealInRounds(1, [long, short])).toEqual({ א: 0, ב: 1 });
+
+    // And the other way round, with the shorter rank on the later id.
+    const later = { customerId: "ב", quantity: 1, rank: [3], orderedAt: at };
+    const earlier = { customerId: "א", quantity: 1, rank: [3, 0.5], orderedAt: at };
+    expect(dealInRounds(1, [earlier, later])).toEqual({ א: 1, ב: 0 });
+    expect(dealInRounds(1, [later, earlier])).toEqual({ א: 1, ב: 0 });
+  });
+
+  it("never gives a customer more than they ordered, however much stock is left", () => {
+    // "קטן" asked for one; what is left after he is served goes to the other.
+    const granted = dealInRounds(4, [
+      { customerId: "קטן", quantity: 1, rank: [5], orderedAt: at },
+      { customerId: "גדול", quantity: 5, rank: [1], orderedAt: at },
+    ]);
+
+    expect(granted).toEqual({ קטן: 1, גדול: 3 });
+  });
+
+  it("settles an equal rank and an equal time by the lower customer id, whatever order they arrive in", () => {
+    const first = { customerId: "א", quantity: 1, rank: [3], orderedAt: at };
+    const second = { customerId: "ב", quantity: 1, rank: [3], orderedAt: at };
+
+    expect(dealInRounds(1, [first, second])).toEqual({ א: 1, ב: 0 });
+    expect(dealInRounds(1, [second, first])).toEqual({ א: 1, ב: 0 });
+  });
+
+  it("puts an order whose time cannot be read after every order that has one, whatever order they arrive in", () => {
+    const withTime = { customerId: "עם שעה", quantity: 1, rank: [3], orderedAt: at };
+    const without = { customerId: "בלי שעה", quantity: 1, rank: [3], orderedAt: "" };
+
+    expect(dealInRounds(1, [withTime, without])).toEqual({ "עם שעה": 1, "בלי שעה": 0 });
+    expect(dealInRounds(1, [without, withTime])).toEqual({ "עם שעה": 1, "בלי שעה": 0 });
+  });
+
+  it("settles two orders whose time cannot be read by the lower customer id, whatever order they arrive in", () => {
+    const first = { customerId: "א", quantity: 1, rank: [3], orderedAt: "" };
+    const second = { customerId: "ב", quantity: 1, rank: [3], orderedAt: "" };
+
+    expect(dealInRounds(1, [first, second])).toEqual({ א: 1, ב: 0 });
+    expect(dealInRounds(1, [second, first])).toEqual({ א: 1, ב: 0 });
+  });
+
   it("matches the owner's acceptance case: peach 1881, five ordered, three picked", () => {
     // General score and "days with peach out of 20", copied from his worked example.
     const facts: Array<[string, number, number, number]> = [
@@ -204,6 +254,119 @@ describe("learnFrom", () => {
       אסף: { [PRODUCT]: [1, -1] },
       פשה: { [PRODUCT]: [-1, 1] },
     });
+  });
+
+  it("counts a day on which a family was only arranged, not ordered, as a day it sold", () => {
+    const { shares } = learnFrom(
+      [
+        day("2026-09-01", { recorded: { [PRODUCT]: { א: 1 } } }),
+        day("2026-09-02", { orders: { [PRODUCT]: { ב: 1 } } }),
+      ],
+      FAMILY_OF,
+    );
+
+    expect(shares).toEqual({ א: { חציל: 0.5 }, ב: { חציל: 0.5 } });
+  });
+
+  it("treats a product that is in no family as a family of its own", () => {
+    const { shares } = learnFrom(
+      [
+        day("2026-09-01", { orders: { מלון: { א: 1 } } }),
+        day("2026-09-02", { orders: { אבטיח: { ב: 1 } } }),
+      ],
+      FAMILY_OF,
+    );
+
+    expect(shares).toEqual({ א: { מלון: 1 }, ב: { אבטיח: 1 } });
+  });
+
+  it("learns nothing from a line of zero pallets", () => {
+    const learned = learnFrom(
+      [
+        day("2026-09-01", {
+          supply: { [PRODUCT]: 1 },
+          orders: { [PRODUCT]: { אסף: 2, פשה: 0 } },
+          recorded: { [PRODUCT]: { אסף: 1, כבביה: 0 } },
+        }),
+        // Short too, and "arranged" with nothing but a record of zero pallets:
+        // that is not arranged in the app, so nothing is learnt about who came first.
+        day("2026-09-02", {
+          supply: { [PRODUCT]: 1 },
+          orders: { [PRODUCT]: { אסף: 2 } },
+          recorded: { [PRODUCT]: { אסף: 0 } },
+        }),
+      ],
+      FAMILY_OF,
+    );
+
+    expect(learned).toEqual({
+      shares: { אסף: { חציל: 1 } },
+      received: { אסף: { [PRODUCT]: 1 } },
+      shortages: { אסף: { [PRODUCT]: [1] } },
+    });
+  });
+
+  it("judges a shortage by pallets ordered, not by how many customers ordered", () => {
+    const { shortages } = learnFrom(
+      [
+        day("2026-09-01", {
+          supply: { [PRODUCT]: 1 },
+          orders: { [PRODUCT]: { אסף: 3 } },
+          recorded: { [PRODUCT]: { אסף: 1 } },
+        }),
+      ],
+      FAMILY_OF,
+    );
+
+    expect(shortages).toEqual({ אסף: { [PRODUCT]: [1] } });
+  });
+
+  it("counts a customer who got only part of what they ordered as served", () => {
+    const { shortages } = learnFrom(
+      [
+        day("2026-09-01", {
+          supply: { [PRODUCT]: 2 },
+          orders: { [PRODUCT]: { אסף: 2, פשה: 1 } },
+          recorded: { [PRODUCT]: { אסף: 1 } },
+        }),
+      ],
+      FAMILY_OF,
+    );
+
+    expect(shortages).toEqual({ אסף: { [PRODUCT]: [1] }, פשה: { [PRODUCT]: [-1] } });
+  });
+
+  it("judges each product against its own stock", () => {
+    const { shortages } = learnFrom(
+      [
+        day("2026-09-01", {
+          // Plenty of the first product, one pallet of the second.
+          supply: { [PRODUCT]: 5, "חציל בלאדי": 1 },
+          orders: { [PRODUCT]: { אסף: 1, פשה: 1 }, "חציל בלאדי": { אסף: 1, פשה: 1 } },
+          recorded: { [PRODUCT]: { אסף: 1, פשה: 1 }, "חציל בלאדי": { אסף: 1 } },
+        }),
+      ],
+      FAMILY_OF,
+    );
+
+    expect(shortages).toEqual({
+      אסף: { "חציל בלאדי": [1] },
+      פשה: { "חציל בלאדי": [-1] },
+    });
+  });
+
+  it("takes a product with no stock figure for the day as having had none", () => {
+    const { shortages } = learnFrom(
+      [
+        day("2026-09-01", {
+          orders: { [PRODUCT]: { אסף: 1, פשה: 1 } },
+          recorded: { [PRODUCT]: { אסף: 1 } },
+        }),
+      ],
+      FAMILY_OF,
+    );
+
+    expect(shortages).toEqual({ אסף: { [PRODUCT]: [1] }, פשה: { [PRODUCT]: [-1] } });
   });
 });
 
@@ -599,7 +762,167 @@ describe("assignLots — whose lot each customer's pallets come off", () => {
 
     expect(cells.reduce((sum, cell) => sum + cell.quantity, 0)).toBe(1);
   });
+
+  it("takes each customer's pallets from the lot with the most left at that moment", () => {
+    const cells = assignLots(
+      [
+        { growerId: "A", available: 4 },
+        { growerId: "B", available: 3 },
+      ],
+      [
+        { customerId: "X", quantity: 2 },
+        { customerId: "Y", quantity: 2 },
+      ],
+    );
+
+    // X takes lot A down to 2, so for Y lot B now has more.
+    expect(byCustomer(cells)).toEqual({ X: { A: 2 }, Y: { B: 2 } });
+  });
+
+  it("splits a customer over two lots by whichever has the most left each time", () => {
+    // "ב" has a saved cell on lot B, so he goes first and takes 3 of lot A's 5.
+    // "א" then takes lot B whole (3 left against 2) and the last pallet from lot A.
+    const cells = assignLots(
+      [
+        { growerId: "A", available: 5 },
+        { growerId: "B", available: 3, takenBy: new Set(["ב"]) },
+      ],
+      [
+        { customerId: "א", quantity: 4 },
+        { customerId: "ב", quantity: 3 },
+      ],
+    );
+
+    expect(byCustomer(cells)).toEqual({ ב: { A: 3 }, א: { B: 3, A: 1 } });
+  });
+
+  it("places first the customer who can be given from the fewest pallets", () => {
+    // "ב" has a saved cell on lot C, so only 4 pallets are open to him against
+    // 5 for "א" — who would be first on the id. Lots A and B tie, and B is tried first.
+    const cells = assignLots(
+      [
+        { growerId: "A", available: 2 },
+        { growerId: "B", available: 2 },
+        { growerId: "C", available: 1, takenBy: new Set(["ב"]) },
+      ],
+      [
+        { customerId: "א", quantity: 2 },
+        { customerId: "ב", quantity: 2 },
+      ],
+    );
+
+    expect(byCustomer(cells)).toEqual({ ב: { B: 2 }, א: { A: 2 } });
+  });
+
+  it("counts an overdrawn lot as holding nothing, not as a debt against a customer's reach", () => {
+    // "א" is shut out of the overdrawn lot C and "ב" is not. C counts as empty
+    // for "ב" too, so both can be given from the same 4 pallets — and "א" is
+    // first on the id.
+    const cells = assignLots(
+      [
+        { growerId: "A", available: 2 },
+        { growerId: "B", available: 2 },
+        { growerId: "C", available: -3, takenBy: new Set(["א"]) },
+      ],
+      [
+        { customerId: "א", quantity: 2 },
+        { customerId: "ב", quantity: 2 },
+      ],
+    );
+
+    expect(byCustomer(cells)).toEqual({ א: { B: 2 }, ב: { A: 2 } });
+  });
+
+  it("serves the larger share first whatever the customers' ids", () => {
+    const cells = assignLots(
+      [
+        { growerId: "A", available: 3 },
+        { growerId: "B", available: 3 },
+      ],
+      [
+        { customerId: "א", quantity: 1 },
+        { customerId: "ב", quantity: 3 },
+      ],
+    );
+
+    expect(byCustomer(cells)).toEqual({ ב: { B: 3 }, א: { A: 1 } });
+  });
+
+  it("settles customers equal in every way by the lower id, whatever order they arrive in", () => {
+    const cells = assignLots(
+      [
+        { growerId: "A", available: 2 },
+        { growerId: "B", available: 2 },
+      ],
+      [
+        { customerId: "ב", quantity: 2 },
+        { customerId: "א", quantity: 2 },
+      ],
+    );
+
+    expect(byCustomer(cells)).toEqual({ א: { B: 2 }, ב: { A: 2 } });
+  });
+
+  it("places whole pallets only, whatever fraction of a pallet a lot has over", () => {
+    const total = (cells: ReturnType<typeof assignLots>) =>
+      cells.reduce((sum, cell) => sum + cell.quantity, 0);
+
+    // Two lots of one and a half: three pallets on paper, two whole ones.
+    expect(
+      total(
+        assignLots(
+          [
+            { growerId: "A", available: 1.5 },
+            { growerId: "B", available: 1.5 },
+          ],
+          [{ customerId: "א", quantity: 3 }],
+        ),
+      ),
+    ).toBe(2);
+    // More wanted than fits: a lot of one and a half holds one.
+    expect(
+      total(
+        assignLots(
+          [{ growerId: "A", available: 1.5 }],
+          [
+            { customerId: "א", quantity: 1 },
+            { customerId: "ב", quantity: 1 },
+          ],
+        ),
+      ),
+    ).toBe(1);
+  });
 });
+
+/** customer → grower → pallets, whatever order the cells come in. */
+function byCustomer(
+  cells: ReadonlyArray<{ growerId: string; customerId: string; quantity: number }>,
+): Record<string, Record<string, number>> {
+  const out: Record<string, Record<string, number>> = {};
+  for (const cell of cells) {
+    const lots = (out[cell.customerId] ??= {});
+    lots[cell.growerId] = (lots[cell.growerId] ?? 0) + cell.quantity;
+  }
+  return out;
+}
+
+/** No customer is given more than their share, no lot gives more than it has, and no cell lands where a customer's is already saved. */
+function expectValidPlacement(
+  lots: readonly LotToFill[],
+  shares: ReadonlyArray<{ customerId: string; quantity: number }>,
+  cells: ReadonlyArray<{ growerId: string; customerId: string; quantity: number }>,
+) {
+  const sum = (some: typeof cells) => some.reduce((total, cell) => total + cell.quantity, 0);
+  for (const share of shares) {
+    const own = cells.filter((cell) => cell.customerId === share.customerId);
+    expect(sum(own)).toBeLessThanOrEqual(share.quantity);
+  }
+  for (const lot of lots) {
+    const off = cells.filter((cell) => cell.growerId === lot.growerId);
+    expect(sum(off)).toBeLessThanOrEqual(Math.max(0, Math.floor(lot.available)));
+    for (const cell of off) expect(lot.takenBy?.has(cell.customerId) ?? false).toBe(false);
+  }
+}
 
 describe("proposeArrangement — the lines it returns", () => {
   it("names the grower, the product and the customer of every cell, in whole pallets", () => {
@@ -939,5 +1262,278 @@ describe("assignLots — placed in full", () => {
 
     expect(cells.reduce((sum, cell) => sum + cell.quantity, 0)).toBe(5);
     expect(cells.find((cell) => cell.customerId === "X")?.growerId).toBe("A");
+  });
+
+  it("moves a customer's pallet to another lot to make room for one more", () => {
+    // Lot B (1) is shut to Q, so the pallet on it can only be P's; the rest
+    // share lot A (5). The 6 pallets the lots hold can all go, though 7 are wanted.
+    const lots = [
+      { growerId: "A", available: 5 },
+      { growerId: "B", available: 1, takenBy: new Set(["Q"]) },
+    ];
+    const shares = [
+      { customerId: "P", quantity: 5 },
+      { customerId: "Q", quantity: 2 },
+    ];
+
+    const cells = assignLots(lots, shares);
+
+    expectValidPlacement(lots, shares, cells);
+    expect(cells.reduce((sum, cell) => sum + cell.quantity, 0)).toBe(6);
+  });
+
+  it("places every pallet when making room for one takes moving a chain of others", () => {
+    // R can only use lot C; Q, who is on it, can only go to lot B; P, who is
+    // on that, can go to lot A. All five fit, but only if the later customers
+    // push the earlier ones along.
+    const lots = [
+      { growerId: "A", available: 2, takenBy: new Set(["Q", "R"]) },
+      { growerId: "B", available: 2, takenBy: new Set(["R"]) },
+      { growerId: "C", available: 2, takenBy: new Set(["P"]) },
+    ];
+    const shares = [
+      { customerId: "P", quantity: 2 },
+      { customerId: "Q", quantity: 2 },
+      { customerId: "R", quantity: 1 },
+    ];
+
+    const cells = assignLots(lots, shares);
+
+    expectValidPlacement(lots, shares, cells);
+    expect(cells.reduce((sum, cell) => sum + cell.quantity, 0)).toBe(5);
+  });
+
+  it("gives the pallets that fit to the lower id of two equal customers, whatever order they arrive in", () => {
+    const lots = [{ growerId: "A", available: 1 }];
+    const first = { customerId: "א", quantity: 3 };
+    const second = { customerId: "ב", quantity: 3 };
+
+    expect(byCustomer(assignLots(lots, [first, second]))).toEqual({ א: { A: 1 } });
+    expect(byCustomer(assignLots(lots, [second, first]))).toEqual({ א: { A: 1 } });
+  });
+});
+
+// Cases a mutation check of the engine showed the tests above left open: each
+// is a rule the code states and no case yet depended on.
+describe("proposeArrangement — saved cells and order lines, counted per customer and per product", () => {
+  const at = "2026-10-20T05:00:00Z";
+  const CABBAGE = "כרוב אלוף";
+
+  it("lets a saved cell of one product change nothing about another product", () => {
+    // "א" has a saved cell on the grower's eggplant lot. The grower's cabbage is
+    // another lot, and the eggplant is no part of what "א" is owed in cabbage.
+    const today: DayToPropose = {
+      date: "2026-10-20",
+      lots: [
+        { growerId: "מגדל", varietyId: PRODUCT, available: 2 },
+        { growerId: "מגדל", varietyId: CABBAGE, available: 2 },
+      ],
+      orders: [{ customerId: "א", varietyId: CABBAGE, quantity: 2, orderedAt: at }],
+      arranged: [{ growerId: "מגדל", varietyId: PRODUCT, customerId: "א", quantity: 1 }],
+    };
+
+    expect(propose(today)).toEqual([
+      { growerId: "מגדל", varietyId: CABBAGE, customerId: "א", quantity: 2 },
+    ]);
+  });
+
+  it("adds up what a customer already has when it sits in cells on several lots", () => {
+    // "א" ordered 3 and has a pallet in each of two lots that are now empty.
+    const today: DayToPropose = {
+      date: "2026-10-20",
+      lots: [
+        { growerId: "ריק א", varietyId: PRODUCT, available: 0 },
+        { growerId: "ריק ב", varietyId: PRODUCT, available: 0 },
+        { growerId: "מלא", varietyId: PRODUCT, available: 5 },
+      ],
+      orders: [{ customerId: "א", varietyId: PRODUCT, quantity: 3, orderedAt: at }],
+      arranged: [
+        { growerId: "ריק א", varietyId: PRODUCT, customerId: "א", quantity: 1 },
+        { growerId: "ריק ב", varietyId: PRODUCT, customerId: "א", quantity: 1 },
+      ],
+    };
+
+    expect(given(propose(today))).toEqual({ א: 1 });
+  });
+
+  it("adds up two order lines of one customer for one product", () => {
+    const lines = propose({
+      ...oneLotDay(5, []),
+      orders: [
+        { customerId: "א", varietyId: PRODUCT, quantity: 1, orderedAt: at },
+        { customerId: "א", varietyId: PRODUCT, quantity: 2, orderedAt: at },
+      ],
+    });
+
+    expect(given(lines)).toEqual({ א: 3 });
+  });
+
+  it.each([
+    ["the later line first", ["2026-10-20T08:00:00Z", "2026-10-20T05:00:00Z"]],
+    ["the earlier line first", ["2026-10-20T05:00:00Z", "2026-10-20T08:00:00Z"]],
+  ])("ranks a customer with two order lines by the earlier of them, %s", (_case, times) => {
+    // "יחיד" is first on the id and ordered at 06:00; "כפול" ordered at 05:00
+    // and again at 08:00, and should count as having ordered at 05:00.
+    const lines = propose({
+      ...oneLotDay(1, []),
+      orders: [
+        ...times.map((orderedAt) => ({
+          customerId: "כפול",
+          varietyId: PRODUCT,
+          quantity: 1,
+          orderedAt,
+        })),
+        { customerId: "יחיד", varietyId: PRODUCT, quantity: 1, orderedAt: "2026-10-20T06:00:00Z" },
+      ],
+    });
+
+    expect(given(lines)).toEqual({ כפול: 1 });
+  });
+
+  it("ignores an order line of zero pallets, its time included", () => {
+    // The zero line was written at 04:00; the customer's real order, at 08:00,
+    // comes after "יחיד"'s at 06:00.
+    const lines = propose({
+      ...oneLotDay(1, []),
+      orders: [
+        { customerId: "ביטל", varietyId: PRODUCT, quantity: 1, orderedAt: "2026-10-20T08:00:00Z" },
+        { customerId: "ביטל", varietyId: PRODUCT, quantity: 0, orderedAt: "2026-10-20T04:00:00Z" },
+        { customerId: "יחיד", varietyId: PRODUCT, quantity: 1, orderedAt: "2026-10-20T06:00:00Z" },
+      ],
+    });
+
+    expect(given(lines)).toEqual({ יחיד: 1 });
+  });
+
+  it("deals whole pallets when an order or a saved cell is a fraction", () => {
+    // 2.5 ordered: two whole pallets.
+    expect(given(propose(oneLotDay(10, [["א", 2.5]])))).toEqual({ א: 2 });
+
+    // 3.5 ordered with half a pallet already saved: three more.
+    const today: DayToPropose = {
+      ...oneLotDay(10, [["א", 3.5]]),
+      lots: [
+        { growerId: "ריק", varietyId: PRODUCT, available: 0 },
+        { growerId: "מגדל", varietyId: PRODUCT, available: 10 },
+      ],
+      arranged: [{ growerId: "ריק", varietyId: PRODUCT, customerId: "א", quantity: 0.5 }],
+    };
+    expect(given(propose(today))).toEqual({ א: 3 });
+  });
+});
+
+describe("proposeArrangement — the stock, the ranking, and a customer shut out of a lot", () => {
+  const at = "2026-10-20T05:00:00Z";
+
+  it("takes nothing off the other lots for a lot that is overdrawn", () => {
+    const lines = propose({
+      date: "2026-10-20",
+      lots: [
+        { growerId: "מלא", varietyId: PRODUCT, available: 3 },
+        { growerId: "חסר", varietyId: PRODUCT, available: -2 },
+      ],
+      orders: [{ customerId: "א", varietyId: PRODUCT, quantity: 3, orderedAt: at }],
+      arranged: [],
+    });
+
+    expect(lines).toEqual([{ growerId: "מלא", varietyId: PRODUCT, customerId: "א", quantity: 3 }]);
+  });
+
+  it("deals only the whole pallets the lots hold, to the best ranked, when each has half a pallet over", () => {
+    // 1.5 + 1.5 is three pallets on paper and two whole ones.
+    const lines = propose(
+      {
+        date: "2026-10-20",
+        lots: [
+          { growerId: "A", varietyId: PRODUCT, available: 1.5 },
+          { growerId: "B", varietyId: PRODUCT, available: 1.5 },
+        ],
+        orders: ["א", "ב", "ג"].map((customerId) => ({
+          customerId,
+          varietyId: PRODUCT,
+          quantity: 1,
+          orderedAt: at,
+        })),
+        arranged: [],
+      },
+      { scores: { א: 2.0, ב: 3.0, ג: 4.0 } },
+    );
+
+    expect(given(lines)).toEqual({ ב: 1, ג: 1 });
+  });
+
+  it("does not rank a customer with no score above one scored 1", () => {
+    // The mirror of the case where the unscored customer ordered first: here
+    // the scored one did, and the tie goes to him.
+    const lines = propose(
+      {
+        ...oneLotDay(1, []),
+        orders: [
+          {
+            customerId: "מדורג 1",
+            varietyId: PRODUCT,
+            quantity: 1,
+            orderedAt: "2026-10-20T04:00:00Z",
+          },
+          {
+            customerId: "לא מדורג",
+            varietyId: PRODUCT,
+            quantity: 1,
+            orderedAt: "2026-10-20T06:00:00Z",
+          },
+        ],
+      },
+      { scores: { "מדורג 1": 1.0 } },
+    );
+
+    expect(given(lines)).toEqual({ "מדורג 1": 1 });
+  });
+
+  it("takes a product that is in no family for a family of its own when ranking", () => {
+    const MELON = "מלון";
+    // "קבוע" orders melon on 2 of its 3 days: product score 5, priority 4.2,
+    // above "גבוה"'s 0.5 × 4.0 + 0.5 × 1 = 2.5.
+    const history = ["2026-09-01", "2026-09-02", "2026-09-03"].map((date, index) =>
+      day(date, { orders: { [MELON]: index < 2 ? { קבוע: 1 } : { אחר: 1 } } }),
+    );
+    const lines = propose(
+      {
+        date: "2026-10-20",
+        lots: [{ growerId: "מגדל", varietyId: MELON, available: 1 }],
+        orders: ["גבוה", "קבוע"].map((customerId) => ({
+          customerId,
+          varietyId: MELON,
+          quantity: 1,
+          orderedAt: at,
+        })),
+        arranged: [],
+      },
+      { history, scores: { גבוה: 4.0, קבוע: 3.4 } },
+    );
+
+    expect(lines).toEqual([
+      { growerId: "מגדל", varietyId: MELON, customerId: "קבוע", quantity: 1 },
+    ]);
+  });
+
+  it("still serves the best ranked first when a saved cell shuts one customer out of a lot", () => {
+    // Two lots of one pallet. X has a saved cell on lot B, so only lot A is
+    // open to him; Y and Z can take either. Three want a pallet and two can
+    // have one: the two best ranked, not whoever happens to fit.
+    const today: DayToPropose = {
+      date: "2026-10-20",
+      lots: [
+        { growerId: "A", varietyId: PRODUCT, available: 1 },
+        { growerId: "B", varietyId: PRODUCT, available: 1 },
+      ],
+      orders: [
+        { customerId: "X", varietyId: PRODUCT, quantity: 2, orderedAt: at },
+        { customerId: "Y", varietyId: PRODUCT, quantity: 1, orderedAt: at },
+        { customerId: "Z", varietyId: PRODUCT, quantity: 1, orderedAt: at },
+      ],
+      arranged: [{ growerId: "B", varietyId: PRODUCT, customerId: "X", quantity: 1 }],
+    };
+
+    expect(given(propose(today, { scores: { X: 1.0, Y: 4.0, Z: 3.0 } }))).toEqual({ Y: 1, Z: 1 });
   });
 });

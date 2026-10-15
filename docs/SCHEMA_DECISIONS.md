@@ -25,12 +25,26 @@ someone filled between the read and the save was silently overwritten.
 - **Only empty cells.** A cell that already holds a record is refused with P0006 (`CONFLICT`),
   every such cell listed at once — never overwritten. The proposal on screen is worked out against
   a read of the day; anything written since is the distributor's decision and wins.
+- **Not a push by accident.** A cell the screen marks `forOrder` was meant to fill the customer's
+  order: the engine suggested it, or the distributor typed it for a customer who had ordered the
+  product. If that order has been withdrawn since the read, `arrange_to_customer` would turn the
+  cell into a push (a zero-pallet order line has no ceiling) and `close_arrangement` would price
+  and announce pallets the customer took back — so such a cell is refused with P0006 as well,
+  listed the same way. A cell without the mark is a push the distributor typed, saved as it is.
 - **Locks, in the order the lifecycle functions take them.** The trading day `FOR SHARE` first, so a
   save cannot land inside a running `close_arrangement` (which locks only the day and closes the
   arrangement last, after leftovers and prices); then the arrangement `FOR UPDATE`, which every
   record writer takes, so "still empty" holds to commit; then the touched pick lines `FOR SHARE`, in
   id order, because the allocation check reads `pallets_picked` unlocked and `save_pick_lines`
-  could lower it.
+  could lower it; then the involved customers' order headers `FOR UPDATE`, in id order — the lock
+  `submit_order` takes before changing a customer's lines — so "still ordered" holds to commit.
+- **The cells are read into typed columns once.** Under RLS, Postgres will not use an index for a
+  join condition that calls a function not known to be leakproof, and `->>` and the cast to `uuid`
+  are not: joined on ids pulled out of the JSON, each check read every pick line (82,000) once per
+  cell, and a 72-cell save took 12 seconds against October's data — past the 8-second statement
+  timeout of a signed-in caller. Read once with `jsonb_to_recordset` and joined on typed columns,
+  the same save takes 0.3 seconds. The local test database is empty between tests and cannot show
+  this; it was measured on the cloud database as a signed-in backoffice user, rolled back.
 - **Nothing new to read the history with.** The 60 days the engine learns from are read straight
   from the tables under the caller's RLS, as the arrangement module's header says such reads should
   be; paged until a page comes back empty, so a `max_rows` cap cannot cut them short.

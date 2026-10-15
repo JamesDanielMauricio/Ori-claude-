@@ -270,21 +270,26 @@ export function proposeForDay({
     learned: learnFrom(learnedFrom.history, familyOf),
     familyOf,
     customers: learnedFrom.customers,
-  }).map((line) => ({ ...line, origin: "suggested" as const }));
+  }).map((line) => ({ ...line, forOrder: "suggested" as const }));
 }
 
 /**
  * When the customer FIRST submitted the order. submitted_at is reset on every
  * submission (submit_order, 0040), so it says who submitted last — and a
  * customer who corrects their order would lose their place to it.
+ *
+ * Compared as moments, not as text, and only among times that can be read:
+ * one that cannot would otherwise stick as "first" whenever it came first,
+ * and lose the order every tie. With none readable, the caller falls back.
  */
 function firstSubmission(order: BoardOrder): string | undefined {
-  let first: string | undefined;
+  let first: { text: string; at: number } | undefined;
   for (const log of order.order_submission_logs ?? []) {
-    if (first === undefined || Date.parse(log.created_at) < Date.parse(first))
-      first = log.created_at;
+    const at = Date.parse(log.created_at);
+    if (Number.isNaN(at)) continue;
+    if (first === undefined || at < first.at) first = { text: log.created_at, at };
   }
-  return first;
+  return first?.text;
 }
 
 /** Each customer's score and the day they were created, for the engine's ranking. */

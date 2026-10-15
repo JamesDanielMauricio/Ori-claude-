@@ -130,6 +130,159 @@ describe("historyFromRows", () => {
   it("collects each product's family as it goes", () => {
     expect(familyOf).toEqual({ [LEMON]: CITRUS, [LIME]: CITRUS });
   });
+
+  describe("on the rows of one day", () => {
+    // 2026-10-05, to which each test adds only what it is about.
+    const closedDay: HistoryRows["days"] = [
+      { id: "day-5", trade_date: "2026-10-05", daily_arrangements: { status: "closed" } },
+    ];
+    const none = { pickLines: [], orderLines: [], records: [] };
+    const record = (
+      overrides: Partial<HistoryRows["records"][number]> = {},
+    ): HistoryRows["records"][number] => ({
+      quantity_pallets: "2",
+      customer_company_id: "atara",
+      daily_arrangements: { trading_day_id: "day-5" },
+      daily_pick_products: { product_variety_id: LEMON, product_varieties: CITRUS_ROW },
+      daily_order_products: null,
+      ...overrides,
+    });
+
+    it("ignores lots, order lines and allocations of a day that is not in the window", () => {
+      const elsewhere = { trading_day_id: "day-elsewhere" };
+      const stray = historyFromRows({
+        days: closedDay,
+        pickLines: [
+          {
+            product_variety_id: LEMON,
+            pallets_picked: "4",
+            leftover_pallets: "1",
+            daily_picks: elsewhere,
+            product_varieties: CITRUS_ROW,
+          },
+        ],
+        orderLines: [
+          {
+            product_variety_id: LEMON,
+            pallets_ordered: "3",
+            daily_orders: { ...elsewhere, customer_company_id: "gabbai" },
+            product_varieties: CITRUS_ROW,
+          },
+        ],
+        records: [record({ daily_arrangements: elsewhere })],
+      });
+
+      expect(stray.history).toEqual([{ date: "2026-10-05", supply: {}, orders: {}, recorded: {} }]);
+    });
+
+    it("learns a product's family from an order line even when nothing of it was picked or arranged", () => {
+      const ordered = historyFromRows({
+        days: closedDay,
+        ...none,
+        orderLines: [
+          {
+            product_variety_id: LIME,
+            pallets_ordered: "2",
+            daily_orders: { trading_day_id: "day-5", customer_company_id: "gabbai" },
+            product_varieties: CITRUS_ROW,
+          },
+        ],
+      });
+
+      expect(ordered.familyOf).toEqual({ [LIME]: CITRUS });
+    });
+
+    it("learns a product's family from an allocation even when nothing of it was picked or ordered", () => {
+      const arranged = historyFromRows({ days: closedDay, ...none, records: [record()] });
+
+      expect(arranged.familyOf).toEqual({ [LEMON]: CITRUS });
+    });
+
+    it("counts a row whose product did not come back, and notes no family for it", () => {
+      const unknown = historyFromRows({
+        days: closedDay,
+        pickLines: [
+          {
+            product_variety_id: LEMON,
+            pallets_picked: "4",
+            leftover_pallets: "1",
+            daily_picks: { trading_day_id: "day-5" },
+            product_varieties: null,
+          },
+        ],
+        orderLines: [
+          {
+            product_variety_id: LEMON,
+            pallets_ordered: "3",
+            daily_orders: { trading_day_id: "day-5", customer_company_id: "gabbai" },
+            product_varieties: null,
+          },
+        ],
+        records: [
+          record({ daily_pick_products: { product_variety_id: LEMON, product_varieties: null } }),
+        ],
+      });
+
+      expect(unknown.familyOf).toStrictEqual({});
+      // 1 left + 2 arranged; the order line and the allocation count all the same.
+      expect(unknown.history[0]).toEqual({
+        date: "2026-10-05",
+        supply: { [LEMON]: 3 },
+        orders: { [LEMON]: { gabbai: 3 } },
+        recorded: { [LEMON]: { atara: 2 } },
+      });
+    });
+
+    it("adds up what one customer was given of one product from different lots", () => {
+      const twoLots = historyFromRows({
+        days: closedDay,
+        ...none,
+        records: [record({ quantity_pallets: "2" }), record({ quantity_pallets: "3" })],
+      });
+
+      expect(twoLots.history[0]?.recorded).toEqual({ [LEMON]: { atara: 5 } });
+    });
+
+    it("leaves an allocation of zero pallets out of the day", () => {
+      const empty = historyFromRows({
+        days: closedDay,
+        ...none,
+        records: [record({ quantity_pallets: "0" })],
+      });
+
+      expect(empty.history[0]).toEqual({
+        date: "2026-10-05",
+        supply: {},
+        orders: {},
+        recorded: {},
+      });
+    });
+
+    it("ignores an allocation whose lot did not come back", () => {
+      const lotless = historyFromRows({
+        days: closedDay,
+        ...none,
+        records: [record({ daily_pick_products: null })],
+      });
+
+      expect(lotless.history[0]).toEqual({
+        date: "2026-10-05",
+        supply: {},
+        orders: {},
+        recorded: {},
+      });
+    });
+
+    it("reads an allocation's customer off its own copy when its order line came back without its order", () => {
+      const orderless = historyFromRows({
+        days: closedDay,
+        ...none,
+        records: [record({ daily_order_products: { daily_orders: null } })],
+      });
+
+      expect(orderless.history[0]?.recorded).toEqual({ [LEMON]: { atara: 2 } });
+    });
+  });
 });
 
 describe("readAllPages", () => {
@@ -145,6 +298,39 @@ describe("readAllPages", () => {
 
     expect(read).toEqual(rows);
     expect(asked.map(([from]) => from)).toEqual([0, 2, 4, 6, 7]);
+  });
+
+  it("asks for each page as a range of exactly the page size, both ends included", async () => {
+    const asked: Array<[number, number]> = [];
+    const read = await readAllPages(async (from, to) => {
+      asked.push([from, to]);
+      return rows.slice(from, to + 1);
+    }, 3);
+
+    expect(read).toEqual(rows);
+    expect(asked).toEqual([
+      [0, 2],
+      [3, 5],
+      [6, 8],
+      [7, 9],
+    ]);
+  });
+
+  it("reads pages of 1000 rows unless told otherwise", async () => {
+    const many = Array.from({ length: 2500 }, (_, index) => index);
+    const asked: Array<[number, number]> = [];
+    const read = await readAllPages(async (from, to) => {
+      asked.push([from, to]);
+      return many.slice(from, to + 1);
+    });
+
+    expect(read).toEqual(many);
+    expect(asked).toEqual([
+      [0, 999],
+      [1000, 1999],
+      [2000, 2999],
+      [2500, 3499],
+    ]);
   });
 
   it("asks once when there is nothing", async () => {
@@ -362,6 +548,141 @@ describe("dayToPropose", () => {
   it("carries the day's date", () => {
     expect(day.date).toBe("2026-10-12");
   });
+
+  it("takes every allocation on a lot off what is free on it, not only the last", () => {
+    const two = dayToPropose({
+      tradeDate: "2026-10-12",
+      picks,
+      orders,
+      records: [
+        records[0]!,
+        {
+          ...records[0]!,
+          id: "record-2",
+          daily_order_product_id: "ol-atara-lemon",
+          customer_company_id: "atara",
+          quantity_pallets: 2,
+        },
+      ],
+    });
+
+    // 5 picked + 4 carried in, less 1 and 2 arranged.
+    expect(two.lots[0]).toEqual({ growerId: "grower-a", varietyId: LEMON, available: 6 });
+  });
+
+  it("lists no saved allocation on a lot that is not offered", () => {
+    const offNoLot = dayToPropose({
+      tradeDate: "2026-10-12",
+      picks,
+      orders,
+      records: [
+        { ...records[0]!, id: "record-orphan", daily_pick_product_id: "line-a-orphan" },
+        { ...records[0]!, id: "record-nobody", daily_pick_product_id: "line-nobody" },
+      ],
+    });
+
+    expect(offNoLot.arranged).toEqual([]);
+  });
+
+  it("reads a saved allocation's customer off the record's own copy when its order line is not among the orders", () => {
+    const withdrawn = dayToPropose({
+      tradeDate: "2026-10-12",
+      picks,
+      orders,
+      records: [
+        { ...records[0]!, daily_order_product_id: "ol-withdrawn", customer_company_id: "dana" },
+      ],
+    });
+
+    expect(withdrawn.arranged).toEqual([
+      { growerId: "grower-a", varietyId: LEMON, customerId: "dana", quantity: 1 },
+    ]);
+  });
+
+  it("counts an order line whose product did not come back under the line's own product id, as the grid does", () => {
+    const productless: BoardOrder = {
+      id: "order-dana",
+      customer_company_id: "dana",
+      status: "submitted",
+      submitted_at: "2026-10-12T08:00:00+00:00",
+      order_submission_logs: [],
+      daily_order_products: [
+        {
+          id: "ol-dana-lemon",
+          daily_order_id: "order-dana",
+          product_variety_id: LEMON,
+          pallets_ordered: "2",
+          comment: null,
+          product_varieties: null,
+        },
+      ],
+    };
+
+    const unknown = dayToPropose({
+      tradeDate: "2026-10-12",
+      picks,
+      orders: [productless],
+      records: [],
+    });
+
+    expect(unknown.orders).toEqual([
+      { customerId: "dana", varietyId: LEMON, quantity: 2, orderedAt: "2026-10-12T08:00:00+00:00" },
+    ]);
+  });
+
+  describe("the date of an order", () => {
+    // One order of dana's for lemons, submitted at each of `times`, in the
+    // order the rows arrive in.
+    const submittedAt = (...times: string[]): BoardOrder => ({
+      id: "order-dana",
+      customer_company_id: "dana",
+      status: "submitted",
+      submitted_at: "2026-10-12T12:00:00+00:00",
+      order_submission_logs: times.map((created_at, index) => ({
+        id: `log-${index}`,
+        created_at,
+        snapshot: [],
+      })),
+      daily_order_products: [
+        {
+          id: "ol-dana-lemon",
+          daily_order_id: "order-dana",
+          product_variety_id: LEMON,
+          pallets_ordered: "1",
+          comment: null,
+          product_varieties: variety(LEMON),
+        },
+      ],
+    });
+    const orderedAtOf = (order: BoardOrder) =>
+      dayToPropose({ tradeDate: "2026-10-12", picks, orders: [order], records: [] }).orders[0]
+        ?.orderedAt;
+
+    it("is its first submission, by the moment and not the text, when the logs are in different time zones", () => {
+      // 09:00 at +03:00 is 06:00 UTC: earlier than 07:00Z, though "09" sorts after "07".
+      const early = "2026-10-12T09:00:00+03:00";
+      const late = "2026-10-12T07:00:00Z";
+
+      expect(orderedAtOf(submittedAt(early, late))).toBe(early);
+      expect(orderedAtOf(submittedAt(late, early))).toBe(early);
+    });
+
+    it("stays a readable time when a later log's time cannot be read", () => {
+      expect(orderedAtOf(submittedAt("2026-10-12T06:00:00+00:00", "not a time"))).toBe(
+        "2026-10-12T06:00:00+00:00",
+      );
+    });
+
+    it("is a readable time even when a log whose time cannot be read comes first", () => {
+      expect(orderedAtOf(submittedAt("not a time", "2026-10-12T06:00:00+00:00"))).toBe(
+        "2026-10-12T06:00:00+00:00",
+      );
+    });
+
+    it("is when it was last submitted when no log's time can be read", () => {
+      expect(orderedAtOf(submittedAt("not a time", "nor this"))).toBe("2026-10-12T12:00:00+00:00");
+    });
+  });
 });
 
 describe("customerFactsFrom", () => {
@@ -378,6 +699,15 @@ describe("customerFactsFrom", () => {
       gabbai: { generalScore: 4.35, since: "2025-03-01" },
       atara: { generalScore: null, since: "2026-10-01" },
     });
+  });
+
+  it("takes a score that cannot be read for no score at all, not for a zero", () => {
+    const facts = customerFactsFrom({
+      customers: [{ id: "gabbai", created_at: "2025-03-01T10:00:00+00:00" }],
+      scores: [{ customer_company_id: "gabbai", general_score: "n/a" }],
+    });
+
+    expect(facts.gabbai?.generalScore).toBeNull();
   });
 });
 
@@ -450,7 +780,7 @@ describe("proposeForDay", () => {
         varietyId: KUMQUAT,
         customerId: "gabbai",
         quantity: 1,
-        origin: "suggested",
+        forOrder: "suggested",
       },
     ]);
   });
@@ -467,5 +797,123 @@ describe("proposeForDay", () => {
     };
 
     expect(proposeForDay({ tradeDate, picks, orders, records: [saved], learnedFrom })).toEqual([]);
+  });
+
+  it("works around a lot whose product did not come back", () => {
+    const withOrphan: BoardPick[] = [
+      {
+        ...picks[0]!,
+        daily_pick_products: [
+          ...picks[0]!.daily_pick_products,
+          {
+            id: "line-a-orphan",
+            daily_pick_id: "pick-a",
+            product_variety_id: "variety-gone",
+            pallets_picked: "9",
+            leftover_pallets: "0",
+            comment: null,
+            product_varieties: null,
+          },
+        ],
+      },
+    ];
+
+    expect(
+      proposeForDay({ tradeDate, picks: withOrphan, orders, records: [], learnedFrom }),
+    ).toEqual(proposeForDay({ tradeDate, picks, orders, records: [], learnedFrom }));
+  });
+
+  it("marks every line it proposes as suggested", () => {
+    const plenty: BoardPick[] = [
+      {
+        ...picks[0]!,
+        daily_pick_products: [{ ...picks[0]!.daily_pick_products[0]!, pallets_picked: "5" }],
+      },
+    ];
+    const lines = proposeForDay({ tradeDate, picks: plenty, orders, records: [], learnedFrom });
+
+    expect(lines.map((line) => line.customerId).sort()).toEqual(["atara", "gabbai"]);
+    expect(lines.map((line) => line.forOrder)).toEqual(["suggested", "suggested"]);
+  });
+
+  it("proposes no more than a lot holds when what it holds is part of a pallet", () => {
+    const partOfAPallet: BoardPick[] = [
+      {
+        ...picks[0]!,
+        daily_pick_products: [{ ...picks[0]!.daily_pick_products[0]!, pallets_picked: "2.5" }],
+      },
+    ];
+    const twoEach = orders.map((order) => ({
+      ...order,
+      daily_order_products: order.daily_order_products.map((line) => ({
+        ...line,
+        pallets_ordered: "2",
+      })),
+    }));
+    const lines = proposeForDay({
+      tradeDate,
+      picks: partOfAPallet,
+      orders: twoEach,
+      records: [],
+      learnedFrom,
+    });
+
+    expect(lines.reduce((sum, line) => sum + line.quantity, 0)).toBe(2);
+  });
+
+  it("ranks customers by the owner's scores when a product is short", () => {
+    const scored = {
+      history: [],
+      familyOf: {},
+      customers: {
+        atara: { generalScore: null, since: null },
+        gabbai: { generalScore: 5, since: null },
+      },
+    };
+
+    // Atara ordered first, but Gabbai is the one the owner scored.
+    expect(
+      proposeForDay({ tradeDate, picks, orders, records: [], learnedFrom: scored }).map(
+        (line) => line.customerId,
+      ),
+    ).toEqual(["gabbai"]);
+  });
+
+  it("judges who is a newcomer as of the day's trade date", () => {
+    const customers = {
+      gabbai: { generalScore: 4, since: "2025-01-01" },
+      // Created 11 days before the day: no habits yet, so ranked on the score alone.
+      atara: { generalScore: 4, since: "2026-10-01" },
+    };
+    const gabbaiFirst = [
+      orderFor("gabbai", "2026-10-12T06:00:00+00:00"),
+      orderFor("atara", "2026-10-12T09:00:00+00:00"),
+    ];
+
+    expect(
+      proposeForDay({
+        tradeDate,
+        picks,
+        orders: gabbaiFirst,
+        records: [],
+        learnedFrom: { history: [], familyOf: {}, customers },
+      }).map((line) => line.customerId),
+    ).toEqual(["atara"]);
+  });
+
+  it("serves an order with no time at all after an equal one that has a time", () => {
+    // "a-untimed" would come first on its id alone.
+    const untimed: BoardOrder = { ...orderFor("a-untimed", ""), submitted_at: null };
+    const timed = orderFor("z-timed", "2026-10-12T09:00:00+00:00");
+
+    expect(
+      proposeForDay({
+        tradeDate,
+        picks,
+        orders: [untimed, timed],
+        records: [],
+        learnedFrom: { history: [], familyOf: {}, customers: {} },
+      }).map((line) => line.customerId),
+    ).toEqual(["z-timed"]);
   });
 });

@@ -400,9 +400,9 @@ export default function NewArrangementPage() {
    */
   const commitCell = async (write: MatrixWrite): Promise<boolean> => {
     if (suggestion && proposal && boardDay) {
-      const picks = boardDay.daily_picks;
+      const day = { picks: boardDay.daily_picks, orders: boardDay.daily_orders };
       // Where the number goes does not depend on the lines, only on the cell.
-      const typed = typeIntoProposal(suggestion.lines, picks, write);
+      const typed = typeIntoProposal(suggestion.lines, day, write);
       if (!typed) return false;
       // Applied to the lines as they stand when this runs, not as they were
       // when the cell was drawn: two corrections in a row must both land.
@@ -410,7 +410,7 @@ export default function NewArrangementPage() {
         (current) =>
           current && {
             ...current,
-            lines: typeIntoProposal(current.lines, picks, write)?.lines ?? current.lines,
+            lines: typeIntoProposal(current.lines, day, write)?.lines ?? current.lines,
           },
       );
       if (!typed.saveNow) return true;
@@ -628,9 +628,10 @@ export default function NewArrangementPage() {
     proposal?.allocations.reduce((sum, allocation) => sum + allocation.quantity, 0) ?? 0;
   // Counted on every read of the day, not once when offered: lines drop out
   // as cells are filled and orders change while the proposal is on preview.
-  const leftOut = proposal
-    ? proposal.alreadyArranged + proposal.unplaceable + proposal.noLongerOrdered
-    : 0;
+  // Two counts, because they have different causes: a cell the day has no
+  // room for, against a line held to what the customer has on order.
+  const leftOut = proposal ? proposal.alreadyArranged + proposal.unplaceable : 0;
+  const heldToOrder = proposal?.heldToOrder ?? 0;
   // Why the grid is empty, when the cut-down view is why: its own message
   // assumes a search that matched nothing.
   const emptyLabel =
@@ -690,7 +691,9 @@ export default function NewArrangementPage() {
             <span className="font-semibold">הצעת סידור — עדיין לא נשמרה.</span>{" "}
             {formatPallets(proposedPallets)} משטחים ב-{proposal.allocations.length} תאים.
             {leftOut > 0 &&
-              ` ${leftOut} שורות מההצעה לא נכללו: כבר משובצות, ההזמנה שלהן השתנתה, או שאין להן מקום ביום זה.`}
+              ` ${leftOut} שורות מההצעה לא נכללו: כבר משובצות, או שאין להן מקום ביום זה.`}
+            {heldToOrder > 0 &&
+              ` ${heldToOrder} שורות קוצצו או ירדו כדי לא לעבור את מה שהלקוח הזמין.`}
             {suggestion.refusal && (
               <span className="block font-semibold text-danger">{suggestion.refusal}</span>
             )}

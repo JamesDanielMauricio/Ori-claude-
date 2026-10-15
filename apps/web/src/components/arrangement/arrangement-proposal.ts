@@ -27,23 +27,24 @@ export interface ProposalLine {
   customerId: string;
   quantity: number;
   /**
-   * Where the line came from, when not typed into an empty cell:
+   * Whether the line is meant to fill the customer's order — and whose number
+   * it is:
    *
-   *   suggested  worked out by the engine against the orders as they stood.
-   *              It only ever fills an order, so each time the day is read
-   *              again it is held to what the customer still has on order
-   *              (see resolveProposal) — cut when the order was reduced,
-   *              dropped when it was withdrawn.
-   *   corrected  a suggested cell the distributor typed a number over. The
-   *              number stands as typed, but it was still meant to fill the
-   *              order, so it is dropped if the order is withdrawn.
+   *   suggested  worked out by the engine, which only ever fills an order.
+   *   typed      typed by the distributor for a customer who, on the day as
+   *              read at that moment, had ordered that product.
    *
-   * A line with neither is the distributor's own decision — a push to someone
-   * who did not order included — and is left as typed. Saving tells the
-   * database which cells were for an order (`forOrder`), so it can refuse one
-   * whose order went in the moments before the save.
+   * A line for an order is held to it each time the day is read again (see
+   * resolveProposal): dropped once the order is withdrawn, and a suggestion
+   * cut to what is left of the order once the numbers typed have taken
+   * theirs. A typed number is never cut.
+   *
+   * A line without it is a push — a number typed for a customer with no order
+   * for the product — and is left as typed. Saving tells the database which
+   * cells were for an order (`forOrder`), so it can refuse one whose order
+   * went in the moments before the save rather than save it as a push.
    */
-  origin?: "suggested" | "corrected";
+  forOrder?: "suggested" | "typed";
 }
 
 export interface ResolvedProposal {
@@ -58,15 +59,34 @@ export interface ResolvedProposal {
    */
   unplaceable: number;
   /**
-   * Suggested or corrected lines dropped, or suggested lines cut, because the
-   * customer's order has since been withdrawn or reduced, or the rest of it
-   * arranged.
+   * Lines dropped or cut so as not to go over what the customer has on order:
+   * lines for an order that has since been withdrawn, and suggestions cut
+   * because less of it is left than they proposed — reduced, arranged
+   * elsewhere, or taken by numbers the distributor typed.
    */
-  noLongerOrdered: number;
+  heldToOrder: number;
 }
 
 // Same separator, for the same reason, as matrix-data.ts.
 const SEP = "\u0000";
+
+/**
+ * Pallets each customer has on order of each product, keyed customer and
+ * product — order lines above zero only, as the grid and the save count an
+ * order. A line for no pallets (a push leaves one behind) is no order.
+ */
+function orderedPallets(orders: readonly BoardOrder[]): Map<string, number> {
+  const ordered = new Map<string, number>();
+  for (const order of orders) {
+    for (const line of order.daily_order_products) {
+      const pallets = Number(line.pallets_ordered);
+      if (!(pallets > 0)) continue;
+      const key = `${order.customer_company_id}${SEP}${line.product_varieties?.id ?? line.product_variety_id}`;
+      ordered.set(key, (ordered.get(key) ?? 0) + pallets);
+    }
+  }
+  return ordered;
+}
 
 /**
  * Lands a suggestion on the day as it was last read.
@@ -135,16 +155,8 @@ export function resolveProposal({
       if (line.product_varieties) varietyOfPickLine.set(line.id, line.product_varieties.id);
     }
   }
-  const owed = new Map<string, number>();
-  for (const order of orders) {
-    for (const line of order.daily_order_products) {
-      const pallets = Number(line.pallets_ordered);
-      if (!(pallets > 0)) continue;
-      const key = `${order.customer_company_id}${SEP}${line.product_varieties?.id ?? line.product_variety_id}`;
-      owed.set(key, (owed.get(key) ?? 0) + pallets);
-    }
-  }
-  // Who has an order at all for a product — what a corrected line needs.
+  const owed = orderedPallets(orders);
+  // Who has an order at all for a product — what every line for an order needs.
   const hasOrder = new Set(owed.keys());
   for (const record of records) {
     const ownerId = orderLineOwner.get(record.daily_order_product_id) ?? record.customer_company_id;
@@ -158,13 +170,18 @@ export function resolveProposal({
     }
   }
 
-  // Keyed by cell so two lines for the same one become a single write. Saved
-  // separately, the second would simply overwrite the first.
-  const byCell = new Map<string, ProposedAllocation>();
   let alreadyArranged = 0;
   let unplaceable = 0;
-  let noLongerOrdered = 0;
+  let heldToOrder = 0;
 
+  // Where each line lands — or why it lands nowhere.
+  const landed: Array<{
+    line: ProposalLine;
+    pickLineId: string;
+    cell: string;
+    key: string;
+    quantity: number;
+  }> = [];
   for (const line of lines) {
     const pickLineId = pickLineByGrowerVariety.get(`${line.growerId}${SEP}${line.varietyId}`);
     const wholePallets = Number.isInteger(line.quantity) && line.quantity > 0;
@@ -179,27 +196,46 @@ export function resolveProposal({
       continue;
     }
 
-    let quantity = line.quantity;
     const key = `${line.customerId}${SEP}${line.varietyId}`;
-    if (line.origin === "suggested") {
-      const left = Math.max(0, Math.floor(owed.get(key) ?? 0));
-      if (left < quantity) {
-        noLongerOrdered += 1;
-        quantity = left;
-      }
-      if (quantity <= 0) continue;
-      owed.set(key, left - quantity);
-    } else if (line.origin === "corrected" && !hasOrder.has(key)) {
-      noLongerOrdered += 1;
+    if (line.forOrder !== undefined && !hasOrder.has(key)) {
+      heldToOrder += 1;
       continue;
     }
+    landed.push({ line, pickLineId, cell, key, quantity: line.quantity });
+  }
 
-    const existing = byCell.get(cell);
-    const forOrder = line.origin !== undefined || existing?.forOrder === true;
-    byCell.set(cell, {
-      pickLineId,
-      customerId: line.customerId,
-      quantity: (existing?.quantity ?? 0) + quantity,
+  // Held to the order: every number the distributor typed for the customer
+  // and product is taken off it first, as typed and wherever it stands among
+  // the lines — a push included, which counts against an order placed after
+  // it was typed — and the suggestions get what is left, in the order they
+  // came. Without that, the save would carry more than the order, and be
+  // refused for it until someone found the cell.
+  for (const entry of landed) {
+    if (entry.line.forOrder !== "suggested") {
+      owed.set(entry.key, (owed.get(entry.key) ?? 0) - entry.quantity);
+    }
+  }
+  for (const entry of landed) {
+    if (entry.line.forOrder !== "suggested") continue;
+    const left = Math.max(0, Math.floor(owed.get(entry.key) ?? 0));
+    if (left < entry.quantity) {
+      heldToOrder += 1;
+      entry.quantity = left;
+    }
+    owed.set(entry.key, left - entry.quantity);
+  }
+
+  // Keyed by cell so two lines for the same one become a single write. Saved
+  // separately, the second would simply overwrite the first.
+  const byCell = new Map<string, ProposedAllocation>();
+  for (const entry of landed) {
+    if (entry.quantity <= 0) continue;
+    const existing = byCell.get(entry.cell);
+    const forOrder = entry.line.forOrder !== undefined || existing?.forOrder === true;
+    byCell.set(entry.cell, {
+      pickLineId: entry.pickLineId,
+      customerId: entry.line.customerId,
+      quantity: (existing?.quantity ?? 0) + entry.quantity,
       ...(forOrder ? { forOrder: true } : {}),
     });
   }
@@ -208,7 +244,7 @@ export function resolveProposal({
     allocations: [...byCell.values()],
     alreadyArranged,
     unplaceable,
-    noLongerOrdered,
+    heldToOrder,
   };
 }
 
@@ -254,11 +290,17 @@ export function lotOfPickLine(
  * A quantity that is not a whole number of pallets changes nothing. The grid
  * cannot send one (see parseMatrixQuantity); this is what keeps a caller that
  * could from writing a line resolveProposal would only count as unplaceable.
+ *
+ * `forOrder` is whether the customer has ordered the product — the caller's
+ * to say (see typeIntoProposal), and the only thing that decides it. What
+ * stood in the cell before does not: a suggestion there may have gone with
+ * its order, or been moved here from another grower's lot.
  */
 export function setProposalCell(
   lines: ProposalLine[],
   cell: { growerId: string; varietyId: string; customerId: string },
   quantity: number,
+  forOrder: boolean,
 ): ProposalLine[] {
   if (!Number.isInteger(quantity) || quantity < 0) return lines;
 
@@ -266,11 +308,6 @@ export function setProposalCell(
     line.growerId === cell.growerId &&
     line.varietyId === cell.varietyId &&
     line.customerId === cell.customerId;
-  // Typed over what the engine suggested (or over an earlier correction of
-  // it), the number is a correction: it stands as typed, but it is still for
-  // the customer's order. Typed into a cell with nothing suggested, it is the
-  // distributor's own.
-  const corrects = lines.some((line) => isCell(line) && line.origin !== undefined);
   const typed: ProposalLine[] =
     quantity > 0
       ? [
@@ -279,7 +316,7 @@ export function setProposalCell(
             varietyId: cell.varietyId,
             customerId: cell.customerId,
             quantity,
-            ...(corrects ? { origin: "corrected" as const } : {}),
+            ...(forOrder ? { forOrder: "typed" as const } : {}),
           },
         ]
       : [];
@@ -299,7 +336,9 @@ export function setProposalCell(
  * now.
  *
  * A cell with nothing saved in it is the proposal's. The number is a change to
- * it — see setProposalCell — and waits for "שמור לסידור" with the rest.
+ * it — see setProposalCell — and waits for "שמור לסידור" with the rest. It is
+ * for the customer's order when, on the day as read now, they have ordered
+ * that product; otherwise it is a push.
  *
  * A cell with an allocation saved in it is never the proposal's, so the number
  * is written at once, as it always is. The proposal lets go of the cell too: a
@@ -313,19 +352,27 @@ export function setProposalCell(
  */
 export function typeIntoProposal(
   lines: ProposalLine[],
-  picks: BoardPick[],
+  day: { picks: BoardPick[]; orders: readonly BoardOrder[] },
   write: { pickLineId: string; customerId: string; quantity: number; recordId: string | null },
 ): { lines: ProposalLine[]; saveNow: boolean } | null {
-  const lot = lotOfPickLine(picks, write.pickLineId);
+  const lot = lotOfPickLine(day.picks, write.pickLineId);
   if (write.recordId) {
     return {
-      lines: lot ? setProposalCell(lines, { ...lot, customerId: write.customerId }, 0) : lines,
+      lines: lot
+        ? setProposalCell(lines, { ...lot, customerId: write.customerId }, 0, false)
+        : lines,
       saveNow: true,
     };
   }
   if (!lot) return null;
+  const forOrder = orderedPallets(day.orders).has(`${write.customerId}${SEP}${lot.varietyId}`);
   return {
-    lines: setProposalCell(lines, { ...lot, customerId: write.customerId }, write.quantity),
+    lines: setProposalCell(
+      lines,
+      { ...lot, customerId: write.customerId },
+      write.quantity,
+      forOrder,
+    ),
     saveNow: false,
   };
 }

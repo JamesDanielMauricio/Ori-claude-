@@ -1,8 +1,15 @@
-import { saveCustomerInputSchema, toSaveCustomerRpcArgs } from "@ori/domain/reference-data";
+import {
+  saveCustomerInputSchema,
+  setCustomerScoreInputSchema,
+  toSaveCustomerRpcArgs,
+  toSetCustomerScoreRpcArgs,
+} from "@ori/domain/reference-data";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { ContactPersonEditCell, ContactPersonSummary } from "@/components/reference-data/contact-person-cell";
+import { formatCustomerScore } from "@/components/reference-data/customer-score";
+import { CustomerScoreCell } from "@/components/reference-data/customer-score-cell";
 import { checkboxClassName, inputClassName } from "@/components/reference-data/form-field";
 import { RecordTable, type RecordTableColumn } from "@/components/reference-data/record-table";
 import { PageHeader } from "@/components/ui/page-header";
@@ -25,6 +32,18 @@ interface CustomerCompany {
   whatsapp_group_id: string | null;
   contact_person_id: string | null;
   created_at: string;
+}
+
+/** One customer's ranking score as the table returns it — see scoresQuery. */
+interface CustomerScoreRow {
+  customer_company_id: string;
+  general_score: string | number;
+}
+
+/** One score to save: a number on the scale, or null to clear it. */
+interface ScoreChange {
+  customerCompanyId: string;
+  generalScore: number | null;
 }
 
 interface FormState {
@@ -51,9 +70,10 @@ const BLANK_FORM: FormState = {
   contactPersonId: "",
 };
 
-// Field values here are never actually read — every column has a
-// `renderEdit` for the draft row, so nothing falls back to `render(row)`.
-// Only `id` matters (for keying and for RecordTable's search-bypass).
+// Field values here are never actually read: every column either has a
+// `renderEdit` for the draft row or (נוצר, דירוג) checks for the draft row's
+// id itself. Only `id` matters — for that, for keying, and for RecordTable's
+// search-bypass.
 function blankRow(): CustomerCompany {
   return {
     id: NEW_ROW_ID,
@@ -113,6 +133,102 @@ export default function CustomersPage() {
   });
 
   const contactDirectory = useContactPersonDirectory();
+
+  // The ranking scores, read apart from the customers themselves because
+  // they live apart: customer_scores is a backoffice-only table precisely so
+  // that a score is never a column of the company row its own customer can
+  // read (migration 0067). Its own query, and its own save below — the score
+  // is not part of this screen's row edit.
+  const scoresQueryKey = ["reference-data", "customer-scores"] as const;
+
+  const scoresQuery = useQuery({
+    queryKey: scoresQueryKey,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("customer_scores")
+        .select("customer_company_id, general_score");
+      if (error) throw error;
+      return data as CustomerScoreRow[];
+    },
+  });
+
+  const scoreByCustomer = useMemo(
+    () =>
+      new Map(
+        (scoresQuery.data ?? []).map((row) => [row.customer_company_id, Number(row.general_score)]),
+      ),
+    [scoresQuery.data],
+  );
+
+  const scoreOptimistic = optimisticUpdate<CustomerScoreRow[], ScoreChange>(
+    queryClient,
+    scoresQueryKey,
+    (rows, change) => {
+      const others = (rows ?? []).filter(
+        (row) => row.customer_company_id !== change.customerCompanyId,
+      );
+      // No score is no row, here exactly as in the table.
+      return change.generalScore === null
+        ? others
+        : [
+            ...others,
+            { customer_company_id: change.customerCompanyId, general_score: change.generalScore },
+          ];
+    },
+  );
+
+  const scoreMutationKey = ["reference-data", "customer-scores", "set"] as const;
+
+  const scoreMutation = useMutation({
+    mutationKey: scoreMutationKey,
+    // One at a time, in the order they were typed. Without it two saves of
+    // the same box — a 4 corrected to a 3 a moment later — are two requests
+    // racing, and whichever lands last is what the customer is ranked.
+    scope: { id: "customer-score" },
+    mutationFn: async (change: ScoreChange) => {
+      // Parsed in here rather than before mutate(), so that a value the
+      // schema refuses fails like any other refused save: rolled back, and
+      // said so in a toast.
+      const input = setCustomerScoreInputSchema.parse(change);
+      const { error } = await supabase.rpc("set_customer_score", toSetCustomerScoreRpcArgs(input));
+      if (error) throw error;
+    },
+    onMutate: scoreOptimistic.onMutate,
+    onError: mergeOnError(scoreOptimistic.onError, (error: { message?: string }) => {
+      showToast(`שמירת הדירוג נכשלה: ${errorMessage(error)}`, "error");
+    }),
+    // Re-read once the LAST save in the queue has settled, not after each.
+    // A distributor typing down the column has several saves waiting, each
+    // already shown in its box; a re-read between them comes back without
+    // the ones still queued and would blank those boxes until their own
+    // save landed. (This mutation still counts as in flight while its own
+    // callbacks run, hence 1 and not 0.)
+    onSettled: () => {
+      if (queryClient.isMutating({ mutationKey: scoreMutationKey }) === 1) {
+        void queryClient.invalidateQueries({ queryKey: scoresQueryKey });
+      }
+    },
+  });
+
+  /**
+   * One score, committed from its cell.
+   *
+   * Silent on success, for the reason the arrangement matrix gives for its
+   * own cells: a distributor ranking their customers types down the whole
+   * column, and a toast per number would bury the screen — the number
+   * staying in its box is the confirmation. A failure still toasts.
+   *
+   * Resolves to whether the write landed, never rejects: the cell puts the
+   * saved score back on false.
+   */
+  const saveScore = async (customerCompanyId: string, score: number | null): Promise<boolean> => {
+    try {
+      await scoreMutation.mutateAsync({ customerCompanyId, generalScore: score });
+      return true;
+    } catch {
+      return false;
+    }
+  };
 
   const editingRowId = editingId === NEW_ROW_ID ? null : editingId;
   const selected = customersQuery.data?.find((row) => row.id === editingRowId) ?? null;
@@ -254,6 +370,45 @@ export default function CustomersPage() {
       ),
     },
     {
+      key: "score",
+      label: "דירוג",
+      // No renderEdit, deliberately: the score is not one of the fields the
+      // row's edit holds and saves. Its cell saves itself — see
+      // CustomerScoreCell — so it is the same control whether or not the row
+      // is being edited, and there is nothing to type until the customer
+      // exists.
+      render: (row) => {
+        if (row.id === NEW_ROW_ID) return "—";
+        // No scores to show — still on their way, or the read failed (see
+        // the notice above the table). Never a box in either case: an empty
+        // box reads as "unranked", and would take a number typed over a
+        // score that is actually there.
+        if (!scoresQuery.data) {
+          return (
+            <span className="text-xs text-ink-subtle">{scoresQuery.isError ? "לא נטען" : "…"}</span>
+          );
+        }
+        const score = scoreByCustomer.get(row.id) ?? null;
+        // The row being edited shows its score as plain text. A box here
+        // would sit among the row's own fields looking like one of them while
+        // obeying neither their Save nor their Cancel.
+        if (row.id === editingId) {
+          return (
+            <span className={score === null ? "text-ink-subtle" : "font-medium text-ink"}>
+              {score === null ? "חסר דירוג" : formatCustomerScore(score)}
+            </span>
+          );
+        }
+        return (
+          <CustomerScoreCell
+            customerName={row.name}
+            score={score}
+            onSave={(next) => saveScore(row.id, next)}
+          />
+        );
+      },
+    },
+    {
       key: "prices",
       label: "מציג מחירים בהתראות",
       render: (row) => (row.can_see_product_prices ? "כן" : "לא"),
@@ -317,7 +472,29 @@ export default function CustomersPage() {
 
   return (
     <>
-      <PageHeader title="לקוחות" subtitle="חברות לקוחות והגדרת הצגת מחירים לכל אחת." />
+      <PageHeader
+        title="לקוחות"
+        subtitle="חברות לקוחות והגדרת הצגת מחירים לכל אחת. הדירוג (1 עד 5) נשמר לשימוש בהצעת הסידור, והלקוחות אינם רואים אותו."
+      />
+      {/* The scores are a second read, and the customers are perfectly usable
+          without them — so a failure is said here, with a way to retry,
+          rather than by failing the screen. */}
+      {scoresQuery.isError && !scoresQuery.data && (
+        <div
+          role="alert"
+          className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-md bg-danger-soft px-4 py-3 text-sm text-danger ring-1 ring-inset ring-danger/20"
+        >
+          <span>טעינת הדירוג נכשלה. שאר נתוני הלקוחות מוצגים כרגיל.</span>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => void scoresQuery.refetch()}
+            disabled={scoresQuery.isFetching}
+          >
+            {scoresQuery.isFetching ? "טוען…" : "נסה שוב"}
+          </Button>
+        </div>
+      )}
       <RecordTable
         columns={columns}
         rows={rows}
@@ -334,7 +511,11 @@ export default function CustomersPage() {
         addLabel="לקוח חדש"
         // Waits for the contact-person directory too: it's a column now,
         // and a table that paints rows before it arrives would show every
-        // customer as having no contact for a moment.
+        // customer as having no contact for a moment. NOT for the scores:
+        // their column says for itself when it has nothing to show, and a
+        // scores read that has failed goes back to "loading" on every retry
+        // — which, wired in here, would swap the whole table for its
+        // skeleton, and take the focus with it, each time.
         loading={customersQuery.isLoading || contactDirectory.isLoading}
         loadError={
           (customersQuery.isError && !customersQuery.data) ||

@@ -6,8 +6,15 @@ import { Select } from "@/components/ui/select";
 import { blockDecimalKey, stripDecimal } from "@/lib/integer-input";
 
 import { formatPallets } from "./board-data";
-import type { MatrixWrite } from "./arrangement-matrix";
 import {
+  CELL_TONE,
+  NO_ROWS_LABEL,
+  UNSAVED_BOX,
+  UNSAVED_TITLE,
+  type MatrixWrite,
+} from "./arrangement-matrix";
+import {
+  cellTone,
   cellTarget,
   parseMatrixQuantity,
   type CellTarget,
@@ -43,6 +50,7 @@ export function ArrangementMatrixMobile({
   onToggle,
   editable,
   onCommit,
+  emptyLabel = NO_ROWS_LABEL,
 }: {
   matrix: Matrix;
   // Shared with the desktop grid's own expand/collapse set (both keyed by
@@ -55,6 +63,8 @@ export function ArrangementMatrixMobile({
   onToggle: (varietyId: string) => void;
   editable: boolean;
   onCommit: (write: MatrixWrite) => Promise<boolean>;
+  /** What to say when there are no rows — the caller knows why there are none. */
+  emptyLabel?: string;
 }) {
   const { columns, rows } = matrix;
   const [customerId, setCustomerId] = useState("");
@@ -86,7 +96,7 @@ export function ArrangementMatrixMobile({
 
       {rows.length === 0 ? (
         <p className="rounded-xl bg-surface px-6 py-10 text-center text-sm text-ink-muted shadow-card ring-1 ring-inset ring-border/70">
-          אין מוצרים להצגה — נסה מונח חיפוש אחר.
+          {emptyLabel}
         </p>
       ) : (
         // Bounded and internally scrolling, the same fix applied to the
@@ -278,25 +288,39 @@ function CustomerCellList({
         // to the unfiltered list.
         const target = cellTarget(owner, index, fullColumns);
         const wanted = cell.ordered > 0;
+        // The same three colours, by the same rule, as the desktop grid:
+        // plain, yellow for an order nothing is arranged against yet, orange
+        // once the cell holds pallets.
+        const toneName = cellTone(cell);
+        const tone = CELL_TONE[toneName];
         const displayValue = cell.allocated > 0 ? formatPallets(cell.allocated) : "";
 
         return (
           <li
             key={column.customerId}
             className={`flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 rounded-md px-2.5 py-2 ${
-              wanted ? "bg-marked" : "bg-surface"
+              tone.fill ?? "bg-surface"
             }`}
           >
             <span className="min-w-0 flex-1">
               <span
-                className={`block truncate text-sm ${wanted ? "font-semibold text-marked-ink" : "text-ink"}`}
+                className={`block truncate text-sm ${toneName === "none" ? "text-ink" : `font-semibold ${tone.ink}`}`}
                 title={column.customerName}
               >
                 {column.customerName}
               </span>
               {wanted && (
-                <span className="block text-xs text-marked-ink/80">
+                <span className={`block text-xs ${tone.soft}`}>
                   הזמין {formatPallets(cell.ordered)}
+                </span>
+              )}
+              {/* The customer's note on this order line. Printed in full
+                  rather than tucked behind the desktop grid's hover icon:
+                  there is no hover on a touch screen, and this card has the
+                  room a grid cell does not. */}
+              {cell.comment && (
+                <span className={`block break-words text-xs italic ${tone.soft}`}>
+                  הערה: {cell.comment}
                 </span>
               )}
             </span>
@@ -305,13 +329,22 @@ function CustomerCellList({
               <MatrixMobileInput
                 label={`${column.customerName} — כמות`}
                 displayValue={displayValue}
+                unsaved={cell.proposed > 0}
                 target={target}
                 onCommit={onCommit}
               />
             ) : (
               // Same dashed "this is a total, not a control" treatment the
-              // desktop grid uses for its own read-only cells.
-              <span className="flex h-11 w-24 shrink-0 items-center justify-center rounded-md border border-dashed border-border-strong bg-surface-muted/70 text-center text-sm font-semibold text-ink-muted">
+              // desktop grid uses for its own read-only cells — including the
+              // accent on a number that is a proposal's and not yet saved.
+              <span
+                title={cell.proposed > 0 ? UNSAVED_TITLE : undefined}
+                className={`flex h-11 w-24 shrink-0 items-center justify-center rounded-md border text-center text-sm font-semibold ${
+                  cell.proposed > 0
+                    ? UNSAVED_BOX
+                    : "border-dashed border-border-strong bg-surface-muted/70 text-ink-muted"
+                }`}
+              >
                 {displayValue}
               </span>
             )}
@@ -325,11 +358,14 @@ function CustomerCellList({
 function MatrixMobileInput({
   label,
   displayValue,
+  unsaved,
   target,
   onCommit,
 }: {
   label: string;
   displayValue: string;
+  /** The number shown is a proposal's, not yet in the database — see UNSAVED_BOX. */
+  unsaved: boolean;
   target: CellTarget;
   onCommit: (write: MatrixWrite) => Promise<boolean>;
 }) {
@@ -388,7 +424,10 @@ function MatrixMobileInput({
           event.currentTarget.blur();
         }
       }}
-      className="h-11 w-24 shrink-0 rounded-md border border-border-strong bg-surface px-2 text-center text-sm font-semibold text-ink outline-none transition-colors duration-150 focus:border-accent focus:ring-2 focus:ring-accent/30"
+      title={unsaved ? UNSAVED_TITLE : undefined}
+      className={`h-11 w-24 shrink-0 rounded-md border px-2 text-center text-sm font-semibold outline-none transition-colors duration-150 focus:border-accent focus:bg-surface focus:ring-2 focus:ring-accent/30 ${
+        unsaved ? UNSAVED_BOX : "border-border-strong bg-surface text-ink"
+      }`}
     />
   );
 }

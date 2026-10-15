@@ -1,4 +1,5 @@
 import {
+  createAnonClient,
   createTestCompany,
   createTestProfile,
   deleteTestCompany,
@@ -8,6 +9,7 @@ import {
 } from "@ori/domain/auth/testing";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { toSetCustomerScoreRpcArgs } from "./schemas";
 import {
   createTestCustomerCompany,
   createTestGrowerCompany,
@@ -204,5 +206,104 @@ describe("reference-data Row Level Security", () => {
       .maybeSingle();
     expect(deniedRead.error).toBeNull();
     expect(deniedRead.data).toBeNull();
+  });
+
+  // customer_scores (migration 0067) is the one table here whose rows their
+  // own subject must not see. It exists as a table at all, rather than as a
+  // column on companies, because a customer CAN read their own company row —
+  // so this is checked both ways in: straight at the table, and through that
+  // company row.
+  it("customer_scores: only backoffice reads or writes a ranking score — never the customer it is about", async () => {
+    const rankedCompany = await createTestCustomerCompany();
+    cleanupFns.push(() => deleteTestCompanyById(rankedCompany.id));
+    const otherCompany = await createTestCustomerCompany();
+    cleanupFns.push(() => deleteTestCompanyById(otherCompany.id));
+    const growerCompany = await createTestGrowerCompany();
+    cleanupFns.push(() => deleteTestCompanyById(growerCompany.id));
+
+    const admin = await createTestProfile({ companyId: rankedCompany.id, role: "backoffice" });
+    cleanupFns.push(() => deleteTestUser(admin.userId));
+    const adminClient = await signInTestUser(admin.email, admin.password);
+
+    const set = await adminClient.rpc(
+      "set_customer_score",
+      toSetCustomerScoreRpcArgs({ customerCompanyId: rankedCompany.id, generalScore: 4.35 }),
+    );
+    expect(set.error).toBeNull();
+
+    const readScore = async () => {
+      const { data, error } = await adminClient
+        .from("customer_scores")
+        .select("general_score")
+        .eq("customer_company_id", rankedCompany.id);
+      expect(error).toBeNull();
+      return (data ?? []).map((row) => Number(row.general_score));
+    };
+    expect(await readScore()).toEqual([4.35]);
+
+    const ranked = await createTestProfile({ companyId: rankedCompany.id, role: "customer" });
+    cleanupFns.push(() => deleteTestUser(ranked.userId));
+    const other = await createTestProfile({ companyId: otherCompany.id, role: "customer" });
+    cleanupFns.push(() => deleteTestUser(other.userId));
+    const grower = await createTestProfile({ companyId: growerCompany.id, role: "grower" });
+    cleanupFns.push(() => deleteTestUser(grower.userId));
+
+    const outsiders = [
+      ["the ranked customer", await signInTestUser(ranked.email, ranked.password)],
+      ["another customer", await signInTestUser(other.email, other.password)],
+      ["a grower", await signInTestUser(grower.email, grower.password)],
+      ["a visitor who is not signed in", createAnonClient()],
+    ] as const;
+
+    for (const [who, client] of outsiders) {
+      const direct = await client
+        .from("customer_scores")
+        .select("customer_company_id, general_score");
+      expect(direct.data ?? [], `${who} reading the table`).toEqual([]);
+
+      // The ranked customer does get their own company row back here; what
+      // must not come with it is the score.
+      const throughCompany = await client
+        .from("companies")
+        .select("id, customer_scores(general_score)")
+        .eq("id", rankedCompany.id);
+      expect(
+        JSON.stringify(throughCompany.data ?? []),
+        `${who} reading through the company row`,
+      ).not.toContain("4.35");
+
+      const insert = await client
+        .from("customer_scores")
+        .insert({ customer_company_id: otherCompany.id, general_score: "5" });
+      expect(insert.error, `${who} inserting a score`).not.toBeNull();
+
+      const update = await client
+        .from("customer_scores")
+        .update({ general_score: "5" })
+        .eq("customer_company_id", rankedCompany.id)
+        .select();
+      expect(update.data ?? [], `${who} changing the score`).toEqual([]);
+
+      const removed = await client
+        .from("customer_scores")
+        .delete()
+        .eq("customer_company_id", rankedCompany.id)
+        .select();
+      expect(removed.data ?? [], `${who} deleting the score`).toEqual([]);
+
+      const viaFunction = await client.rpc(
+        "set_customer_score",
+        toSetCustomerScoreRpcArgs({ customerCompanyId: rankedCompany.id, generalScore: 5 }),
+      );
+      expect(viaFunction.error, `${who} calling set_customer_score`).not.toBeNull();
+    }
+
+    // Nothing any of them tried got through.
+    expect(await readScore()).toEqual([4.35]);
+    const otherScore = await adminClient
+      .from("customer_scores")
+      .select("general_score")
+      .eq("customer_company_id", otherCompany.id);
+    expect(otherScore.data).toEqual([]);
   });
 });

@@ -6,13 +6,16 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 
+import { CellPopover } from "@/components/reference-data/cell-popover";
 import { Icon } from "@/components/ui/icon";
 import { stripDecimal } from "@/lib/integer-input";
 
 import { formatPallets } from "./board-data";
 import {
   cellTarget,
+  cellTone,
   flattenMatrixRows,
+  productColumnWidth,
   parseMatrixQuantity,
   type Matrix,
   type MatrixProductRow,
@@ -75,14 +78,21 @@ const ROW_H = 64;
 // tiny — see ArrangementMatrix's own comment on why, below) look lost inside
 // an oversized empty band above it.
 const HEADER_H = 80;
-const W_PRODUCT = 232;
+// One width is NOT here: the products column's. It follows the grid's own
+// width (matrix-data.ts's productColumnWidth), so it is worked out in the
+// component from the measured scrollport and handed down. It is still one
+// number per render, shared by the <col>, the sticky offsets and the scroll
+// margins, which is all the fixed-geometry rule above actually needs.
 const W_STOCK = 88;
 const W_AVAILABLE = 80;
-const W_CUSTOMER = 124;
+// As narrow as a customer's name on up to four lines allows: every pixel it
+// gives up is a pixel of another customer on screen without scrolling.
+const W_CUSTOMER = 104;
 const W_ORDERED = 92;
 const W_ALLOCATED = 92;
-/** Total width of the pinned leading (right, in RTL) pane. */
-const LEAD_PANE = W_PRODUCT + W_STOCK + W_ORDERED;
+// Under this width the products column switches to its compact label: no
+// alignment spacer, a slightly smaller name on up to three lines.
+const COMPACT_PRODUCT_BELOW = 160;
 /** Total width of the pinned trailing (left, in RTL) pane. */
 const TRAIL_PANE = W_AVAILABLE + W_ALLOCATED;
 /** Rows rendered beyond each edge of the viewport, so a flick doesn't blank. */
@@ -120,6 +130,26 @@ const Z_CORNER = "z-40";
 
 const CELL_BORDER = "border-b border-e border-border/70";
 
+/** The empty grid's message when the caller gives none: a search matched nothing. */
+export const NO_ROWS_LABEL = "אין מוצרים להצגה — נסה מונח חיפוש אחר.";
+
+// A customer cell's colours by what it says (matrix-data.ts's cellTone):
+// yellow for an order nothing is arranged against yet, orange for a cell
+// holding pallets. `fill` is null where the cell takes its row's own
+// background. Written out in full because Tailwind only emits classes it can
+// find spelled whole in the source. Shared with the mobile list.
+export const CELL_TONE = {
+  none: { fill: null, ink: "text-ink-subtle", soft: "text-ink-muted" },
+  ordered: { fill: "bg-marked", ink: "text-marked-ink", soft: "text-marked-ink/80" },
+  arranged: { fill: "bg-arranged", ink: "text-arranged-ink", soft: "text-arranged-ink/80" },
+} as const;
+
+// A number that is a proposal's and not saved yet — suggested, or typed while
+// one is open. One look for it wherever it is drawn: in the box it can be
+// corrected in and in a read-only total, on both presentations of the grid.
+export const UNSAVED_BOX = "border-dashed border-accent bg-accent-soft text-accent";
+export const UNSAVED_TITLE = "הצעה — עדיין לא נשמרה";
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
@@ -133,7 +163,9 @@ interface CellAddress {
 
 const BLANK_CELL = {
   ordered: 0,
+  comment: null,
   allocated: 0,
+  proposed: 0,
   recordId: null,
   price: null,
   priceType: null,
@@ -150,6 +182,7 @@ export function ArrangementMatrix({
   onToggle,
   editable,
   onCommit,
+  emptyLabel = NO_ROWS_LABEL,
 }: {
   matrix: Matrix;
   expanded: ReadonlySet<string>;
@@ -157,6 +190,8 @@ export function ArrangementMatrix({
   editable: boolean;
   /** Resolves to whether the write landed; a refusal reverts the cell. */
   onCommit: (write: MatrixWrite) => Promise<boolean>;
+  /** What to say when there are no rows — the caller knows why there are none. */
+  emptyLabel?: string;
 }) {
   const { columns } = matrix;
   const rows = flattenMatrixRows(matrix.rows, expanded);
@@ -218,7 +253,19 @@ export function ArrangementMatrix({
   // Only ever one draft: a cell commits when it loses focus, so a second one
   // cannot begin before the first has ended.
   const [draft, setDraft] = useState<(CellAddress & { value: string }) | null>(null);
+  // A draft cannot outlive the grid going read-only. The box it was typed
+  // into unmounts without a blur, so it is never committed — and left in
+  // state it would be back in that box the moment the grid became editable
+  // again: a number nobody saved, one blur away from being written.
+  if (!editable && draft) setDraft(null);
   const [range, setRange] = useState({ start: 0, end: 40 });
+  // The scrollport's own width, which is what the products column is sized
+  // from. Zero until first measured — see productColumnWidth for why that
+  // starts the column at its narrowest.
+  const [gridWidth, setGridWidth] = useState(0);
+  const productWidth = productColumnWidth(gridWidth);
+  /** Total width of the pinned leading (right, in RTL) pane. */
+  const leadPane = productWidth + W_STOCK + W_ORDERED;
 
   const rowCount = rows.length;
 
@@ -245,6 +292,10 @@ export function ArrangementMatrix({
     let frame = 0;
     const measure = () => {
       frame = 0;
+      // Guarded like the range below: this runs on every scroll frame, and
+      // the width only changes when the window does.
+      setGridWidth((current) => (current === element.clientWidth ? current : element.clientWidth));
+
       const first = Math.floor(element.scrollTop / ROW_H);
       const visible = Math.ceil(Math.max(0, element.clientHeight - HEADER_H) / ROW_H);
       const start = Math.max(0, first - OVERSCAN);
@@ -550,7 +601,7 @@ export function ArrangementMatrix({
   }
 
   const totalColumns = 3 + columns.length + 2;
-  const tableWidth = LEAD_PANE + columns.length * W_CUSTOMER + TRAIL_PANE;
+  const tableWidth = leadPane + columns.length * W_CUSTOMER + TRAIL_PANE;
 
   return (
     // Outer, non-scrolling wrapper. Its only job is to anchor the custom
@@ -621,7 +672,7 @@ export function ArrangementMatrix({
           role="grid"
         >
           <colgroup>
-            <col style={{ width: W_PRODUCT }} />
+            <col style={{ width: productWidth }} />
             <col style={{ width: W_STOCK }} />
             <col style={{ width: W_ORDERED }} />
             {columns.map((column) => (
@@ -645,14 +696,14 @@ export function ArrangementMatrix({
               </th>
               <th
                 scope="col"
-                style={{ right: W_PRODUCT }}
+                style={{ right: productWidth }}
                 className={`sticky top-0 ${Z_CORNER} ${CELL_BORDER} bg-surface-muted px-2 align-bottom pb-3 text-xs font-semibold leading-tight text-ink-subtle`}
               >
                 סה״כ במלאי
               </th>
               <th
                 scope="col"
-                style={{ right: W_PRODUCT + W_STOCK }}
+                style={{ right: productWidth + W_STOCK }}
                 className={`sticky top-0 ${Z_CORNER} ${CELL_BORDER} bg-surface-muted px-2 align-bottom pb-3 text-xs font-semibold leading-tight text-ink-subtle`}
               >
                 סה״כ הוזמן
@@ -711,6 +762,7 @@ export function ArrangementMatrix({
                   columns={columns}
                   expanded={row.kind === "product" && expanded.has(row.varietyId)}
                   onToggle={onToggle}
+                  productWidth={productWidth}
                   editable={editable}
                   active={activeCell}
                   draft={draftCell}
@@ -731,9 +783,7 @@ export function ArrangementMatrix({
         </table>
 
         {rowCount === 0 && (
-          <p className="px-6 py-10 text-center text-sm text-ink-muted">
-            אין מוצרים להצגה — נסה מונח חיפוש אחר.
-          </p>
+          <p className="px-6 py-10 text-center text-sm text-ink-muted">{emptyLabel}</p>
         )}
       </div>
 
@@ -798,6 +848,7 @@ function MatrixRowCells({
   columns,
   expanded,
   onToggle,
+  productWidth,
   editable,
   active,
   draft,
@@ -811,6 +862,8 @@ function MatrixRowCells({
   columns: Matrix["columns"];
   expanded: boolean;
   onToggle: (varietyId: string) => void;
+  /** The products column's width this render — see productColumnWidth. */
+  productWidth: number;
   editable: boolean;
   active: CellAddress | null;
   draft: (CellAddress & { value: string }) | null;
@@ -820,6 +873,7 @@ function MatrixRowCells({
   onFocusCell: (cell: CellAddress) => void;
 }) {
   const isProduct = row.kind === "product";
+  const compact = productWidth < COMPACT_PRODUCT_BELOW;
   const isActiveRow = active?.row === rowIndex;
   const label = isProduct ? row.varietyName : row.growerName;
 
@@ -833,8 +887,9 @@ function MatrixRowCells({
   // and the pinned totals end up striped with whatever is passing behind.
   const rowBase = isProduct ? "bg-surface" : "bg-surface-muted";
   // The focused row is traced in the frozen pane only. Tinting the customer
-  // cells as well would put a third fill in play against the demand tint,
-  // and demand is the one this screen exists to make visible.
+  // cells as well would put yet another fill in play against the two that
+  // carry meaning there (ordered, arranged), and those are what this screen
+  // exists to make visible.
   const stickyTint = isActiveRow ? "bg-accent-soft" : rowBase;
 
   return (
@@ -845,14 +900,16 @@ function MatrixRowCells({
         style={{ right: 0 }}
         className={`sticky ${Z_STICKY_COL} ${CELL_BORDER} ${stickyTint} px-2 text-start font-normal`}
       >
-        <div className={`flex items-center gap-1.5 ${isProduct ? "" : "ps-5"}`}>
+        <div
+          className={`flex items-center ${compact ? "gap-1" : "gap-1.5"} ${isProduct ? "" : compact ? "ps-3" : "ps-5"}`}
+        >
           {isProduct && row.expandable ? (
             <button
               type="button"
               onClick={() => onToggle(row.varietyId)}
               aria-expanded={expanded}
               aria-label={`${expanded ? "סגור" : "פתח"} מגדלים עבור ${row.varietyName}`}
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-muted ring-1 ring-inset ring-border-strong transition-colors duration-150 hover:bg-accent-soft hover:text-accent"
+              className={`flex ${compact ? "h-5 w-5" : "h-6 w-6"} shrink-0 items-center justify-center rounded-md text-ink-muted ring-1 ring-inset ring-border-strong transition-colors duration-150 hover:bg-accent-soft hover:text-accent`}
             >
               <Icon
                 name="chevronDown"
@@ -861,12 +918,19 @@ function MatrixRowCells({
             </button>
           ) : (
             // Keeps the label's start edge on one vertical line whether or
-            // not a row has a chevron, so the column doesn't ripple.
-            isProduct && <span aria-hidden className="h-6 w-6 shrink-0" />
+            // not a row has a chevron, so the column doesn't ripple. Given
+            // up in the compact column: most rows have no chevron, and there
+            // the 30px it reserves on every one of them is a third of the
+            // name's room.
+            isProduct && !compact && <span aria-hidden className="h-6 w-6 shrink-0" />
           )}
           <span className="min-w-0">
+            {/* Compact: a size smaller and a third line, which together fit
+                a long name where the wide column's two lines would cut it —
+                and still leave the family line inside the fixed row height
+                (3 x 15px + 14px, against 64). */}
             <span
-              className={`line-clamp-2 break-words text-sm leading-[1.2] ${isProduct ? "font-semibold text-ink" : "text-ink-muted"}`}
+              className={`break-words ${compact ? "line-clamp-3 text-[13px] leading-[1.15]" : "line-clamp-2 text-sm leading-[1.2]"} ${isProduct ? "font-semibold text-ink" : "text-ink-muted"}`}
               title={label}
             >
               {label}
@@ -882,7 +946,7 @@ function MatrixRowCells({
 
       <TotalCell
         value={formatPallets(row.inStock)}
-        offset={{ right: W_PRODUCT }}
+        offset={{ right: productWidth }}
         tint={stickyTint}
       />
       <TotalCell
@@ -890,7 +954,7 @@ function MatrixRowCells({
         // against the product, not against one of its lots — so it shows a
         // dash rather than a zero, which would claim nobody wanted it.
         value={isProduct ? formatPallets(row.ordered) : "—"}
-        offset={{ right: W_PRODUCT + W_STOCK }}
+        offset={{ right: productWidth + W_STOCK }}
         tint={stickyTint}
         tone={isProduct ? "normal" : "muted"}
       />
@@ -904,28 +968,56 @@ function MatrixRowCells({
         const target = cellTarget(row, colIndex, columns);
         const isDrafting = draft?.row === rowIndex && draft.col === colIndex;
         const value = isDrafting ? draft.value : palletsOrBlank(cell.allocated);
-        // The highlight marks demand, not allocation: a tinted cell is one
-        // where this customer asked for this product, which is where the
-        // distributor's attention belongs. It runs down the expanded grower
-        // rows too — the request is against the variety, so every lot of it
-        // is a candidate for filling that request.
+        // Three states, one colour each (see cellTone): untinted where the
+        // customer asked for nothing, yellow where they ordered and nothing
+        // is arranged yet — which is where the distributor's attention
+        // belongs — and orange once the cell holds pallets. The yellow runs
+        // down the expanded grower rows too: the request is against the
+        // variety, so every lot of it is a candidate for filling it.
+        const tone = CELL_TONE[cellTone(cell)];
         const wanted = cell.ordered > 0;
 
         return (
-          <td
-            key={column.customerId}
-            className={`${CELL_BORDER} px-1.5 ${wanted ? "bg-marked" : rowBase}`}
-          >
+          <td key={column.customerId} className={`${CELL_BORDER} px-1.5 ${tone.fill ?? rowBase}`}>
             <div className="flex flex-col items-stretch gap-1">
               {/* The number above the box. Printed on product rows only:
                   what a customer ordered is a fact about the VARIETY, so
                   repeating it on each grower row underneath would read as a
                   per-grower request that nobody made. The non-breaking space
                   holds the box on one line either way. */}
+              {/* A fixed height, with or without a note button on it: a line
+                  that grew only where there is a note would push that one
+                  cell's box out of line with the rest of its row. */}
               <span
-                className={`block text-center text-xs leading-none ${wanted ? "font-bold text-marked-ink" : "text-ink-subtle"}`}
+                className={`flex h-5 items-center justify-center gap-1 text-xs leading-none ${tone.ink} ${wanted ? "font-bold" : ""}`}
               >
                 {isProduct ? formatPallets(cell.ordered) : " "}
+                {/* The customer's own note on this order line, when they
+                    left one. On product rows only, beside the number it
+                    qualifies and for the same reason that number is.
+
+                    A button that opens the note, not a hover hint: a native
+                    `title` takes a second or more to appear and cannot be
+                    summoned at all on a touch screen, and a note here can
+                    change what the right number is ("2 משטח" on an order for
+                    one). It keeps the quiet look of the hint it replaced —
+                    the same small outline icon, in the line's own ink — and
+                    only its hit area is larger than it looks. */}
+                {isProduct && cell.comment && (
+                  <CellPopover
+                    label={`הערת הלקוח — ${column.customerName}`}
+                    panelClassName="w-64"
+                    trigger={{
+                      className:
+                        "flex h-5 w-4 shrink-0 cursor-pointer items-center justify-center rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-bright",
+                      content: <Icon name="infoCircle" className="h-3 w-3" />,
+                    }}
+                  >
+                    <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-ink">
+                      {cell.comment}
+                    </p>
+                  </CellPopover>
+                )}
               </span>
 
               {target && editable ? (
@@ -944,10 +1036,16 @@ function MatrixRowCells({
                   // Scroll margins are the only way to tell it about them.
                   style={{
                     scrollMarginTop: HEADER_H + 8,
-                    scrollMarginInlineStart: LEAD_PANE + 8,
+                    scrollMarginInlineStart: productWidth + W_STOCK + W_ORDERED + 8,
                     scrollMarginInlineEnd: TRAIL_PANE + 8,
                   }}
-                  className="h-7 w-full rounded-sm border border-border-strong bg-surface px-1 text-center text-sm font-semibold text-ink outline-none transition-colors duration-150 focus:border-accent focus:bg-surface focus:ring-2 focus:ring-accent/30"
+                  // Unsaved numbers keep their own look in the box as well:
+                  // it is the only thing telling them from what is already
+                  // in the day now that both can be typed over.
+                  title={cell.proposed > 0 ? UNSAVED_TITLE : undefined}
+                  className={`h-7 w-full rounded-sm border px-1 text-center text-sm font-semibold outline-none transition-colors duration-150 focus:border-accent focus:bg-surface focus:ring-2 focus:ring-accent/30 ${
+                    cell.proposed > 0 ? UNSAVED_BOX : "border-border-strong bg-surface text-ink"
+                  }`}
                   onFocus={(event) => {
                     onFocusCell({ row: rowIndex, col: colIndex, key: row.key });
                     // Type-to-replace, the way stepping onto a spreadsheet
@@ -967,10 +1065,21 @@ function MatrixRowCells({
                 />
               ) : (
                 // Read-only: either a multi-grower product row (the sum of
-                // the growers below, which cannot be written as one number)
-                // or a day that is closed or being viewed in the past. The
-                // dashed edge says "this is a total", not "this is disabled".
-                <span className="flex h-7 w-full items-center justify-center rounded-sm border border-dashed border-border-strong bg-surface-muted/70 text-center text-sm font-semibold text-ink-muted">
+                // the growers below, which cannot be written as one number),
+                // a day that is closed or being viewed in the past, or a
+                // proposal in the middle of being saved. The dashed edge says
+                // "this is a total", not "this is disabled".
+                //
+                // A sum with unsaved pallets in it takes the same accent as
+                // the boxes they were typed or suggested into.
+                <span
+                  title={cell.proposed > 0 ? UNSAVED_TITLE : undefined}
+                  className={`flex h-7 w-full items-center justify-center rounded-sm border text-center text-sm font-semibold ${
+                    cell.proposed > 0
+                      ? UNSAVED_BOX
+                      : "border-dashed border-border-strong bg-surface-muted/70 text-ink-muted"
+                  }`}
+                >
                   {palletsOrBlank(cell.allocated)}
                 </span>
               )}

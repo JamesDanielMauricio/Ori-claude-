@@ -29,6 +29,7 @@ import {
   ARRANGEMENT_ERROR_CODES,
   toCreateArrangementRecordRpcArgs,
   toDeleteArrangementRecordRpcArgs,
+  toSaveArrangementProposalRpcArgs,
   toUpdateArrangementRecordRpcArgs,
 } from "./schemas";
 
@@ -244,6 +245,92 @@ describe("arrangement module", () => {
       .select("quantity_pallets")
       .eq("daily_pick_product_id", pickLine!.id);
     expect(recordsAfter).toHaveLength(1);
+  }, 30000);
+
+  // save_arrangement_proposal (0068): the whole proposal in one transaction,
+  // only into empty cells. Each cell goes through arrange_to_customer.
+  async function recordsOn(pickProductId: string) {
+    const { data, error } = await admin.client
+      .from("arrangement_records")
+      .select("id, quantity_pallets, customer_company_id, created_at")
+      .eq("daily_pick_product_id", pickProductId);
+    expect(error).toBeNull();
+    return data ?? [];
+  }
+
+  it("save_arrangement_proposal saves every cell, a push included, and says how many", async () => {
+    const { day, pickProductId, customer } = await setUpDayWithSupplyAndDemand(5, 3);
+    const pushedTo = await createTestCompany(`לקוח בדיקה ${crypto.randomUUID()}`, "customer");
+    cleanupFns.push(() => deleteTestCompany(pushedTo.id));
+    // A header for the customer who ordered nothing: arrange_to_customer needs one.
+    await db.insert(dailyOrders).values({ tradingDayId: day.id, customerCompanyId: pushedTo.id });
+
+    const saved = await admin.client.rpc(
+      "save_arrangement_proposal",
+      toSaveArrangementProposalRpcArgs({
+        tradingDayId: day.id,
+        allocations: [
+          { dailyPickProductId: pickProductId, customerCompanyId: customer.id, quantityPallets: 3 },
+          { dailyPickProductId: pickProductId, customerCompanyId: pushedTo.id, quantityPallets: 2 },
+        ],
+      }),
+    );
+
+    expect(saved.error).toBeNull();
+    expect(saved.data).toBe(2);
+    const records = await recordsOn(pickProductId);
+    expect(records.map((record) => Number(record.quantity_pallets)).sort()).toEqual([2, 3]);
+  }, 30000);
+
+  it("save_arrangement_proposal saves nothing when one cell is refused, and names that cell", async () => {
+    const { day, pickProductId, customer } = await setUpDayWithSupplyAndDemand(5, 10);
+    const pushedTo = await createTestCompany(`לקוח בדיקה ${crypto.randomUUID()}`, "customer");
+    cleanupFns.push(() => deleteTestCompany(pushedTo.id));
+    await db.insert(dailyOrders).values({ tradingDayId: day.id, customerCompanyId: pushedTo.id });
+
+    // 3 + 4 off a lot of 5: the first cell fits, the second does not.
+    const saved = await admin.client.rpc(
+      "save_arrangement_proposal",
+      toSaveArrangementProposalRpcArgs({
+        tradingDayId: day.id,
+        allocations: [
+          { dailyPickProductId: pickProductId, customerCompanyId: customer.id, quantityPallets: 3 },
+          { dailyPickProductId: pickProductId, customerCompanyId: pushedTo.id, quantityPallets: 4 },
+        ],
+      }),
+    );
+
+    expect(saved.error?.code).toBe(ARRANGEMENT_ERROR_CODES.OVER_ALLOCATION);
+    expect(JSON.parse(saved.error?.details ?? "{}")).toMatchObject({
+      index: 1,
+      dailyPickProductId: pickProductId,
+      customerCompanyId: pushedTo.id,
+    });
+    expect(await recordsOn(pickProductId)).toEqual([]);
+  }, 30000);
+
+  it("save_arrangement_proposal refuses a cell filled since the proposal was read, and leaves it as it was", async () => {
+    const { day, pickProductId, customer } = await setUpDayWithSupplyAndDemand(5, 3);
+    const typed = await admin.client.rpc("arrange_to_customer", {
+      p_daily_pick_product_id: pickProductId,
+      p_customer_company_id: customer.id,
+      p_quantity_pallets: 1,
+    });
+    expect(typed.error).toBeNull();
+
+    const saved = await admin.client.rpc(
+      "save_arrangement_proposal",
+      toSaveArrangementProposalRpcArgs({
+        tradingDayId: day.id,
+        allocations: [
+          { dailyPickProductId: pickProductId, customerCompanyId: customer.id, quantityPallets: 3 },
+        ],
+      }),
+    );
+
+    expect(saved.error?.code).toBe(ARRANGEMENT_ERROR_CODES.CONFLICT);
+    const records = await recordsOn(pickProductId);
+    expect(records.map((record) => Number(record.quantity_pallets))).toEqual([1]);
   }, 30000);
 
   it("update_arrangement_record excludes its own prior quantity from the ceiling; delete_arrangement_record frees it back up", async () => {

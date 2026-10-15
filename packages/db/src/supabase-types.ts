@@ -251,6 +251,39 @@ export type Database = {
           },
         ];
       };
+      // The distributor's ranking score per customer (migration 0067).
+      // Backoffice-only: it has no "select own" policy, so a customer's own
+      // session reads no rows from it. Hand-added alongside that migration —
+      // see this file's header note on regenerating.
+      customer_scores: {
+        Row: {
+          customer_company_id: string;
+          general_score: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          customer_company_id: string;
+          general_score: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          customer_company_id?: string;
+          general_score?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "customer_scores_customer_company_id_fkey";
+            columns: ["customer_company_id"];
+            isOneToOne: true;
+            referencedRelation: "companies";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       profile_blocked_products: {
         Row: {
           created_at: string;
@@ -1028,6 +1061,14 @@ export type Database = {
         };
         Returns: Database["public"]["Tables"]["companies"]["Row"];
       };
+      // Sets a customer's ranking score, or clears it when null (0067).
+      set_customer_score: {
+        Args: {
+          p_customer_company_id: string;
+          p_general_score: number | null;
+        };
+        Returns: void;
+      };
       save_transporter: {
         Args: {
           p_id: string | null;
@@ -1327,6 +1368,16 @@ export type Database = {
           p_price_type?: string | null;
         };
         Returns: Database["public"]["Tables"]["arrangement_records"]["Row"];
+      };
+      // "שמור לסידור": a whole proposal in one transaction, only into empty
+      // cells, each through arrange_to_customer (migration 0068). Returns
+      // how many records it created.
+      save_arrangement_proposal: {
+        Args: {
+          p_trading_day_id: string;
+          p_allocations: Json;
+        };
+        Returns: number;
       };
       populate_arrangement_prices: {
         Args: {

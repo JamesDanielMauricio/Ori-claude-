@@ -5,7 +5,8 @@ import { z } from "zod";
 // the lifecycle-engine/customer modules' pattern. close_arrangement itself
 // takes no arguments and already has its schema-less call site in
 // lifecycle-engine — this module only covers the New Arrangement write
-// surface (create/update/delete a single arrangement record).
+// surface (create/update/delete a single arrangement record, arrange one
+// cell, and save a whole proposal at once).
 
 export const createArrangementRecordInputSchema = z.object({
   dailyPickProductId: z.string().uuid(),
@@ -84,12 +85,47 @@ export function toDeleteArrangementRecordRpcArgs(input: DeleteArrangementRecordI
   return { p_id: input.id };
 }
 
+// "שמור לסידור" on the arrangement screen: a whole proposal, saved by
+// save_arrangement_proposal (migration 0068) in one transaction, all or
+// nothing, and only into cells (pick line × customer) that are still empty.
+// Each cell goes through arrange_to_customer, so — as above — there is no
+// order line id: a customer who never ordered the product gets a zero-pallet
+// line created for them. A cell may appear once; the function refuses a
+// repeat, and so does this, before the round trip.
+const proposalAllocationSchema = z.object({
+  dailyPickProductId: z.string().uuid(),
+  customerCompanyId: z.string().uuid(),
+  quantityPallets: z.number().int().positive(),
+});
+
+export const saveArrangementProposalInputSchema = z.object({
+  tradingDayId: z.string().uuid(),
+  allocations: z
+    .array(proposalAllocationSchema)
+    .refine(
+      (allocations) =>
+        new Set(allocations.map((cell) => `${cell.dailyPickProductId}|${cell.customerCompanyId}`))
+          .size === allocations.length,
+      { message: "A cell appears more than once in the proposal." },
+    ),
+});
+export type SaveArrangementProposalInput = z.infer<typeof saveArrangementProposalInputSchema>;
+
+export function toSaveArrangementProposalRpcArgs(input: SaveArrangementProposalInput) {
+  return {
+    p_trading_day_id: input.tradingDayId,
+    // jsonb on the way in: the array is sent as it is, in the keys the
+    // function reads off each element.
+    p_allocations: input.allocations,
+  };
+}
+
 // See packages/domain/src/lifecycle-engine/schemas.ts's LIFECYCLE_ERROR_CODES
 // for the full convention this mirrors — these are just the subset this
 // module's own functions (0021's create/update/delete_arrangement_record,
 // 0022's populate_arrangement_prices) actually raise.
 export const ARRANGEMENT_ERROR_CODES = {
-  /** No pick line, order line, arrangement record, or daily_arrangements row matched. */
+  /** No pick line, order line, arrangement record, or daily_arrangements row matched — or, from save_arrangement_proposal, a pick line that is not on the day being saved. */
   NOT_FOUND: "P0002",
   /** current_role() <> 'backoffice'. */
   FORBIDDEN: "42501",
@@ -97,6 +133,8 @@ export const ARRANGEMENT_ERROR_CODES = {
   INVALID_STATE: "P0007",
   /** A non-positive quantity, or a pick/order line pair spanning different trading days or varieties. */
   INVALID_INPUT: "P0008",
-  /** The requested quantity would exceed the pick line's pallets_picked or the order line's pallets_ordered, summed against every other arrangement record referencing it. */
+  /** The requested quantity would exceed the pick line's pallets_picked plus leftover_pallets, or the order line's pallets_ordered when that is above zero, summed against every other arrangement record referencing it (check_arrangement_allocation, 0050). */
   OVER_ALLOCATION: "P0009",
+  /** save_arrangement_proposal (0068): a cell of the proposal already holds an allocation — filled after the proposal was read. The error's DETAIL lists every such cell. */
+  CONFLICT: "P0006",
 } as const;

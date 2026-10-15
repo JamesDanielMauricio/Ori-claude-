@@ -28,13 +28,20 @@ export function CellPopover({
   summary,
   children,
   panelClassName = "w-80",
+  trigger,
 }: {
   // The control's accessible name, e.g. "מוצרים בעונה".
   label: string;
-  // What the closed trigger shows — a count, usually.
-  summary: ReactNode;
+  // What the closed trigger shows — a count, usually. Not drawn when the
+  // caller brings a `trigger` of its own.
+  summary?: ReactNode;
   children: ReactNode;
   panelClassName?: string;
+  // A trigger of the caller's own, for where the field-like one does not fit
+  // — an icon inside a grid cell. `content` is drawn in the button in place
+  // of the summary and chevron, and `className` in place of the field skin.
+  // The panel, its placement and how it closes are the same either way.
+  trigger?: { className: string; content: ReactNode };
 }) {
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState<{
@@ -121,10 +128,20 @@ export function CellPopover({
         // it should not look like a button that happens to sit in a field's
         // place. `flex` overrides the skin's inline-block so the chevron can
         // be pushed to the inline end.
-        className={`${inputClassName} flex min-w-[7rem] items-center justify-between gap-2`}
+        className={
+          trigger
+            ? trigger.className
+            : `${inputClassName} flex min-w-[7rem] items-center justify-between gap-2`
+        }
       >
-        <span className="truncate">{summary}</span>
-        <Icon name="chevronDown" className="h-3.5 w-3.5 shrink-0 text-ink-subtle" />
+        {trigger ? (
+          trigger.content
+        ) : (
+          <>
+            <span className="truncate">{summary}</span>
+            <Icon name="chevronDown" className="h-3.5 w-3.5 shrink-0 text-ink-subtle" />
+          </>
+        )}
       </button>
 
       {present &&

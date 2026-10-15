@@ -1501,6 +1501,12 @@ const WIPED_TABLES = [
   "profile_blocked_products",
   "grower_products",
   "profiles",
+  // Not in Bubble — entered in this app only. Listed so it is in the backup
+  // and in the deleted-rows count: `delete from companies` below would take
+  // it anyway, through the foreign key, and without a trace. Scores are NOT
+  // carried over to the re-imported companies (which get new ids); they have
+  // to be entered or loaded again after an import.
+  "customer_scores",
   "companies",
   "product_varieties",
   "product_families",

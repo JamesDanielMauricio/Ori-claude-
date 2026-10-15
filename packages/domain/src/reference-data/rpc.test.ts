@@ -10,6 +10,7 @@ import {
   toSaveGrowerRpcArgs,
   toSaveProductRpcArgs,
   toSaveTransporterRpcArgs,
+  toSetCustomerScoreRpcArgs,
 } from "./schemas";
 import {
   createTestCustomerCompany,
@@ -345,5 +346,133 @@ describe("reference-data save functions", () => {
       .eq("id", product.id)
       .single();
     expect(unchanged).toMatchObject({ name: product.name, version: 1 });
+  });
+
+  // set_customer_score (migration 0067). Who may NOT see or set a score is
+  // rls.test.ts's business; this is what the function does for the one role
+  // that may.
+  it("set_customer_score: sets, overwrites and clears a customer's ranking score", async () => {
+    const client = await signedInBackofficeClient();
+    const customer = await createTestCustomerCompany();
+    cleanupFns.push(() => deleteTestCompanyById(customer.id));
+
+    const stored = async () => {
+      const { data, error } = await client
+        .from("customer_scores")
+        .select("general_score")
+        .eq("customer_company_id", customer.id);
+      expect(error).toBeNull();
+      return (data ?? []).map((row) => Number(row.general_score));
+    };
+    const set = (score: number | null) =>
+      // Raw arguments, not the input schema: the schema rounds, and the first
+      // call below is about what the COLUMN does with an unrounded number.
+      client.rpc("set_customer_score", {
+        p_customer_company_id: customer.id,
+        p_general_score: score,
+      });
+
+    expect((await set(4.349999999999999)).error).toBeNull();
+    expect(await stored()).toEqual([4.35]);
+
+    expect((await set(3.5)).error).toBeNull();
+    expect(await stored()).toEqual([3.5]);
+
+    expect((await set(null)).error).toBeNull();
+    expect(await stored()).toEqual([]);
+
+    // Clearing a customer who has no score is not an error.
+    expect((await set(null)).error).toBeNull();
+    expect(await stored()).toEqual([]);
+  });
+
+  it("set_customer_score: refuses a score off the 1-to-5 scale, and a company that is not a customer", async () => {
+    const client = await signedInBackofficeClient();
+    const customer = await createTestCustomerCompany();
+    cleanupFns.push(() => deleteTestCompanyById(customer.id));
+    const grower = await createTestGrowerCompany();
+    cleanupFns.push(() => deleteTestCompanyById(grower.id));
+
+    for (const score of [0.99, 5.01, 0, -1]) {
+      const refused = await client.rpc("set_customer_score", {
+        p_customer_company_id: customer.id,
+        p_general_score: score,
+      });
+      expect(refused.error?.code, `a score of ${score}`).toBe("P0008");
+    }
+
+    for (const companyId of [grower.id, randomUUID()]) {
+      const refused = await client.rpc(
+        "set_customer_score",
+        toSetCustomerScoreRpcArgs({ customerCompanyId: companyId, generalScore: 3 }),
+      );
+      expect(refused.error?.code).toBe("P0002");
+    }
+
+    const stored = await client
+      .from("customer_scores")
+      .select("customer_company_id")
+      .in("customer_company_id", [customer.id, grower.id]);
+    expect(stored.data).toEqual([]);
+  });
+
+  it("set_customer_score: refuses a non-backoffice caller — the customer the score is about included", async () => {
+    const adminClient = await signedInBackofficeClient();
+    const customerCompany = await createTestCustomerCompany();
+    cleanupFns.push(() => deleteTestCompanyById(customerCompany.id));
+    const customer = await createTestProfile({ companyId: customerCompany.id, role: "customer" });
+    cleanupFns.push(() => deleteTestUser(customer.userId));
+    const customerClient = await signInTestUser(customer.email, customer.password);
+
+    const seeded = await adminClient.rpc(
+      "set_customer_score",
+      toSetCustomerScoreRpcArgs({ customerCompanyId: customerCompany.id, generalScore: 2 }),
+    );
+    expect(seeded.error).toBeNull();
+
+    const raised = await customerClient.rpc(
+      "set_customer_score",
+      toSetCustomerScoreRpcArgs({ customerCompanyId: customerCompany.id, generalScore: 5 }),
+    );
+    expect(raised.error?.code).toBe("42501");
+    expect(raised.error?.message).toMatch(/FORBIDDEN/);
+
+    const cleared = await customerClient.rpc(
+      "set_customer_score",
+      toSetCustomerScoreRpcArgs({ customerCompanyId: customerCompany.id, generalScore: null }),
+    );
+    expect(cleared.error?.code).toBe("42501");
+
+    const unchanged = await adminClient
+      .from("customer_scores")
+      .select("general_score")
+      .eq("customer_company_id", customerCompany.id);
+    expect((unchanged.data ?? []).map((row) => Number(row.general_score))).toEqual([2]);
+  });
+
+  it("set_customer_score: a deleted customer takes its score with it", async () => {
+    const client = await signedInBackofficeClient();
+    const customer = await createTestCustomerCompany();
+    let deleted = false;
+    cleanupFns.push(async () => {
+      if (!deleted) await deleteTestCompanyById(customer.id);
+    });
+
+    const set = await client.rpc(
+      "set_customer_score",
+      toSetCustomerScoreRpcArgs({ customerCompanyId: customer.id, generalScore: 4 }),
+    );
+    expect(set.error).toBeNull();
+
+    // The way the customers screen deletes one: a plain delete under RLS.
+    const removal = await client.from("companies").delete().eq("id", customer.id);
+    expect(removal.error).toBeNull();
+    deleted = true;
+
+    const left = await client
+      .from("customer_scores")
+      .select("customer_company_id")
+      .eq("customer_company_id", customer.id);
+    expect(left.data).toEqual([]);
   });
 });

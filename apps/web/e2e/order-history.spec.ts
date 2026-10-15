@@ -18,6 +18,8 @@ import {
 } from "@ori/domain/lifecycle-engine/testing";
 import { expect, test } from "@playwright/test";
 
+import { pickSidebarDate } from "./pick-sidebar-date";
+
 // Arrangement and Orders History by Date (PRD:
 // backoffice/order-history-distributor-view.md): pick a date, see what
 // was ordered vs. what was arranged for it. Read-only — this spec never
@@ -75,11 +77,11 @@ test.describe("Backoffice — Order History", () => {
     await expect(page).toHaveURL(/\/backoffice\/shop$/);
 
     await page.goto("/backoffice/order-history");
-    // `exact` matters: the backoffice rail's trading-day picker is labelled
-    // "יום מסחר מוצג — בחר תאריך", so a substring match resolves to two
-    // elements and Playwright's strict mode rejects it. This page's own
-    // field is labelled exactly "תאריך".
-    await page.getByLabel("תאריך", { exact: true }).fill(tradeDate);
+    // The date is chosen in the sidebar's calendar — the screen has no date
+    // field of its own any more (see order-history.tsx). tradeDate is also
+    // the live day here, so the screen would open on it anyway; picking it
+    // keeps this test about "pick a date, see that date's orders".
+    await pickSidebarDate(page, tradeDate);
 
     const customerRow = page.getByRole("button", { name: new RegExp(customerCompany.name) });
     await expect(customerRow).toBeVisible();
@@ -104,7 +106,12 @@ test.describe("Backoffice — Order History", () => {
     await expect(page).toHaveURL(/\/backoffice\/shop$/);
 
     await page.goto("/backoffice/order-history");
-    await page.getByLabel("תאריך", { exact: true }).fill("2019-01-01");
+    // A date that can never have a trading day: before the first one ever
+    // recorded (2025-02-11), and in the past, where the start-day dialog
+    // can't create one. Nearer than the 2019-01-01 this used to type into the
+    // screen's own date field, because the sidebar's calendar is stepped to
+    // it one month at a time.
+    await pickSidebarDate(page, "2024-12-15");
     // No trailing period: this copy is an EmptyState `title`, and titles
     // across the app are written without terminal punctuation. The string
     // here kept a period from back when the same message was a sentence,

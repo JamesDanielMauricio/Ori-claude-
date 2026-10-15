@@ -181,17 +181,23 @@ export default function GrowersPage() {
   const catalogQuery = useQuery({
     queryKey: ["reference-data", "product-catalog"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("product_varieties")
-        .select("id, name, sizes, product_families(name)")
-        .order("name");
-      if (error) throw error;
-      return data as Array<{
+      // Paged like grower_products above: the catalog (~900 varieties) is
+      // near PostgREST's 1,000-row cap, and a truncated read would drop the
+      // varieties that sort last from every chip and picker on this screen.
+      // `id` breaks ties between same-named varieties so pages can't overlap.
+      return fetchAllRows<{
         id: string;
         name: string;
         sizes: string | null;
         product_families: { name: string } | null;
-      }>;
+      }>((from, to) =>
+        supabase
+          .from("product_varieties")
+          .select("id, name, sizes, product_families(name)")
+          .order("name")
+          .order("id")
+          .range(from, to),
+      );
     },
   });
 

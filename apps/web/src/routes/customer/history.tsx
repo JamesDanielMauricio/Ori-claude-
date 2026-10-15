@@ -1,8 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { inputClassName } from "@/components/reference-data/form-field";
+import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { PageHeader } from "@/components/ui/page-header";
 import { QueryError } from "@/components/ui/query-error";
@@ -61,11 +62,21 @@ const BADGE_CLASSES: Record<BadgeKind, string> = {
   closed: "border-border-strong text-ink-muted font-semibold",
 };
 
+// Built once, not per call — see the same formatter in
+// routes/grower/history.tsx for why.
+const SHORT_DATE_FORMAT = new Intl.DateTimeFormat("he-IL", {
+  day: "numeric",
+  month: "numeric",
+  year: "2-digit",
+});
+
 function shortDateLabel(isoDate: string): string {
-  return new Intl.DateTimeFormat("he-IL", { day: "numeric", month: "numeric", year: "2-digit" }).format(
-    new Date(isoDate),
-  );
+  return SHORT_DATE_FORMAT.format(new Date(isoDate));
 }
+
+// Days per "הצג עוד" batch — same paging as the grower's pick history
+// (routes/grower/history.tsx explains why the list isn't loaded whole).
+const PAGE_SIZE = 60;
 
 // Read-only order history (PRD: customer-home/order-history.md) — every
 // trading day, newest first, not just the ones this company has an order
@@ -90,19 +101,36 @@ export default function CustomerOrderHistoryPage() {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
 
-  const daysQuery = useQuery({
+  const daysQuery = useInfiniteQuery({
     queryKey: ["customer", "order-history"],
-    queryFn: async () => {
+    initialPageParam: 0,
+    queryFn: async ({ pageParam }) => {
       const { data, error } = await supabase
         .from("trading_days")
         .select("id, trade_date, phase, daily_orders(id, status, submitted_at)")
-        .order("trade_date", { ascending: false });
+        .order("trade_date", { ascending: false })
+        // Unique tie-breaker so same-date rows keep one position across pages.
+        .order("id")
+        .range(pageParam, pageParam + PAGE_SIZE - 1);
       if (error) throw error;
       return data as unknown as DayRow[];
     },
+    getNextPageParam: (lastPage, allPages) =>
+      lastPage.length < PAGE_SIZE ? undefined : allPages.length * PAGE_SIZE,
   });
 
-  const sortedDays = useMemo(() => daysQuery.data ?? [], [daysQuery.data]);
+  // First copy of each day only — a day started between two clicks shifts
+  // the pages by one (see routes/grower/history.tsx).
+  const sortedDays = useMemo(() => {
+    const seen = new Set<string>();
+    const rows: DayRow[] = [];
+    for (const row of daysQuery.data?.pages.flat() ?? []) {
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      rows.push(row);
+    }
+    return rows;
+  }, [daysQuery.data]);
 
   // Filters by the visible date label — the only field a row shows, so it's
   // the only thing worth searching (matches the mockup's plain "חיפוש" box).
@@ -138,7 +166,7 @@ export default function CustomerOrderHistoryPage() {
             <Skeleton className="h-10 w-full" />
             <Skeleton className="h-10 w-full" />
           </div>
-        ) : daysQuery.isError ? (
+        ) : daysQuery.isError && !daysQuery.isFetchNextPageError ? (
           // Not "you have no orders yet" — that sentence would tell a customer
           // their entire order history had vanished.
           <QueryError
@@ -179,6 +207,29 @@ export default function CustomerOrderHistoryPage() {
           </ul>
         )}
       </div>
+
+      {daysQuery.hasNextPage && (
+        <div className="flex flex-col items-center gap-2">
+          {/* Search runs over the rows on screen — say so while older days
+              are still unloaded, or a miss reads as "no such order". */}
+          {search.trim() && (
+            <p className="text-center text-xs text-ink-muted">
+              החיפוש כולל רק את הימים שמוצגים — לחץ ״הצג עוד״ כדי לחפש גם בימים קודמים.
+            </p>
+          )}
+          {daysQuery.isFetchNextPageError && (
+            <p className="text-center text-xs text-danger">טעינת ימים נוספים נכשלה. נסה שוב.</p>
+          )}
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => void daysQuery.fetchNextPage()}
+            disabled={daysQuery.isFetchingNextPage}
+          >
+            {daysQuery.isFetchingNextPage ? "טוען…" : "הצג עוד"}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

@@ -196,8 +196,18 @@ export function Dialog({
       {/* The scrolling part. `min-h-0` is what actually lets it shrink: a
           flex child defaults to `min-height: auto`, which refuses to go below
           its content's height and would push the overflow back outside the
-          dialog no matter what the cap above says. */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">{shown.children}</div>
+          dialog no matter what the cap above says.
+
+          `flex-auto` (1 1 auto), not `flex-1` (1 1 0%). The dialog has only a
+          max-height, never a height, so a percentage basis has nothing to
+          resolve against. Chrome and current WebKit read that as "size to
+          content"; older WebKit (seen on 26.0 and 26.4, fine on 26.5 —
+          iPhones that have not updated yet) reads it as zero, which
+          collapsed this body to its own padding: a 107px dialog with the
+          order list cut off after one row, on every popup in the app. A
+          content basis sizes the same in all of them, and `min-h-0` + the
+          cap above still shrink it to scroll. */}
+      <div className="min-h-0 flex-auto overflow-y-auto px-6 py-5">{shown.children}</div>
     </dialog>,
     document.body,
   );

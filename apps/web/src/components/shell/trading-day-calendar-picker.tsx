@@ -1,5 +1,5 @@
 import { parseIsoDate, todayIsoDate } from "@ori/shared/dates";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { Icon } from "@/components/ui/icon";
@@ -90,6 +90,23 @@ export function TradingDayCalendarPicker({
   // lib/use-exit-animation.ts. The outside-click and Escape listeners below
   // still key off `open`, so they're already gone by then.
   const { present, closing } = useExitAnimation(open, popoverRef);
+
+  // Keeps the panel on screen. It opens `fixed`, 8px under its trigger — right
+  // on a tall screen, and off the bottom of a short one: a phone held sideways
+  // is ~390px tall, the panel ~340px, and the trigger sits ~200px down. The
+  // panel's height is the month grid's, not a number this file knows, so it is
+  // measured once the panel exists. A layout effect, so it moves before the
+  // first paint and never flashes in the wrong place; written straight onto
+  // the element's style, the way ui/select.tsx places its list, because none
+  // of it changes what React renders. A screen too short for the panel at all
+  // gets a max-height instead, and the panel scrolls (see its className).
+  useLayoutEffect(() => {
+    const panel = popoverRef.current;
+    if (!open || !panel || !position) return;
+    panel.style.maxHeight = `${window.innerHeight - VIEWPORT_MARGIN * 2}px`;
+    const lowestTop = window.innerHeight - panel.offsetHeight - VIEWPORT_MARGIN;
+    panel.style.top = `${Math.max(VIEWPORT_MARGIN, Math.min(position.top, lowestTop))}px`;
+  }, [open, position]);
 
   function openPopover() {
     setViewDate(parseIsoDate(selectedDate ?? liveDate ?? todayIsoDate()));
@@ -186,7 +203,12 @@ export function TradingDayCalendarPicker({
             style={{ position: "fixed", top: position.top, right: position.right }}
             // `origin-top-right`: the corner pinned under the trigger (see
             // openPopover), which the open/close animation scales from.
-            className="animate-popover origin-top-right z-50 w-[19rem] overflow-hidden rounded-xl border border-border bg-surface p-3 text-ink shadow-overlay"
+            // `overflow-y-auto overflow-x-hidden`, not `overflow-hidden`: the
+            // layout effect above caps the height at the screen's, and a
+            // capped panel has to scroll rather than cut the grid off. On a
+            // screen tall enough for the whole panel (over ~360px) there is
+            // nothing to scroll, so this draws the same as `overflow-hidden`.
+            className="animate-popover origin-top-right z-50 w-[19rem] overflow-y-auto overflow-x-hidden rounded-xl border border-border bg-surface p-3 text-ink shadow-overlay"
           >
             <TradingDayMonthGrid
               viewDate={viewDate}

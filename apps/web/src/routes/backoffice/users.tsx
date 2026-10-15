@@ -159,17 +159,21 @@ export default function UsersPage() {
   const catalogQuery = useQuery({
     queryKey: ["reference-data", "product-catalog"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("product_varieties")
-        .select("id, name, sizes, product_families(name)")
-        .order("name");
-      if (error) throw error;
-      return data as Array<{
+      // Paged like profile_blocked_products above — same query and cache
+      // key as growers.tsx's catalog read, which explains why.
+      return fetchAllRows<{
         id: string;
         name: string;
         sizes: string | null;
         product_families: { name: string } | null;
-      }>;
+      }>((from, to) =>
+        supabase
+          .from("product_varieties")
+          .select("id, name, sizes, product_families(name)")
+          .order("name")
+          .order("id")
+          .range(from, to),
+      );
     },
   });
 

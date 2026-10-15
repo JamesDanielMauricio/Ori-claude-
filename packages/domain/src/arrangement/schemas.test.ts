@@ -65,10 +65,45 @@ describe("saveArrangementProposalInputSchema", () => {
   });
 });
 
+describe("saveArrangementProposalInputSchema — the for-an-order mark", () => {
+  it("accepts a cell marked as filling an order, and one without the mark", () => {
+    const parsed = saveArrangementProposalInputSchema.parse({
+      tradingDayId: DAY,
+      allocations: [
+        {
+          dailyPickProductId: LOT,
+          customerCompanyId: CUSTOMER,
+          quantityPallets: 1,
+          forOrder: true,
+        },
+        { dailyPickProductId: LOT, customerCompanyId: OTHER_CUSTOMER, quantityPallets: 1 },
+      ],
+    });
+
+    expect(parsed.allocations.map((cell) => cell.forOrder)).toEqual([true, undefined]);
+  });
+
+  it("refuses a mark that is not true or false", () => {
+    const result = saveArrangementProposalInputSchema.safeParse({
+      tradingDayId: DAY,
+      allocations: [
+        {
+          dailyPickProductId: LOT,
+          customerCompanyId: CUSTOMER,
+          quantityPallets: 1,
+          forOrder: "yes",
+        },
+      ],
+    });
+
+    expect(result.success).toBe(false);
+  });
+});
+
 describe("toSaveArrangementProposalRpcArgs", () => {
   it("hands the cells over in the keys the function reads", () => {
     const allocations = [
-      { dailyPickProductId: LOT, customerCompanyId: CUSTOMER, quantityPallets: 2 },
+      { dailyPickProductId: LOT, customerCompanyId: CUSTOMER, quantityPallets: 2, forOrder: true },
     ];
 
     expect(toSaveArrangementProposalRpcArgs({ tradingDayId: DAY, allocations })).toEqual({

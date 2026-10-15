@@ -4,6 +4,7 @@ import {
   customerFactsFrom,
   dayToPropose,
   historyFromRows,
+  proposeForDay,
   readAllPages,
   type HistoryRows,
 } from "./arrangement-engine-input";
@@ -377,5 +378,94 @@ describe("customerFactsFrom", () => {
       gabbai: { generalScore: 4.35, since: "2025-03-01" },
       atara: { generalScore: null, since: "2026-10-01" },
     });
+  });
+});
+
+describe("proposeForDay", () => {
+  // Kumquats are new today — in no day of the history — and one pallet came
+  // in for two orders. Gabbai has bought citrus on every day it sold; Atara
+  // never has, but ordered first.
+  const KUMQUAT = "variety-kumquat";
+  const tradeDate = "2026-10-12";
+  const picks: BoardPick[] = [
+    {
+      id: "pick-a",
+      grower_company_id: "grower-a",
+      status: "submitted",
+      pickup_time: null,
+      daily_pick_products: [
+        {
+          id: "line-a-kumquat",
+          daily_pick_id: "pick-a",
+          product_variety_id: KUMQUAT,
+          pallets_picked: "1",
+          leftover_pallets: "0",
+          comment: null,
+          product_varieties: variety(KUMQUAT),
+        },
+      ],
+    },
+  ];
+  const orderFor = (customer: string, at: string): BoardOrder => ({
+    id: `order-${customer}`,
+    customer_company_id: customer,
+    status: "submitted",
+    submitted_at: at,
+    order_submission_logs: [],
+    daily_order_products: [
+      {
+        id: `ol-${customer}-kumquat`,
+        daily_order_id: `order-${customer}`,
+        product_variety_id: KUMQUAT,
+        pallets_ordered: "1",
+        comment: null,
+        product_varieties: variety(KUMQUAT),
+      },
+    ],
+  });
+  const orders = [
+    orderFor("atara", "2026-10-12T06:00:00+00:00"),
+    orderFor("gabbai", "2026-10-12T09:00:00+00:00"),
+  ];
+  const learnedFrom = {
+    history: [
+      {
+        date: "2026-10-01",
+        supply: { [LEMON]: 1 },
+        orders: { [LEMON]: { gabbai: 1 } },
+        recorded: { [LEMON]: { gabbai: 1 } },
+      },
+    ],
+    familyOf: { [LEMON]: CITRUS },
+    customers: {
+      atara: { generalScore: null, since: null },
+      gabbai: { generalScore: null, since: null },
+    },
+  };
+
+  it("judges a product first sold today by its family, from the day's own lots", () => {
+    expect(proposeForDay({ tradeDate, picks, orders, records: [], learnedFrom })).toEqual([
+      {
+        growerId: "grower-a",
+        varietyId: KUMQUAT,
+        customerId: "gabbai",
+        quantity: 1,
+        origin: "suggested",
+      },
+    ]);
+  });
+
+  it("proposes nothing onto a cell that is already arranged", () => {
+    const saved: BoardRecord = {
+      id: "record-atara",
+      daily_pick_product_id: "line-a-kumquat",
+      daily_order_product_id: "ol-atara-kumquat",
+      customer_company_id: "atara",
+      quantity_pallets: 1,
+      price: null,
+      price_type: null,
+    };
+
+    expect(proposeForDay({ tradeDate, picks, orders, records: [saved], learnedFrom })).toEqual([]);
   });
 });

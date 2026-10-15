@@ -828,3 +828,116 @@ describe("proposeArrangement — rules pinned after review", () => {
     expect(lines).toEqual([]);
   });
 });
+
+// The second review's counter-examples: on a partly arranged day, every pallet
+// that can be placed is placed — whatever order the customers come in.
+describe("proposeArrangement — partly arranged days, placed in full", () => {
+  function placed(lines: ReturnType<typeof propose>) {
+    return lines.reduce((sum, line) => sum + line.quantity, 0);
+  }
+  const at = "2026-10-20T05:00:00Z";
+
+  it("places all 8 when three lots and two saved cells leave only one way to do it", () => {
+    // X can use A and B (saved on C); Y can use B and C (saved on A).
+    const today: DayToPropose = {
+      date: "2026-10-20",
+      lots: [
+        { growerId: "A", varietyId: PRODUCT, available: 2 },
+        { growerId: "B", varietyId: PRODUCT, available: 3 },
+        { growerId: "C", varietyId: PRODUCT, available: 3 },
+      ],
+      orders: [
+        { customerId: "X", varietyId: PRODUCT, quantity: 3, orderedAt: at },
+        { customerId: "Y", varietyId: PRODUCT, quantity: 7, orderedAt: at },
+      ],
+      arranged: [
+        { growerId: "C", varietyId: PRODUCT, customerId: "X", quantity: 1 },
+        { growerId: "A", varietyId: PRODUCT, customerId: "Y", quantity: 1 },
+      ],
+    };
+
+    const lines = propose(today);
+    expect(placed(lines)).toBe(8);
+    expect(given(lines)).toEqual({ X: 2, Y: 6 });
+  });
+
+  it("deals no pallet to a customer that no lot open to them can hold", () => {
+    // X and Y are both shut out of A; only B (2 free) is open to them. Z can
+    // take from either. Everyone is owed 2 and ranks equal.
+    const today: DayToPropose = {
+      date: "2026-10-20",
+      lots: [
+        { growerId: "A", varietyId: PRODUCT, available: 2 },
+        { growerId: "B", varietyId: PRODUCT, available: 2 },
+      ],
+      orders: ["X", "Y", "Z"].map((customerId) => ({
+        customerId,
+        varietyId: PRODUCT,
+        quantity: 3,
+        orderedAt: at,
+      })),
+      arranged: [
+        { growerId: "A", varietyId: PRODUCT, customerId: "X", quantity: 1 },
+        { growerId: "A", varietyId: PRODUCT, customerId: "Y", quantity: 1 },
+      ],
+    };
+
+    const lines = propose(today);
+    // All 4 free pallets go out, and every line lands on a lot open to its customer.
+    expect(placed(lines)).toBe(4);
+    for (const line of lines) {
+      expect(line.growerId === "A" && (line.customerId === "X" || line.customerId === "Y")).toBe(
+        false,
+      );
+    }
+  });
+
+  it("gives the same proposal whatever order the lots and orders arrive in", () => {
+    const lots = [
+      { growerId: "A", varietyId: PRODUCT, available: 2 },
+      { growerId: "B", varietyId: PRODUCT, available: 2 },
+      { growerId: "C", varietyId: PRODUCT, available: 1 },
+    ];
+    const orders = ["X", "Y", "Z", "W"].map((customerId) => ({
+      customerId,
+      varietyId: PRODUCT,
+      quantity: 2,
+      orderedAt: at,
+    }));
+    const arranged = [{ growerId: "B", varietyId: PRODUCT, customerId: "Z", quantity: 0 }];
+    const baseline = propose({ date: "2026-10-20", lots, orders, arranged });
+
+    for (const permutation of [
+      { lots: [...lots].reverse(), orders: [...orders].reverse() },
+      {
+        lots: [lots[1]!, lots[2]!, lots[0]!],
+        orders: [orders[2]!, orders[0]!, orders[3]!, orders[1]!],
+      },
+    ]) {
+      const again = propose({ date: "2026-10-20", ...permutation, arranged });
+      const key = (line: (typeof baseline)[number]) =>
+        `${line.growerId}|${line.customerId}|${line.quantity}`;
+      expect(again.map(key).sort()).toEqual(baseline.map(key).sort());
+    }
+  });
+});
+
+describe("assignLots — placed in full", () => {
+  it("finds a placement for every pallet whenever one exists", () => {
+    // Lots A=1, B=2, C=2. X (1) is shut out of C; Y (4) is shut out of A.
+    const cells = assignLots(
+      [
+        { growerId: "A", available: 1, takenBy: new Set(["Y"]) },
+        { growerId: "B", available: 2 },
+        { growerId: "C", available: 2, takenBy: new Set(["X"]) },
+      ],
+      [
+        { customerId: "X", quantity: 1 },
+        { customerId: "Y", quantity: 4 },
+      ],
+    );
+
+    expect(cells.reduce((sum, cell) => sum + cell.quantity, 0)).toBe(5);
+    expect(cells.find((cell) => cell.customerId === "X")?.growerId).toBe("A");
+  });
+});

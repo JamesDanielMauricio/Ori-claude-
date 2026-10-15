@@ -27,9 +27,21 @@
 --   3. The pick lines touched, FOR SHARE, in id order. The allocation check
 --      reads pallets_picked without a lock, and save_pick_lines (0050) could
 --      lower it under the check.
+--   4. The order headers of the customers involved, FOR UPDATE, in id order.
+--      submit_order changes a customer's lines under that row's lock, so
+--      "this customer still has that order" stays true until commit.
+--
+-- A cell marked forOrder was meant to fill the customer's order — the screen
+-- suggested it, or the distributor corrected a suggestion. If that order has
+-- gone (withdrawn in the moments since the proposal was read), the cell is
+-- refused rather than saved: arrange_to_customer would otherwise make it a
+-- push, and close_arrangement would then price and announce pallets the
+-- customer took back. A cell without the mark is the distributor's own, push
+-- or not, and is saved as it is.
 --
 -- p_allocations: [{ "dailyPickProductId": uuid, "customerCompanyId": uuid,
---                   "quantityPallets": whole number above zero }, ...]
+--                   "quantityPallets": whole number above zero,
+--                   "forOrder": true | false (optional) }, ...]
 --
 -- Written to be re-run.
 
@@ -90,7 +102,8 @@ begin
             then (e.elem ->> 'quantityPallets')::numeric <= 0
               or (e.elem ->> 'quantityPallets')::numeric % 1 <> 0
           else true
-        end;
+        end
+     or (e.elem ? 'forOrder' and jsonb_typeof(e.elem -> 'forOrder') <> 'boolean');
   if v_bad is not null then
     raise exception 'INVALID_INPUT: each allocation needs a pick line, a customer and a whole number of pallets above zero'
       using errcode = 'P0008', detail = jsonb_build_object('indexes', v_bad)::text;
@@ -133,6 +146,39 @@ begin
   )
   order by id
   for share;
+
+  perform 1
+  from public.daily_orders
+  where trading_day_id = p_trading_day_id
+    and customer_company_id in (
+      select (e.elem ->> 'customerCompanyId')::uuid from jsonb_array_elements(p_allocations) as e(elem)
+    )
+  order by id
+  for update;
+
+  -- Meant for an order that has gone since the proposal was read: the whole
+  -- save is refused, naming every such cell at once.
+  select jsonb_agg(jsonb_build_object(
+           'index', e.ord - 1,
+           'dailyPickProductId', e.elem ->> 'dailyPickProductId',
+           'customerCompanyId', e.elem ->> 'customerCompanyId') order by e.ord)
+    into v_bad
+  from jsonb_array_elements(p_allocations) with ordinality as e(elem, ord)
+  where (e.elem -> 'forOrder') = 'true'::jsonb
+    and not exists (
+      select 1
+      from public.daily_pick_products dpp
+      join public.daily_order_products dop on dop.product_variety_id = dpp.product_variety_id
+      join public.daily_orders o on o.id = dop.daily_order_id
+      where dpp.id = (e.elem ->> 'dailyPickProductId')::uuid
+        and o.trading_day_id = p_trading_day_id
+        and o.customer_company_id = (e.elem ->> 'customerCompanyId')::uuid
+        and dop.pallets_ordered > 0
+    );
+  if v_bad is not null then
+    raise exception 'CONFLICT: % cell(s) of this proposal are no longer ordered', jsonb_array_length(v_bad)
+      using errcode = 'P0006', detail = jsonb_build_object('cells', v_bad)::text;
+  end if;
 
   -- Filled since the proposal was read: the whole save is refused, naming
   -- every such cell at once. A cell's customer is read off its order line,
@@ -198,7 +244,7 @@ end;
 $$;
 
 comment on function public.save_arrangement_proposal(uuid, jsonb) is
-  'Backoffice-only. Saves a whole arrangement proposal for one trading day in one transaction, all or nothing, through arrange_to_customer per allocation, and only into cells (pick line × customer) with no arrangement record yet. Returns the number of records created. Raises 42501 for a non-backoffice caller; P0002 for an unknown day or arrangement, or a pick line not on that day; P0007 if the arrangement is closed; P0008 for a malformed or repeated allocation; P0006 if a cell is already filled (DETAIL lists every one); and whatever arrange_to_customer raises (P0002/P0008/P0009) with its SQLSTATE kept and DETAIL naming the allocation (index, dailyPickProductId, customerCompanyId, quantityPallets).';
+  'Backoffice-only. Saves a whole arrangement proposal for one trading day in one transaction, all or nothing, through arrange_to_customer per allocation, and only into cells (pick line × customer) with no arrangement record yet. Returns the number of records created. Raises 42501 for a non-backoffice caller; P0002 for an unknown day or arrangement, or a pick line not on that day; P0007 if the arrangement is closed; P0008 for a malformed or repeated allocation; P0006 if a cell is already filled, or was marked forOrder and its order has gone (DETAIL lists every such cell); and whatever arrange_to_customer raises (P0002/P0008/P0009) with its SQLSTATE kept and DETAIL naming the allocation (index, dailyPickProductId, customerCompanyId, quantityPallets).';
 
 -- SECURITY: ALLOWS signed-in users (`authenticated`) and the service role to
 -- call it — the function itself then refuses everyone but backoffice, and
@@ -209,8 +255,9 @@ comment on function public.save_arrangement_proposal(uuid, jsonb) is
 -- (0039), which is why it is not a definer.
 -- PROTECTS AGAINST anonymous callers reaching it at all (EXECUTE revoked from
 -- public and anon, as in 0055, 0059, 0062 and 0067); a cell someone else
--- filled being overwritten (refused, never upserted); a half-saved day (one
--- transaction); and a save landing inside a running close_arrangement (the
--- trading day is locked first).
+-- filled being overwritten (refused, never upserted); a cell meant for an
+-- order becoming a push once that order is withdrawn (refused); a half-saved
+-- day (one transaction); and a save landing inside a running close_arrangement
+-- (the trading day is locked first).
 revoke execute on function public.save_arrangement_proposal(uuid, jsonb) from public, anon;
 grant execute on function public.save_arrangement_proposal(uuid, jsonb) to authenticated, service_role;

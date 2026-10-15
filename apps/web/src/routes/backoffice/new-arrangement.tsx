@@ -15,14 +15,12 @@ import {
   type MatrixWrite,
 } from "@/components/arrangement/arrangement-matrix";
 import { ArrangementMatrixMobile } from "@/components/arrangement/arrangement-matrix-mobile";
-import { learnFrom, proposeArrangement } from "@/components/arrangement/arrangement-engine";
-import { dayToPropose } from "@/components/arrangement/arrangement-engine-input";
+import { proposeForDay } from "@/components/arrangement/arrangement-engine-input";
 import { readEngineHistory } from "@/components/arrangement/arrangement-history-query";
 import {
-  lotOfPickLine,
   resolveProposal,
   saveRefusalMessage,
-  setProposalCell,
+  typeIntoProposal,
   type ProposalLine,
 } from "@/components/arrangement/arrangement-proposal";
 import {
@@ -127,8 +125,6 @@ export default function NewArrangementPage() {
   const [suggestion, setSuggestion] = useState<{
     tradingDayId: string;
     lines: ProposalLine[];
-    /** Lines the day had no room for when the suggestion was offered. */
-    leftOut: number;
     /** What the last attempt to save it could not write, until the next one. */
     refusal: string | null;
   } | null>(null);
@@ -399,27 +395,25 @@ export default function NewArrangementPage() {
    * proposal's, and a number typed there is a correction to it — changed,
    * added or, when the box is emptied, taken out — that waits for "שמור
    * לסידור" with the rest. Nothing is written for it here. A cell that
-   * already holds a saved allocation is never the proposal's (resolveProposal
-   * lands nothing on one), so it is written at once, as it always is.
+   * already holds a saved allocation is never the proposal's, so it is
+   * written at once, as it always is — see typeIntoProposal.
    */
   const commitCell = async (write: MatrixWrite): Promise<boolean> => {
-    if (proposal && boardDay && !write.recordId) {
-      const lot = lotOfPickLine(boardDay.daily_picks, write.pickLineId);
-      if (!lot) return false;
-      // From the lines as they stand when this is applied, not as they were
+    if (suggestion && proposal && boardDay) {
+      const picks = boardDay.daily_picks;
+      // Where the number goes does not depend on the lines, only on the cell.
+      const typed = typeIntoProposal(suggestion.lines, picks, write);
+      if (!typed) return false;
+      // Applied to the lines as they stand when this runs, not as they were
       // when the cell was drawn: two corrections in a row must both land.
       setSuggestion(
         (current) =>
           current && {
             ...current,
-            lines: setProposalCell(
-              current.lines,
-              { ...lot, customerId: write.customerId },
-              write.quantity,
-            ),
+            lines: typeIntoProposal(current.lines, picks, write)?.lines ?? current.lines,
           },
       );
-      return true;
+      if (!typed.saveNow) return true;
     }
 
     try {
@@ -464,6 +458,8 @@ export default function NewArrangementPage() {
           dailyPickProductId: allocation.pickLineId,
           customerCompanyId: allocation.customerId,
           quantityPallets: allocation.quantity,
+          // So the database can refuse a cell whose order went meanwhile.
+          ...(allocation.forOrder ? { forOrder: true } : {}),
         })),
       });
       const { data, error } = await supabase.rpc(
@@ -513,44 +509,32 @@ export default function NewArrangementPage() {
    *
    * The day on screen as it stands — orders, what is free on each lot, what
    * is already arranged — plus the last HISTORY_DAYS days, read now; the rules
-   * are arrangement-engine.ts's. Cells already arranged are never proposed
-   * over.
+   * are arrangement-engine.ts's (see proposeForDay). Cells already arranged
+   * are never proposed over.
    */
   const suggestArrangement = async () => {
     if (!boardDay || !arrangement || savingProposal || proposing) return;
     setProposing(true);
     try {
       const learnedFrom = await readEngineHistory(supabase, boardDay.trade_date);
-      // The day as it stands NOW, not as it stood when the button was pressed:
-      // the history read takes a moment, and anything saved meanwhile (it
-      // re-reads the day through lib/live-updates.ts) must be worked around,
-      // not proposed over.
-      const today = queryClient.getQueryData<TradingDay | null>(boardDataQueryKey) ?? boardDay;
-      const todaysArrangement = today.daily_arrangements;
-      if (today.id !== boardDay.id || todaysArrangement?.status !== "open") return;
-      // Today's products' families too: one first sold today is in no history.
-      const familyOf = { ...learnedFrom.familyOf };
-      for (const pick of today.daily_picks) {
-        for (const line of pick.daily_pick_products) {
-          if (line.product_varieties) {
-            familyOf[line.product_varieties.id] = line.product_varieties.family_id;
-          }
-        }
+      // The day as it stands NOW, from the same cache entry, not as it stood
+      // when the button was pressed: the history read takes a moment, and
+      // anything saved meanwhile (lib/live-updates.ts re-reads the day) must be
+      // worked around, not proposed over.
+      const today = queryClient.getQueryData<TradingDay | null>(boardDataQueryKey);
+      const todaysArrangement = today?.daily_arrangements;
+      if (!today || todaysArrangement?.status !== "open") {
+        showToast("הסידור נסגר בזמן שההצעה חושבה. לא הוצע דבר.", "error");
+        return;
       }
       const records = todaysArrangement.arrangement_records;
-      // Marked as suggested: held to what is still on order every time the day
-      // is read again while it is on preview (see resolveProposal).
-      const lines = proposeArrangement({
-        day: dayToPropose({
-          tradeDate: today.trade_date,
-          picks: today.daily_picks,
-          orders: today.daily_orders,
-          records,
-        }),
-        learned: learnFrom(learnedFrom.history, familyOf),
-        familyOf,
-        customers: learnedFrom.customers,
-      }).map((line) => ({ ...line, suggested: true }));
+      const lines = proposeForDay({
+        tradeDate: today.trade_date,
+        picks: today.daily_picks,
+        orders: today.daily_orders,
+        records,
+        learnedFrom,
+      });
       const offered = resolveProposal({
         lines,
         picks: today.daily_picks,
@@ -561,12 +545,7 @@ export default function NewArrangementPage() {
         showToast("אין מה להציע: כל מה שהוזמן ויש לו מלאי כבר משובץ.");
         return;
       }
-      setSuggestion({
-        tradingDayId: boardDay.id,
-        lines,
-        leftOut: offered.alreadyArranged + offered.unplaceable + offered.noLongerOrdered,
-        refusal: null,
-      });
+      setSuggestion({ tradingDayId: today.id, lines, refusal: null });
     } catch (error) {
       showToast(`חישוב הצעת הסידור נכשל: ${errorMessage(error)}`, "error");
     } finally {
@@ -647,6 +626,11 @@ export default function NewArrangementPage() {
   const gridEditable = editable && !savingProposal;
   const proposedPallets =
     proposal?.allocations.reduce((sum, allocation) => sum + allocation.quantity, 0) ?? 0;
+  // Counted on every read of the day, not once when offered: lines drop out
+  // as cells are filled and orders change while the proposal is on preview.
+  const leftOut = proposal
+    ? proposal.alreadyArranged + proposal.unplaceable + proposal.noLongerOrdered
+    : 0;
   // Why the grid is empty, when the cut-down view is why: its own message
   // assumes a search that matched nothing.
   const emptyLabel =
@@ -705,8 +689,8 @@ export default function NewArrangementPage() {
           <p className="text-sm text-ink">
             <span className="font-semibold">הצעת סידור — עדיין לא נשמרה.</span>{" "}
             {formatPallets(proposedPallets)} משטחים ב-{proposal.allocations.length} תאים.
-            {suggestion.leftOut > 0 &&
-              ` ${suggestion.leftOut} שורות לא נכללו: כבר משובצות, או שאין להן מקום ביום זה.`}
+            {leftOut > 0 &&
+              ` ${leftOut} שורות מההצעה לא נכללו: כבר משובצות, ההזמנה שלהן השתנתה, או שאין להן מקום ביום זה.`}
             {suggestion.refusal && (
               <span className="block font-semibold text-danger">{suggestion.refusal}</span>
             )}
@@ -862,12 +846,12 @@ function describeRpcError(error: RpcError, migration = "0040"): string {
     case ARRANGEMENT_ERROR_CODES.CONFLICT:
       return "התא כבר שובץ בינתיים.";
     case ARRANGEMENT_ERROR_CODES.INVALID_INPUT:
-      return "חלק מהכמויות אינן תקינות.";
+      return "הכמות אינה תקינה.";
     // Postgres broke a lock cycle with another write landing at the same
     // moment (a grower's pick being saved, say) by giving up on this one.
     // Nothing was written; trying again is all it takes.
     case "40P01":
-      return "השמירה התנגשה בשינוי אחר שנעשה באותו רגע. לא נשמר דבר — נסה שוב.";
+      return "השמירה התנגשה בשינוי אחר שנעשה באותו רגע. נסה שוב.";
     // PostgREST's "no function matches". Worth naming because migrations here
     // are applied by hand: every cell in this grid calls arrange_to_customer,
     // which does not exist until 0040 is run (and a whole proposal

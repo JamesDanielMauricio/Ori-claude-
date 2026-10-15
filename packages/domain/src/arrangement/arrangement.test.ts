@@ -258,12 +258,19 @@ describe("arrangement module", () => {
     return data ?? [];
   }
 
+  // A customer who orders nothing on the day. Created BEFORE the day, so that
+  // open_shop gives them the order header arrange_to_customer needs — and so
+  // that, cleanup running last-in-first-out, the day (and its orders) goes
+  // before they do.
+  async function customerWhoOrdersNothing() {
+    const company = await createTestCompany(`לקוח בדיקה ${crypto.randomUUID()}`, "customer");
+    cleanupFns.push(() => deleteTestCompany(company.id));
+    return company;
+  }
+
   it("save_arrangement_proposal saves every cell, a push included, and says how many", async () => {
+    const pushedTo = await customerWhoOrdersNothing();
     const { day, pickProductId, customer } = await setUpDayWithSupplyAndDemand(5, 3);
-    const pushedTo = await createTestCompany(`לקוח בדיקה ${crypto.randomUUID()}`, "customer");
-    cleanupFns.push(() => deleteTestCompany(pushedTo.id));
-    // A header for the customer who ordered nothing: arrange_to_customer needs one.
-    await db.insert(dailyOrders).values({ tradingDayId: day.id, customerCompanyId: pushedTo.id });
 
     const saved = await admin.client.rpc(
       "save_arrangement_proposal",
@@ -283,10 +290,8 @@ describe("arrangement module", () => {
   }, 30000);
 
   it("save_arrangement_proposal saves nothing when one cell is refused, and names that cell", async () => {
+    const pushedTo = await customerWhoOrdersNothing();
     const { day, pickProductId, customer } = await setUpDayWithSupplyAndDemand(5, 10);
-    const pushedTo = await createTestCompany(`לקוח בדיקה ${crypto.randomUUID()}`, "customer");
-    cleanupFns.push(() => deleteTestCompany(pushedTo.id));
-    await db.insert(dailyOrders).values({ tradingDayId: day.id, customerCompanyId: pushedTo.id });
 
     // 3 + 4 off a lot of 5: the first cell fits, the second does not.
     const saved = await admin.client.rpc(
@@ -331,6 +336,41 @@ describe("arrangement module", () => {
     expect(saved.error?.code).toBe(ARRANGEMENT_ERROR_CODES.CONFLICT);
     const records = await recordsOn(pickProductId);
     expect(records.map((record) => Number(record.quantity_pallets))).toEqual([1]);
+  }, 30000);
+
+  it("save_arrangement_proposal refuses a cell meant for an order the customer no longer has, and saves nothing", async () => {
+    // The proposal was worked out while the customer still had an order; it
+    // has gone since. Without the mark the same cell is a push, and is saved
+    // (see the first case); with it, the whole save is refused.
+    const withdrawn = await customerWhoOrdersNothing();
+    const { day, pickProductId, customer } = await setUpDayWithSupplyAndDemand(5, 3);
+
+    const saved = await admin.client.rpc(
+      "save_arrangement_proposal",
+      toSaveArrangementProposalRpcArgs({
+        tradingDayId: day.id,
+        allocations: [
+          {
+            dailyPickProductId: pickProductId,
+            customerCompanyId: customer.id,
+            quantityPallets: 2,
+            forOrder: true,
+          },
+          {
+            dailyPickProductId: pickProductId,
+            customerCompanyId: withdrawn.id,
+            quantityPallets: 1,
+            forOrder: true,
+          },
+        ],
+      }),
+    );
+
+    expect(saved.error?.code).toBe(ARRANGEMENT_ERROR_CODES.CONFLICT);
+    expect(JSON.parse(saved.error?.details ?? "{}")).toMatchObject({
+      cells: [{ index: 1, dailyPickProductId: pickProductId, customerCompanyId: withdrawn.id }],
+    });
+    expect(await recordsOn(pickProductId)).toEqual([]);
   }, 30000);
 
   it("update_arrangement_record excludes its own prior quantity from the ceiling; delete_arrangement_record frees it back up", async () => {

@@ -1,9 +1,10 @@
 # Data Migration — Bubble → this schema
 
-**Status (2026-09-16): imported.** The Bubble **test** database (st4ck's "staging" code version is
-exported from Bubble's `version-test` app) was imported into the hosted Supabase project, replacing
-its demo data. The two scripts in § 2 can repeat the import at any time; a re-run replaces
-everything again.
+**Status (2026-10-12): live data imported — the switch-over.** The Bubble **live** database replaced
+everything in the hosted Supabase project on 2026-10-12; § 9 records that run. Before it, the Bubble
+**test** database (st4ck's "staging" code version is exported from Bubble's `version-test` app) had
+been imported on 2026-09-16 — §§ 5–8 describe that run. The two scripts in § 2 can repeat the
+import at any time, but a re-run now replaces real business data and logins.
 
 Sections 1 and 3 are the original research against the **live** Bubble project (2026-07-12), kept
 for their findings. Sections 2 and 4–8 describe what was built and run.
@@ -54,8 +55,11 @@ cursor loop silently stops at half. The export pages in windows of at most 10,00
 
 1. Writes a JSON backup of everything it will delete — including `auth.users` and
    `auth.identities`, so password hashes — to `packages/db/.bubble-export/backups/`.
-2. Creates one Supabase Auth login per imported user through the Admin API, with a random password
-   nobody sees. (Auth logins cannot join a Postgres transaction.)
+2. Creates one Supabase Auth login per imported user through the Admin API, unless one already
+   exists for that email. (Auth logins cannot join a Postgres transaction.) Inside the transaction
+   every imported login then gets a new password — the shared temporary one in the
+   `IMPORT_TEMP_PASSWORD` environment variable (at least 6 characters, Supabase's minimum), or a
+   random one per login — and all its sessions are ended.
 3. In one transaction: locks the core tables against other writers, deletes the current business
    data, inserts the snapshot, fills `_bubble_migration_id_map` / `_bubble_migration_log`
    (migration 0026), and runs the § 7 checks.
@@ -225,3 +229,45 @@ Inside the transaction, before anything commits — a failure rolls the whole im
 - The domain and e2e suites create their own fixtures rather than using the demo accounts, but they
   have not yet been re-run against the imported data.
 - The 2026-04-07 live day is open in phase `shop_open`, dated in the past relative to the import.
+
+## 9. The live import (2026-10-12)
+
+The switch-over: Bubble **live**, exported 2026-10-12 between 12:05 and 12:18 UTC (15:05–15:18 in
+Israel), replaced the test import above. Anything entered in Bubble after that is not in this app.
+
+**Found in the live data, and handled:**
+
+- **195 pick lines have no Created Date** — empty records holding only an id. Paging by Created
+  Date never reaches them, so the export's count check failed on every run until the export
+  fetched them separately (`bubble-export.ts`). The import skips them as lines without a pick.
+- **Four picks had every line created twice** (two growers, 31/01 and 18/03/2026). Decision (James):
+  keep one copy — the one the arrangement records point at, otherwise the first. 170 pairs were
+  identical; in the other 17 only the arranged copy carries the matching end-of-day leftover.
+- **13 orders had a line saved two or three times**, seconds apart. Decision (James): import it once.
+  Wherever such a line was arranged, the arranged quantity was one copy's, never the sum (7 of 7).
+- Copies that differ with nothing to tell them apart would still stop the import.
+
+**Other decisions (James):** the 2025 history of eight deleted products is not imported (263 picked,
+70 arranged and 160 ordered pallets — under 0.6% of the totals); everyone, including the 66 logins
+that already existed from the test import, got the temporary password `IMPORT_TEMP_PASSWORD` and
+must change it at first sign-in; a backoffice login for the developer was created afterwards on the
+distributor's company, the same way `bulk-create-users.ts` provisions one.
+
+| Imported | Rows |
+| --- | ---: |
+| `companies` | 113 |
+| logins + `profiles` | 80 (66 existing, 14 created) |
+| `product_families` / `product_varieties` | 150 / 1,163 |
+| `trading_days` / `daily_arrangements` | 370 / 370 |
+| `daily_shops` | 368 |
+| `daily_picks` / `daily_pick_products` | 8,918 / 82,223 |
+| `daily_orders` / `daily_order_products` | 11,737 / 17,950 |
+| `arrangement_records` | 10,232 |
+| `order_submission_logs` | 1,593 |
+| `lifecycle_sessions` | 822 |
+
+The open day is 2026-10-12, in phase `shop_closed`. The data replaced — the test import plus
+everything created in this app since — is in
+`packages/db/.bubble-export/backups/before-bubble-import-2026-10-12T12-21-41-228Z.json`. Eight logins
+whose email is not a Bubble live user were deleted, among them two of the `SAMPLE_LOGIN_*`
+accounts; the other nine `SAMPLE_LOGIN_*` accounts are real people's logins in the live data.

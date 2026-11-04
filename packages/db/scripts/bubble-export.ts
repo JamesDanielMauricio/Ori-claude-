@@ -95,7 +95,8 @@ const CONCURRENT_TYPES = 3;
 
 interface BubbleRecord {
   _id: string;
-  "Created Date": string;
+  // Missing on a few records — see the undated pass in exportDataType.
+  "Created Date"?: string;
   [field: string]: unknown;
 }
 
@@ -170,7 +171,7 @@ async function exportDataType(dataType: string): Promise<BubbleRecord[]> {
       const page = await fetchPage(dataType, params);
       for (const record of page.results) {
         byId.set(record._id, record);
-        lastCreated = record["Created Date"];
+        lastCreated = record["Created Date"] ?? lastCreated;
       }
       cursor += page.results.length;
       if (page.remaining === 0 || page.results.length === 0) {
@@ -191,6 +192,31 @@ async function exportDataType(dataType: string): Promise<BubbleRecord[]> {
     createdAfter = next;
   }
 
+  // A record can have no Created Date at all: the live app has 195 such pick
+  // lines, empty apart from their id (found 2026-10-12). Every window after
+  // the first filters on Created Date, so paging never reaches them and the
+  // count check below would fail on every run. They are fetched by that
+  // emptiness instead, in two passes in opposite orders: cursor paging over
+  // records that tie on the sort field can skip one in a pass, but not the
+  // same one in both. The count check still guards the result.
+  for (const descending of ["false", "true"]) {
+    for (let cursor = 0; ; ) {
+      const page = await fetchPage(
+        dataType,
+        new URLSearchParams({
+          limit: String(PAGE_SIZE),
+          cursor: String(cursor),
+          sort_field: "Modified Date",
+          descending,
+          constraints: JSON.stringify([{ key: "Created Date", constraint_type: "is_empty" }]),
+        }),
+      );
+      for (const record of page.results) byId.set(record._id, record);
+      cursor += page.results.length;
+      if (page.remaining === 0 || page.results.length === 0) break;
+    }
+  }
+
   if (byId.size !== expected) {
     throw new Error(
       `${dataType}: collected ${byId.size} unique records but Bubble reported ${expected}. ` +
@@ -204,7 +230,7 @@ async function exportDataType(dataType: string): Promise<BubbleRecord[]> {
     for (const field of redacted) delete copy[field];
     return copy;
   });
-  records.sort((a, b) => a["Created Date"].localeCompare(b["Created Date"]) || a._id.localeCompare(b._id));
+  records.sort((a, b) => (a["Created Date"] ?? "").localeCompare(b["Created Date"] ?? "") || a._id.localeCompare(b._id));
   return records;
 }
 

@@ -21,8 +21,11 @@
 // A --commit run creates them just before the transaction and deletes the ones
 // it created again if the transaction fails — the same compensation
 // packages/domain/src/auth/bulk-create-users.ts uses. Bubble never exposes
-// password hashes, so every imported login gets a random password and
-// must_change_password = true; people get in through the admin-mediated reset.
+// password hashes, so every imported login — created or reused — gets a new
+// password inside the transaction: the shared temporary one in
+// IMPORT_TEMP_PASSWORD (environment only, never in the repo), or else a random
+// one per login, and then people get in through the admin-mediated reset.
+// must_change_password = true makes everyone replace it at first sign-in.
 //
 // A --commit run first writes a JSON backup of everything it is about to
 // delete to packages/db/.bubble-export/backups/ (gitignored).
@@ -72,6 +75,20 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 if (!DATABASE_URL) throw new Error("DATABASE_URL is not set — add it to the root .env.");
 if (COMMIT && (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY)) {
   throw new Error("A --commit run creates logins through the Supabase Admin API: set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");
+}
+
+// The shared temporary password every imported login gets (see the header).
+// Empty -> a random password per login.
+const TEMP_PASSWORD = process.env.IMPORT_TEMP_PASSWORD ?? "";
+// SECURITY: Supabase Auth rejects passwords shorter than the project's
+// password_min_length — 6, also the lowest Supabase allows. This import writes
+// password hashes straight into auth.users, which skips that check, so it is
+// repeated here. It ALLOWS any temporary password Supabase itself would accept
+// and PROTECTS AGAINST the import quietly setting one weaker than the project
+// permits anyone to choose.
+const MIN_PASSWORD_LENGTH = 6;
+if (TEMP_PASSWORD && TEMP_PASSWORD.length < MIN_PASSWORD_LENGTH) {
+  throw new Error(`IMPORT_TEMP_PASSWORD must be at least ${MIN_PASSWORD_LENGTH} characters — Supabase Auth's minimum.`);
 }
 
 // Bubble's "No. of pallets per wholesaler" is the per-customer order cap
@@ -1064,10 +1081,47 @@ function planTrading(data: ExportData, reference: ReferencePlan, loginIds: Map<s
   }
   report.note("info", "dailypickproduct", null, "pick_line.temp_records", `${tempRecords} temp pick-line copies skipped — the real record of each pair is imported.`);
 
+  // Bubble created every line of a few picks twice (in the live app: two
+  // growers on 2026-01-31 and 2026-03-18, both copies made in the same
+  // minute). The copies hold the same values, except where the arrangement
+  // was recorded against one of them — that copy alone carries the matching
+  // end-of-day leftover. So of each (pick, variety) the copy arrangement
+  // records point at is imported, otherwise the first; copies that differ
+  // with no arrangement to tell them apart still stop the import below.
+  const pickLineValues = (line: BubbleRecord) =>
+    JSON.stringify([
+      numberValue(line, "Pallets picked"),
+      numberValue(line, "leftovers"),
+      numberValue(line, "the number of leftover pallets after the day ended"),
+      text(line, "Comment"),
+    ]);
+  const realCopies = new Map<string, BubbleRecord[]>();
+  for (const line of data.dailypickproduct) {
+    const pickBubbleId = text(line, "linked to daily pick");
+    const varietyBubbleId = text(line, "linked to product variety");
+    if (line["Is Temp Record?"] === true || !pickBubbleId || !varietyBubbleId) continue;
+    const key = `${pickBubbleId}|${varietyBubbleId}`;
+    realCopies.set(key, [...(realCopies.get(key) ?? []), line]);
+  }
+  const duplicatePickLines = new Set<string>();
+  for (const copies of realCopies.values()) {
+    if (copies.length < 2) continue;
+    const arranged = copies.filter((line) => arrangedByBubblePickLine.has(line._id));
+    const keep = arranged.length === 1 ? arranged[0]
+      : arranged.length === 0 && new Set(copies.map(pickLineValues)).size === 1 ? copies[0]
+        : undefined;
+    if (!keep) continue;
+    for (const line of copies) if (line !== keep) duplicatePickLines.add(line._id);
+  }
+
   const pickLineByBubbleId = new Map<string, PickLineRef>();
   const pickLineByPickVariety = new Map<string, PickLineRef>();
   for (const line of data.dailypickproduct) {
     if (line["Is Temp Record?"] === true) continue;
+    if (duplicatePickLines.has(line._id)) {
+      report.note("info", "dailypickproduct", line._id, "pick_line.duplicate_copy", "Bubble created this pick's lines twice — this copy is not imported; the one its arrangement points at (otherwise the first) is.");
+      continue;
+    }
     const pickBubbleId = text(line, "linked to daily pick");
     const pick = pickBubbleId ? pickByBubbleId.get(pickBubbleId) : undefined;
     if (!pick) {
@@ -1215,11 +1269,7 @@ function planTrading(data: ExportData, reference: ReferencePlan, loginIds: Map<s
       continue;
     }
     const key = `${order.id}|${varietyId}`;
-    if (lineByOrderVariety.has(key)) {
-      report.blockers.push(`Two order lines for one variety on order ${orderBubbleId}.`);
-      continue;
-    }
-    lineByOrderVariety.set(key, {
+    const candidate: OrderLineCandidate = {
       id: randomUUID(),
       order,
       varietyId,
@@ -1229,7 +1279,30 @@ function planTrading(data: ExportData, reference: ReferencePlan, loginIds: Map<s
       updatedAt: modifiedAt(line),
       bubbleId: line._id,
       neededByArrangement: false,
-    });
+    };
+    const earlier = lineByOrderVariety.get(key);
+    if (earlier) {
+      // Bubble sometimes saved a customer's line for one variety two or three
+      // times within seconds (a double click). Where such copies were
+      // arranged, the arranged quantity is one copy's, never their sum (7 of
+      // 7 in the live app, 2026-10-12): they are one line, imported once — the
+      // copy with the larger quantity, keeping a comment only the other has.
+      // Two different non-zero quantities are a real conflict and stop the
+      // import.
+      if (earlier.pallets > 0 && candidate.pallets > 0 && earlier.pallets !== candidate.pallets) {
+        report.blockers.push(`Two order lines with different quantities for one variety on order ${orderBubbleId}.`);
+        continue;
+      }
+      const [kept, dropped] = candidate.pallets > earlier.pallets ? [candidate, earlier] : [earlier, candidate];
+      if (dropped.comment && dropped.comment !== kept.comment) {
+        if (!kept.comment) kept.comment = dropped.comment;
+        else report.note("warning", "dailyorderproducts", dropped.bubbleId, "order_line.duplicate_comment", `Comment on a repeated line, not imported: "${dropped.comment}"`);
+      }
+      lineByOrderVariety.set(key, kept);
+      report.note("info", "dailyorderproducts", dropped.bubbleId, "order_line.duplicate_copy", `The customer's line for this variety was saved more than once on ${order.day.tradeDate} — imported once, ${kept.pallets} pallet(s).`);
+      continue;
+    }
+    lineByOrderVariety.set(key, candidate);
   }
   report.note("info", "dailyorderproducts", null, "order_line.blank_placeholders", `${blankPlaceholders} blank order-line placeholders (no order, no quantity) skipped.`);
 
@@ -1562,6 +1635,16 @@ async function verify(tx: Tx, reference: ReferencePlan, plan: TradingPlan) {
 
   const [logins] = await tx<{ n: number }[]>`select count(*)::int as n from auth.users`;
   if (logins?.n !== reference.users.length) throw new Error(`Verification failed: auth.users has ${logins?.n} rows, expected ${reference.users.length}.`);
+  // The password step above reached every login: each accepts the temporary
+  // password when there is one, and no session from before the import is left.
+  if (TEMP_PASSWORD) {
+    const [refusing] = await tx<{ n: number }[]>`
+      select count(*)::int as n from auth.users
+      where encrypted_password is null or extensions.crypt(${TEMP_PASSWORD}, encrypted_password) <> encrypted_password`;
+    if (refusing?.n !== 0) throw new Error(`Verification failed: ${refusing?.n} login(s) do not accept the temporary password.`);
+  }
+  const [sessions] = await tx<{ n: number }[]>`select count(*)::int as n from auth.sessions`;
+  if (sessions?.n !== 0) throw new Error(`Verification failed: ${sessions?.n} session(s) from before the import are still open.`);
 
   const [open] = await tx<{ n: number }[]>`select count(*)::int as n from trading_days where phase <> 'closed'`;
   if (open?.n !== (plan.liveDay ? 1 : 0)) throw new Error(`Verification failed: ${open?.n} non-closed trading days.`);
@@ -1738,7 +1821,7 @@ async function main() {
       const existingId = existingByEmail.get(user.email);
       if (existingId) {
         loginIds.set(user.bubbleId, existingId);
-        loginReport.note("warning", "user", user.bubbleId, "user.existing_login_reused", `A login for ${user.email} already exists — reused instead of creating a second one.`);
+        loginReport.note("warning", "user", user.bubbleId, "user.existing_login_reused", `A login for ${user.email} already exists — reused instead of creating a second one; its password is replaced like everyone's.`);
         continue;
       }
       if (!admin) {
@@ -1818,6 +1901,27 @@ async function main() {
       deleted.notification_templates = templates.count;
       console.table(deleted);
 
+      // ---- passwords
+      // SECURITY: every imported login gets a new password here — including
+      // the ones reused above, which would otherwise keep whatever password
+      // they had (on this project, test accounts' shared one) and open the
+      // real data with it. It ALLOWS sign-in with the temporary password, or
+      // with nobody's when it is random (one per login), and PROTECTS AGAINST
+      // an old or widely known password reaching the imported data. The hash
+      // is bcrypt from pgcrypto, the format Supabase Auth stores and checks.
+      // Deleting the logins' sessions (refresh tokens cascade) signs out anyone
+      // already signed in on a reused login, the same "signed out everywhere"
+      // as packages/domain/src/auth/admin-reset-password.ts.
+      await tx`
+        update auth.users
+        set encrypted_password = extensions.crypt(
+              coalesce(${TEMP_PASSWORD || null}::text, encode(extensions.gen_random_bytes(32), 'base64')),
+              extensions.gen_salt('bf', 10)),
+            updated_at = now()
+        where id in (select (jsonb_array_elements_text(${tx.json(keepLoginIds)}))::uuid)
+      `;
+      await tx`delete from auth.sessions where user_id in (select (jsonb_array_elements_text(${tx.json(keepLoginIds)}))::uuid)`;
+
       // ---- insert
       await insertRows(tx, "companies", reference.companies);
       if (reference.transporterLinks.length > 0) {
@@ -1856,7 +1960,12 @@ async function main() {
       if (!COMMIT) throw new DryRunRollback();
     });
 
-    console.log(`\nCOMMITTED. ${reference.users.length} login(s) imported (${createdLoginIds.length} created) — every one must reset its password before signing in.`);
+    console.log(
+      `\nCOMMITTED. ${reference.users.length} login(s) imported (${createdLoginIds.length} created) — ` +
+        (TEMP_PASSWORD
+          ? "everyone signs in with the temporary password and must change it at first sign-in."
+          : "every one has a random password and must be reset before signing in."),
+    );
   } catch (error) {
     if (error instanceof DryRunRollback) {
       console.log("\nDry run finished — everything above was rolled back; the database is unchanged.");

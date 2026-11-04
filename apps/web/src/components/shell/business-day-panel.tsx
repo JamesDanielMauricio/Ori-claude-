@@ -19,13 +19,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { errorMessage } from "@/lib/error-message";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
+import { businessDayPanelKeys, shopPanelKeys, shopQueries } from "@/lib/queries/shop";
+import { tradingDayKeys, tradingDayQueries, type TradingDayView } from "@/lib/queries/trading-day";
 import { createClient } from "@/lib/supabase/client";
 import {
-  OPEN_TRADING_DAY_QUERY_KEY,
   useOpenTradingDay,
   useSelectedTradingDay,
   useTradingDaysInRange,
-  type TradingDayView,
 } from "@/lib/trading-day-view";
 
 import { TradingDayCalendarPicker, TradingDayMonthGrid } from "./trading-day-calendar-picker";
@@ -90,27 +90,16 @@ export function BusinessDayPanel() {
   // rather than leave a no-op affordance on screen.
   const isViewingPinnedDate = selectedDate !== null && selectedDate !== day?.trade_date;
 
-  const shopQueryKey = ["business-day-panel", "shop", day?.id] as const;
-
   // Read-only display of the flag once the shop is already open — this
   // panel doesn't add a way to change it after the fact; canSeePrices is
   // still only ever set at open_shop time (the checkbox below it).
   const shopQuery = useQuery({
-    queryKey: shopQueryKey,
+    ...shopQueries.businessDayShop(day?.id),
     enabled: phase === "shop_open",
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("daily_shops")
-        .select("can_see_prices")
-        .eq("trading_day_id", day!.id)
-        .single();
-      if (error) throw error;
-      return data;
-    },
   });
 
   function invalidate() {
-    void queryClient.invalidateQueries({ queryKey: ["business-day-panel"] });
+    void queryClient.invalidateQueries({ queryKey: businessDayPanelKeys.all });
     // Every "trading-day" entry (lib/trading-day-view.tsx), not just the
     // shared "live open day" one: the open day — every date-aware screen
     // following live reads that one entry, so refetching it is what shows
@@ -119,9 +108,9 @@ export function BusinessDayPanel() {
     // deleted: the start-day dialog refuses dates the calendar says are
     // taken, so a stale month would block a date that was just freed, or
     // leave a just-taken one looking free.
-    void queryClient.invalidateQueries({ queryKey: ["trading-day"] });
+    void queryClient.invalidateQueries({ queryKey: tradingDayKeys.all });
     // The Shop screen's own status/metrics queries key off the same data.
-    void queryClient.invalidateQueries({ queryKey: ["shop-panel"] });
+    void queryClient.invalidateQueries({ queryKey: shopPanelKeys.all });
   }
 
   // Shared shape for the three transitions on an ALREADY-existing day
@@ -133,7 +122,7 @@ export function BusinessDayPanel() {
   function dayPhaseOptimistic(nextPhase: TradingDayView["phase"]) {
     return optimisticUpdate<TradingDayView | null, void>(
       queryClient,
-      OPEN_TRADING_DAY_QUERY_KEY,
+      tradingDayQueries.open().queryKey,
       (current) => (current ? { ...current, phase: nextPhase } : current),
     );
   }
@@ -172,7 +161,7 @@ export function BusinessDayPanel() {
         trade_date: newDay.trade_date,
         phase: newDay.phase,
       };
-      queryClient.setQueryData(OPEN_TRADING_DAY_QUERY_KEY, liveDay);
+      queryClient.setQueryData(tradingDayQueries.open().queryKey, liveDay);
       showToast("יום העסקים נפתח.", "success");
       setConfirmAction(null);
       invalidate();
@@ -199,7 +188,9 @@ export function BusinessDayPanel() {
       // below) and simply confirms it. No rollback needed: on failure the
       // phase patch above reverts, `shopQuery` goes back to disabled
       // (`enabled: phase === "shop_open"`), and this seed just sits unused.
-      queryClient.setQueryData(shopQueryKey, { can_see_prices: canSeePrices });
+      queryClient.setQueryData(shopQueries.businessDayShop(day?.id).queryKey, {
+        can_see_prices: canSeePrices,
+      });
       return context;
     },
     onSuccess: () => {
@@ -272,7 +263,7 @@ export function BusinessDayPanel() {
       return data;
     },
     onSuccess: (deletedDay) => {
-      queryClient.setQueryData<TradingDayView | null>(OPEN_TRADING_DAY_QUERY_KEY, null);
+      queryClient.setQueryData(tradingDayQueries.open().queryKey, null);
       // A sidebar pinned to the deleted day's date would keep showing a day
       // that no longer exists; send it back to following the live day.
       if (selectedDate === deletedDay.trade_date) setSelectedDate(null);

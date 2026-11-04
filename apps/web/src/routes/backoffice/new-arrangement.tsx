@@ -13,12 +13,7 @@ import {
   type MatrixWrite,
 } from "@/components/arrangement/arrangement-matrix";
 import { ArrangementMatrixMobile } from "@/components/arrangement/arrangement-matrix-mobile";
-import type {
-  BoardCompany,
-  BoardOrder,
-  BoardPick,
-  BoardRecord,
-} from "@/components/arrangement/board-data";
+import type { BoardRecord } from "@/components/arrangement/board-data";
 import { buildMatrix, filterMatrixRows } from "@/components/arrangement/matrix-data";
 import { StatusPill } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -29,26 +24,15 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { errorMessage } from "@/lib/error-message";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
+import {
+  arrangementKeys,
+  arrangementQueries,
+  newArrangementKeys,
+  type ArrangementDay,
+} from "@/lib/queries/arrangement";
 import { createClient } from "@/lib/supabase/client";
 import { useTradingDayView } from "@/lib/trading-day-view";
 import { useWide } from "@/lib/use-wide";
-
-// The whole screen's data as ONE nested row — same shape as the arrangement
-// board's own query next door, and for the same reasons (see that file).
-interface TradingDay {
-  id: string;
-  trade_date: string;
-  phase: "initiated" | "shop_open" | "shop_closed" | "closed";
-  daily_arrangements: DailyArrangement | null;
-  daily_picks: BoardPick[];
-  daily_orders: BoardOrder[];
-}
-
-interface DailyArrangement {
-  id: string;
-  status: "open" | "closed";
-  arrangement_records: BoardRecord[];
-}
 
 // "סידור לפי מוצרים" — the day's whole arrangement as one spreadsheet:
 // products down the side, customers across the top, and the pallets going
@@ -97,45 +81,16 @@ export default function NewArrangementPage() {
   const dayView = useTradingDayView();
   const day = dayView.day;
 
-  // Everything else in ONE request once the day is known — see the identical
-  // query on /backoffice/arrangement for why this is a single nested read
-  // rather than a chain of dependent ones. `order_submission_logs` is the one
-  // thing that tree carries and this one does not: the "changed since their
-  // last submission" flag it feeds has nowhere to go in a grid cell.
-  const boardDataQueryKey = ["new-arrangement", "matrix", day?.id ?? null] as const;
+  // Everything else in ONE request once the day is known — see
+  // arrangementQueries.matrix.
+  const boardDataQueryKey = arrangementQueries.matrix(day?.id ?? null).queryKey;
 
-  const boardDataQuery = useQuery({
-    queryKey: boardDataQueryKey,
-    enabled: !!day?.id,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("trading_days")
-        .select(
-          `id, trade_date, phase,
-           daily_arrangements(id, status, arrangement_records(id, daily_pick_product_id, daily_order_product_id, customer_company_id, quantity_pallets, price, price_type)),
-           daily_picks(id, grower_company_id, status, pickup_time, daily_pick_products(id, daily_pick_id, product_variety_id, pallets_picked, leftover_pallets, comment, product_varieties(id, name, sizes, family_id, product_families(name, image_url)))),
-           daily_orders(id, customer_company_id, status, daily_order_products(id, daily_order_id, product_variety_id, pallets_ordered, comment, product_varieties(id, name, sizes, family_id, product_families(name, image_url))))`,
-        )
-        .eq("id", day!.id)
-        .maybeSingle();
-      if (error) throw error;
-      return data as unknown as TradingDay | null;
-    },
-  });
+  const boardDataQuery = useQuery(arrangementQueries.matrix(day?.id ?? null));
 
   // Whole-table reference data with no dependency on the day, so it starts
-  // immediately and resolves in parallel instead of adding a round trip.
-  const companiesQuery = useQuery({
-    queryKey: ["arrangement", "companies"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("companies")
-        .select("id, name, default_pickup_time")
-        .in("type", ["grower", "customer"]);
-      if (error) throw error;
-      return data as BoardCompany[];
-    },
-  });
+  // immediately and resolves in parallel instead of adding a round trip —
+  // the same cache entry the arrangement board reads.
+  const companiesQuery = useQuery(arrangementQueries.companies());
 
   const boardDay = boardDataQuery.data ?? null;
   const arrangement = boardDay?.daily_arrangements ?? null;
@@ -168,9 +123,9 @@ export default function NewArrangementPage() {
   // row/cell total (זמין, סה"כ חולק) from this array, so nothing here needs
   // to know how to total pallets.
   function recordsOptimistic<TVariables>(
-    updater: (records: BoardRecord[], variables: TVariables, current: TradingDay) => BoardRecord[],
+    updater: (records: BoardRecord[], variables: TVariables, current: ArrangementDay) => BoardRecord[],
   ) {
-    return optimisticUpdate<TradingDay | null, TVariables>(
+    return optimisticUpdate<ArrangementDay | null, TVariables>(
       queryClient,
       boardDataQueryKey,
       (current, variables) =>
@@ -281,10 +236,10 @@ export default function NewArrangementPage() {
   });
 
   function invalidateBoards() {
-    void queryClient.invalidateQueries({ queryKey: ["new-arrangement", "matrix"] });
+    void queryClient.invalidateQueries({ queryKey: newArrangementKeys.matrixAll });
     // The sibling board reads the same records out of its own cache entry,
     // so a cell typed here has to land there too.
-    void queryClient.invalidateQueries({ queryKey: ["arrangement", "board-data"] });
+    void queryClient.invalidateQueries({ queryKey: arrangementKeys.boardDataAll });
   }
 
   /**

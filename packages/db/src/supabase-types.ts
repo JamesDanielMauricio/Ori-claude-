@@ -12,6 +12,20 @@
 // actual source of truth. Prefer regenerating for real via `--local` or
 // `--project-id` the next time either is available, rather than
 // hand-editing further.
+//
+// Corrected 2026-11-04, checked against every migration replayed into a
+// throwaway Postgres 17 (PGlite) and compared field by field:
+// - `numeric` columns are `number`, not `string` — PostgREST sends them as
+//   bare JSON numbers (what `supabase gen types` emits too). The `string`
+//   here was how the Drizzle server driver reads numeric, not the browser.
+// - every table's Relationships now carries the real constraint names
+//   (most foreign keys were created by hand-written SQL and are named
+//   `…_fkey`, not Drizzle's `…_fk`) plus the two companies FKs it lacked.
+// - save_product's Args gained p_number_of_orders_per_customer (0042).
+// Deliberately unchanged: function args stay `| null` where the app passes
+// null (the CLI would emit them non-null), and the internal
+// _bubble_migration_* tables and three internal functions no screen calls
+// are still absent.
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 
 export type Database = {
@@ -84,7 +98,22 @@ export type Database = {
           created_at?: string;
           updated_at?: string;
         };
-        Relationships: [];
+        Relationships: [
+          {
+            foreignKeyName: "companies_contact_person_id_fkey";
+            columns: ["contact_person_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["user_id"];
+          },
+          {
+            foreignKeyName: "companies_transporter_company_id_fkey";
+            columns: ["transporter_company_id"];
+            isOneToOne: false;
+            referencedRelation: "companies";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       product_families: {
         Row: {
@@ -121,11 +150,11 @@ export type Database = {
           name: string;
           sizes: string | null;
           pack_type: Database["public"]["Enums"]["pack_type"] | null;
-          price: string | null;
-          price_range_from: string | null;
-          price_range_to: string | null;
+          price: number | null;
+          price_range_from: number | null;
+          price_range_to: number | null;
           price_type: string | null;
-          no_overbooking: string;
+          no_overbooking: number;
           highlight_price_fluctuations: boolean;
           is_seasonal_available: boolean;
           number_of_orders_per_customer: number | null;
@@ -139,11 +168,11 @@ export type Database = {
           name: string;
           sizes?: string | null;
           pack_type?: Database["public"]["Enums"]["pack_type"] | null;
-          price?: string | null;
-          price_range_from?: string | null;
-          price_range_to?: string | null;
+          price?: number | null;
+          price_range_from?: number | null;
+          price_range_to?: number | null;
           price_type?: string | null;
-          no_overbooking?: string;
+          no_overbooking?: number;
           highlight_price_fluctuations?: boolean;
           is_seasonal_available?: boolean;
           number_of_orders_per_customer?: number | null;
@@ -157,11 +186,11 @@ export type Database = {
           name?: string;
           sizes?: string | null;
           pack_type?: Database["public"]["Enums"]["pack_type"] | null;
-          price?: string | null;
-          price_range_from?: string | null;
-          price_range_to?: string | null;
+          price?: number | null;
+          price_range_from?: number | null;
+          price_range_to?: number | null;
           price_type?: string | null;
-          no_overbooking?: string;
+          no_overbooking?: number;
           highlight_price_fluctuations?: boolean;
           is_seasonal_available?: boolean;
           number_of_orders_per_customer?: number | null;
@@ -197,14 +226,14 @@ export type Database = {
         };
         Relationships: [
           {
-            foreignKeyName: "grower_products_company_id_companies_id_fk";
+            foreignKeyName: "grower_products_company_id_fkey";
             columns: ["company_id"];
             isOneToOne: false;
             referencedRelation: "companies";
             referencedColumns: ["id"];
           },
           {
-            foreignKeyName: "grower_products_product_variety_id_product_varieties_id_fk";
+            foreignKeyName: "grower_products_product_variety_id_fkey";
             columns: ["product_variety_id"];
             isOneToOne: false;
             referencedRelation: "product_varieties";
@@ -236,17 +265,17 @@ export type Database = {
         };
         Relationships: [
           {
-            foreignKeyName: "product_customer_caps_product_variety_id_product_varieties_id_fk";
-            columns: ["product_variety_id"];
-            isOneToOne: false;
-            referencedRelation: "product_varieties";
-            referencedColumns: ["id"];
-          },
-          {
-            foreignKeyName: "product_customer_caps_customer_company_id_companies_id_fk";
+            foreignKeyName: "product_customer_caps_customer_company_id_fkey";
             columns: ["customer_company_id"];
             isOneToOne: false;
             referencedRelation: "companies";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "product_customer_caps_product_variety_id_fkey";
+            columns: ["product_variety_id"];
+            isOneToOne: false;
+            referencedRelation: "product_varieties";
             referencedColumns: ["id"];
           },
         ];
@@ -323,6 +352,13 @@ export type Database = {
             referencedRelation: "companies";
             referencedColumns: ["id"];
           },
+          {
+            foreignKeyName: "profiles_user_id_auth_users_id_fk";
+            columns: ["user_id"];
+            isOneToOne: true;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
         ];
       };
       trading_days: {
@@ -352,7 +388,7 @@ export type Database = {
         };
         Relationships: [
           {
-            foreignKeyName: "trading_days_initiated_by_profiles_user_id_fk";
+            foreignKeyName: "trading_days_initiated_by_fkey";
             columns: ["initiated_by"];
             isOneToOne: false;
             referencedRelation: "profiles";
@@ -390,18 +426,18 @@ export type Database = {
         };
         Relationships: [
           {
-            foreignKeyName: "daily_shops_trading_day_id_trading_days_id_fk";
-            columns: ["trading_day_id"];
-            isOneToOne: true;
-            referencedRelation: "trading_days";
-            referencedColumns: ["id"];
-          },
-          {
-            foreignKeyName: "daily_shops_opened_by_profiles_user_id_fk";
+            foreignKeyName: "daily_shops_opened_by_fkey";
             columns: ["opened_by"];
             isOneToOne: false;
             referencedRelation: "profiles";
             referencedColumns: ["user_id"];
+          },
+          {
+            foreignKeyName: "daily_shops_trading_day_id_fkey";
+            columns: ["trading_day_id"];
+            isOneToOne: true;
+            referencedRelation: "trading_days";
+            referencedColumns: ["id"];
           },
         ];
       };
@@ -429,7 +465,7 @@ export type Database = {
         };
         Relationships: [
           {
-            foreignKeyName: "daily_arrangements_trading_day_id_trading_days_id_fk";
+            foreignKeyName: "daily_arrangements_trading_day_id_fkey";
             columns: ["trading_day_id"];
             isOneToOne: true;
             referencedRelation: "trading_days";
@@ -473,17 +509,17 @@ export type Database = {
         };
         Relationships: [
           {
-            foreignKeyName: "daily_picks_trading_day_id_trading_days_id_fk";
-            columns: ["trading_day_id"];
-            isOneToOne: false;
-            referencedRelation: "trading_days";
-            referencedColumns: ["id"];
-          },
-          {
-            foreignKeyName: "daily_picks_grower_company_id_companies_id_fk";
+            foreignKeyName: "daily_picks_grower_company_id_fkey";
             columns: ["grower_company_id"];
             isOneToOne: false;
             referencedRelation: "companies";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "daily_picks_trading_day_id_fkey";
+            columns: ["trading_day_id"];
+            isOneToOne: false;
+            referencedRelation: "trading_days";
             referencedColumns: ["id"];
           },
         ];
@@ -493,9 +529,9 @@ export type Database = {
           id: string;
           daily_pick_id: string;
           product_variety_id: string;
-          pallets_picked: string;
+          pallets_picked: number;
           comment: string | null;
-          leftover_pallets: string;
+          leftover_pallets: number;
           created_at: string;
           updated_at: string;
         };
@@ -503,9 +539,9 @@ export type Database = {
           id?: string;
           daily_pick_id: string;
           product_variety_id: string;
-          pallets_picked?: string;
+          pallets_picked?: number;
           comment?: string | null;
-          leftover_pallets?: string;
+          leftover_pallets?: number;
           created_at?: string;
           updated_at?: string;
         };
@@ -513,22 +549,22 @@ export type Database = {
           id?: string;
           daily_pick_id?: string;
           product_variety_id?: string;
-          pallets_picked?: string;
+          pallets_picked?: number;
           comment?: string | null;
-          leftover_pallets?: string;
+          leftover_pallets?: number;
           created_at?: string;
           updated_at?: string;
         };
         Relationships: [
           {
-            foreignKeyName: "daily_pick_products_daily_pick_id_daily_picks_id_fk";
+            foreignKeyName: "daily_pick_products_daily_pick_id_fkey";
             columns: ["daily_pick_id"];
             isOneToOne: false;
             referencedRelation: "daily_picks";
             referencedColumns: ["id"];
           },
           {
-            foreignKeyName: "daily_pick_products_product_variety_id_product_varieties_id_fk";
+            foreignKeyName: "daily_pick_products_product_variety_id_fkey";
             columns: ["product_variety_id"];
             isOneToOne: false;
             referencedRelation: "product_varieties";
@@ -569,17 +605,17 @@ export type Database = {
         };
         Relationships: [
           {
-            foreignKeyName: "daily_orders_trading_day_id_trading_days_id_fk";
-            columns: ["trading_day_id"];
-            isOneToOne: false;
-            referencedRelation: "trading_days";
-            referencedColumns: ["id"];
-          },
-          {
-            foreignKeyName: "daily_orders_customer_company_id_companies_id_fk";
+            foreignKeyName: "daily_orders_customer_company_id_fkey";
             columns: ["customer_company_id"];
             isOneToOne: false;
             referencedRelation: "companies";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "daily_orders_trading_day_id_fkey";
+            columns: ["trading_day_id"];
+            isOneToOne: false;
+            referencedRelation: "trading_days";
             referencedColumns: ["id"];
           },
         ];
@@ -589,7 +625,7 @@ export type Database = {
           id: string;
           daily_order_id: string;
           product_variety_id: string;
-          pallets_ordered: string;
+          pallets_ordered: number;
           comment: string | null;
           created_at: string;
           updated_at: string;
@@ -598,7 +634,7 @@ export type Database = {
           id?: string;
           daily_order_id: string;
           product_variety_id: string;
-          pallets_ordered?: string;
+          pallets_ordered?: number;
           comment?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -607,21 +643,21 @@ export type Database = {
           id?: string;
           daily_order_id?: string;
           product_variety_id?: string;
-          pallets_ordered?: string;
+          pallets_ordered?: number;
           comment?: string | null;
           created_at?: string;
           updated_at?: string;
         };
         Relationships: [
           {
-            foreignKeyName: "daily_order_products_daily_order_id_daily_orders_id_fk";
+            foreignKeyName: "daily_order_products_daily_order_id_fkey";
             columns: ["daily_order_id"];
             isOneToOne: false;
             referencedRelation: "daily_orders";
             referencedColumns: ["id"];
           },
           {
-            foreignKeyName: "daily_order_products_product_variety_id_product_varieties_id_fk";
+            foreignKeyName: "daily_order_products_product_variety_id_fkey";
             columns: ["product_variety_id"];
             isOneToOne: false;
             referencedRelation: "product_varieties";
@@ -653,14 +689,14 @@ export type Database = {
         };
         Relationships: [
           {
-            foreignKeyName: "order_submission_logs_daily_order_id_daily_orders_id_fk";
+            foreignKeyName: "order_submission_logs_daily_order_id_fkey";
             columns: ["daily_order_id"];
             isOneToOne: false;
             referencedRelation: "daily_orders";
             referencedColumns: ["id"];
           },
           {
-            foreignKeyName: "order_submission_logs_submitted_by_profiles_user_id_fk";
+            foreignKeyName: "order_submission_logs_submitted_by_fkey";
             columns: ["submitted_by"];
             isOneToOne: false;
             referencedRelation: "profiles";
@@ -675,8 +711,8 @@ export type Database = {
           daily_pick_product_id: string;
           daily_order_product_id: string;
           customer_company_id: string;
-          quantity_pallets: string;
-          price: string | null;
+          quantity_pallets: number;
+          price: number | null;
           price_type: string | null;
           created_at: string;
           updated_at: string;
@@ -687,8 +723,8 @@ export type Database = {
           daily_pick_product_id: string;
           daily_order_product_id: string;
           customer_company_id: string;
-          quantity_pallets: string;
-          price?: string | null;
+          quantity_pallets: number;
+          price?: number | null;
           price_type?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -699,39 +735,39 @@ export type Database = {
           daily_pick_product_id?: string;
           daily_order_product_id?: string;
           customer_company_id?: string;
-          quantity_pallets?: string;
-          price?: string | null;
+          quantity_pallets?: number;
+          price?: number | null;
           price_type?: string | null;
           created_at?: string;
           updated_at?: string;
         };
         Relationships: [
           {
-            foreignKeyName: "arrangement_records_daily_arrangement_id_daily_arrangements_id_fk";
+            foreignKeyName: "arrangement_records_customer_company_id_fkey";
+            columns: ["customer_company_id"];
+            isOneToOne: false;
+            referencedRelation: "companies";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "arrangement_records_daily_arrangement_id_fkey";
             columns: ["daily_arrangement_id"];
             isOneToOne: false;
             referencedRelation: "daily_arrangements";
             referencedColumns: ["id"];
           },
           {
-            foreignKeyName: "arrangement_records_daily_pick_product_id_daily_pick_products_id_fk";
-            columns: ["daily_pick_product_id"];
-            isOneToOne: false;
-            referencedRelation: "daily_pick_products";
-            referencedColumns: ["id"];
-          },
-          {
-            foreignKeyName: "arrangement_records_daily_order_product_id_daily_order_products_id_fk";
+            foreignKeyName: "arrangement_records_daily_order_product_id_fkey";
             columns: ["daily_order_product_id"];
             isOneToOne: false;
             referencedRelation: "daily_order_products";
             referencedColumns: ["id"];
           },
           {
-            foreignKeyName: "arrangement_records_customer_company_id_companies_id_fk";
-            columns: ["customer_company_id"];
+            foreignKeyName: "arrangement_records_daily_pick_product_id_fkey";
+            columns: ["daily_pick_product_id"];
             isOneToOne: false;
-            referencedRelation: "companies";
+            referencedRelation: "daily_pick_products";
             referencedColumns: ["id"];
           },
         ];
@@ -781,17 +817,17 @@ export type Database = {
         };
         Relationships: [
           {
-            foreignKeyName: "notification_outbox_trading_day_id_trading_days_id_fk";
-            columns: ["trading_day_id"];
-            isOneToOne: false;
-            referencedRelation: "trading_days";
-            referencedColumns: ["id"];
-          },
-          {
-            foreignKeyName: "notification_outbox_recipient_company_id_companies_id_fk";
+            foreignKeyName: "notification_outbox_recipient_company_id_fkey";
             columns: ["recipient_company_id"];
             isOneToOne: false;
             referencedRelation: "companies";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "notification_outbox_trading_day_id_fkey";
+            columns: ["trading_day_id"];
+            isOneToOne: false;
+            referencedRelation: "trading_days";
             referencedColumns: ["id"];
           },
         ];
@@ -902,7 +938,7 @@ export type Database = {
           alert_type_id: string;
           read: boolean;
           display_record_id: string | null;
-          number_for_display: string | null;
+          number_for_display: number | null;
           full_name_for_display: string | null;
           send_as_whatsapp: boolean;
           send_as_notification: boolean;
@@ -914,7 +950,7 @@ export type Database = {
           alert_type_id: string;
           read?: boolean;
           display_record_id?: string | null;
-          number_for_display?: string | null;
+          number_for_display?: number | null;
           full_name_for_display?: string | null;
           send_as_whatsapp: boolean;
           send_as_notification: boolean;
@@ -926,7 +962,7 @@ export type Database = {
           alert_type_id?: string;
           read?: boolean;
           display_record_id?: string | null;
-          number_for_display?: string | null;
+          number_for_display?: number | null;
           full_name_for_display?: string | null;
           send_as_whatsapp?: boolean;
           send_as_notification?: boolean;
@@ -934,18 +970,18 @@ export type Database = {
         };
         Relationships: [
           {
-            foreignKeyName: "alerts_intended_for_user_id_profiles_user_id_fk";
-            columns: ["intended_for_user_id"];
-            isOneToOne: false;
-            referencedRelation: "profiles";
-            referencedColumns: ["user_id"];
-          },
-          {
-            foreignKeyName: "alerts_alert_type_id_alert_types_id_fk";
+            foreignKeyName: "alerts_alert_type_id_fkey";
             columns: ["alert_type_id"];
             isOneToOne: false;
             referencedRelation: "alert_types";
             referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "alerts_intended_for_user_id_fkey";
+            columns: ["intended_for_user_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["user_id"];
           },
         ];
       };
@@ -976,18 +1012,18 @@ export type Database = {
         };
         Relationships: [
           {
-            foreignKeyName: "lifecycle_sessions_trading_day_id_trading_days_id_fk";
-            columns: ["trading_day_id"];
-            isOneToOne: false;
-            referencedRelation: "trading_days";
-            referencedColumns: ["id"];
-          },
-          {
-            foreignKeyName: "lifecycle_sessions_performed_by_profiles_user_id_fk";
+            foreignKeyName: "lifecycle_sessions_performed_by_fkey";
             columns: ["performed_by"];
             isOneToOne: false;
             referencedRelation: "profiles";
             referencedColumns: ["user_id"];
+          },
+          {
+            foreignKeyName: "lifecycle_sessions_trading_day_id_fkey";
+            columns: ["trading_day_id"];
+            isOneToOne: false;
+            referencedRelation: "trading_days";
+            referencedColumns: ["id"];
           },
         ];
       };
@@ -1052,6 +1088,7 @@ export type Database = {
           p_no_overbooking: number;
           p_highlight_price_fluctuations: boolean;
           p_is_seasonal_available: boolean;
+          p_number_of_orders_per_customer: number | null;
           p_expected_version: number | null;
           p_customer_pallet_caps: Json;
         };

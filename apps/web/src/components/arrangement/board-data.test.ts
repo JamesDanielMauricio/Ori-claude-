@@ -49,8 +49,8 @@ function pickLine(
   id: string,
   pickId: string,
   v: BoardVarietyRow,
-  picked: string,
-  leftover: string,
+  picked: number,
+  leftover: number,
 ) {
   return {
     id,
@@ -70,12 +70,12 @@ const pickA: BoardPick = {
   status: "draft",
   pickup_time: "07:00:00",
   daily_pick_products: [
-    pickLine("line-a-trepak", "pick-a", trepak, "0", "0"),
-    pickLine("line-a-lemon-100", "pick-a", lemon100, "0", "5"),
-    pickLine("line-a-lemon-123", "pick-a", lemon123, "0", "0"),
-    pickLine("line-a-lemon-72", "pick-a", lemon72, "0", "0"),
-    pickLine("line-a-lemon-88", "pick-a", lemon88, "0", "0"),
-    pickLine("line-a-lychee", "pick-a", lychee, "0", "0"),
+    pickLine("line-a-trepak", "pick-a", trepak, 0, 0),
+    pickLine("line-a-lemon-100", "pick-a", lemon100, 0, 5),
+    pickLine("line-a-lemon-123", "pick-a", lemon123, 0, 0),
+    pickLine("line-a-lemon-72", "pick-a", lemon72, 0, 0),
+    pickLine("line-a-lemon-88", "pick-a", lemon88, 0, 0),
+    pickLine("line-a-lychee", "pick-a", lychee, 0, 0),
   ],
 };
 
@@ -86,7 +86,7 @@ const pickB: BoardPick = {
   grower_company_id: GROWER_B,
   status: "draft",
   pickup_time: null,
-  daily_pick_products: [pickLine("line-b-lemon-100", "pick-b", lemon100, "0", "0")],
+  daily_pick_products: [pickLine("line-b-lemon-100", "pick-b", lemon100, 0, 0)],
 };
 
 const build = (picks: BoardPick[], records: BoardRecord[] = []) =>
@@ -145,8 +145,8 @@ describe("listedFamilies", () => {
     const full: BoardPick = {
       ...pickA,
       daily_pick_products: [
-        pickLine("l1", "pick-a", lemon100, "2", "0"),
-        pickLine("l2", "pick-a", lemon123, "0", "1"),
+        pickLine("l1", "pick-a", lemon100, 2, 0),
+        pickLine("l2", "pick-a", lemon123, 0, 1),
       ],
     };
     const grower = build([full]).growers[0]!;
@@ -161,10 +161,10 @@ describe("listedFamilies", () => {
       {
         ...pickA,
         daily_pick_products: [
-          pickLine("l1", "pick-a", lemon88, "1", "0"),
-          pickLine("l2", "pick-a", lemon72, "1", "0"),
-          pickLine("l3", "pick-a", lychee, "1", "0"),
-          pickLine("l4", "pick-a", lemon100, "0", "0"),
+          pickLine("l1", "pick-a", lemon88, 1, 0),
+          pickLine("l2", "pick-a", lemon72, 1, 0),
+          pickLine("l3", "pick-a", lychee, 1, 0),
+          pickLine("l4", "pick-a", lemon100, 0, 0),
         ],
       },
     ]).growers[0]!;
@@ -181,7 +181,7 @@ describe("listedFamilies", () => {
     const blank: BoardPick = {
       ...pickA,
       daily_pick_products: pickA.daily_pick_products.map((l) =>
-        pickLine(l.id, "pick-a", l.product_varieties!, "0", "0"),
+        pickLine(l.id, "pick-a", l.product_varieties!, 0, 0),
       ),
     };
     expect(listedFamilies(build([blank]).growers[0]!.families)).toEqual([]);
@@ -267,7 +267,7 @@ describe("the board data underneath stays whole", () => {
   it("keeps a grower whose lines are all blank in the list of growers", () => {
     const blank: BoardPick = {
       ...pickB,
-      daily_pick_products: [pickLine("line-b", "pick-b", lemon100, "0", "0")],
+      daily_pick_products: [pickLine("line-b", "pick-b", lemon100, 0, 0)],
     };
     const board = build([pickA, blank]);
     expect(board.growers.map((g) => g.growerId).sort()).toEqual([GROWER_A, GROWER_B].sort());

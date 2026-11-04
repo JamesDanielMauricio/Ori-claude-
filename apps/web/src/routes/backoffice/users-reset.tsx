@@ -10,15 +10,8 @@ import { QueryError } from "@/components/ui/query-error";
 import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/lib/auth-context";
-import { createClient } from "@/lib/supabase/client";
+import { usersAdminQueries } from "@/lib/queries/users-admin";
 import { trpc } from "@/lib/trpc-client";
-
-interface ResettableUser {
-  user_id: string;
-  display_name: string;
-  phone_number: string | null;
-  companies: { name: string } | null;
-}
 
 // Last four digits of a phone as typed on the profile — enough to confirm
 // it's the right person without printing the whole number on screen.
@@ -32,27 +25,12 @@ function lastFourDigits(phone: string | null): string | null {
 // signs them out everywhere (packages/domain/src/auth/admin-reset-password.ts).
 // The link itself is never shown here.
 export default function AdminResetPasswordPage() {
-  const supabase = createClient();
   const { user } = useAuth();
   const [targetUserId, setTargetUserId] = useState("");
   const resetPassword = trpc.auth.adminResetPassword.useMutation();
 
   // Readable by backoffice through the "profiles_select_backoffice" policy.
-  const usersQuery = useQuery({
-    queryKey: ["users-reset", "users"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("profiles")
-        // `companies!company_id(...)`, not the bare embed: profiles has two
-        // FK paths to companies since migration 0057 (company_id, and the
-        // reverse via companies.contact_person_id) — see auth-context.tsx's
-        // loadProfile for the fuller note on why the bare form 300s.
-        .select("user_id, display_name, phone_number, companies!company_id(name)")
-        .order("display_name");
-      if (error) throw error;
-      return data as unknown as ResettableUser[];
-    },
-  });
+  const usersQuery = useQuery(usersAdminQueries.resettableUsers());
   // Shown beside the chosen user so two people with the same name can be
   // told apart. Optional: the reset works without it.
   const emailsQuery = trpc.auth.listUserEmails.useQuery();

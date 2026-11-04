@@ -1,259 +1,41 @@
-import {
-  PRODUCT_VERSION_CONFLICT_ERROR_CODE,
-  saveProductInputSchema,
-  toSaveProductRpcArgs,
-} from "@ori/domain/reference-data";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useMemo, useState, type ReactNode } from "react";
 
-import { CellChipList, CellPopover } from "@/components/reference-data/cell-popover";
-import { checkboxClassName, inputClassName } from "@/components/reference-data/form-field";
 import {
   RecordTable,
-  RowIconButton,
-  type RecordTableColumn,
   type RecordTableGroup,
   type RecordTableGroupContent,
 } from "@/components/reference-data/record-table";
-import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
-import { Dialog } from "@/components/ui/dialog";
 import { Icon } from "@/components/ui/icon";
-import { ProductThumbnail } from "@/components/ui/product-thumbnail";
-import { StatusPill } from "@/components/ui/card";
-import { Select } from "@/components/ui/select";
+import { PageHeader } from "@/components/ui/page-header";
 import { useToast } from "@/components/ui/toast";
-import { errorMessage } from "@/lib/error-message";
-import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { hasChanges } from "@/lib/has-changes";
-import { blockWheel } from "@/lib/integer-input";
-import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
-import { createClient } from "@/lib/supabase/client";
-import { formatVarietyName } from "@/lib/variety-label";
+import type { PalletCap, ProductFamily, ProductVariety } from "@/lib/queries/reference-data";
 
-type PackType = "pallets" | "crates";
-
-interface ProductVariety {
-  id: string;
-  family_id: string;
-  name: string;
-  sizes: string | null;
-  pack_type: PackType | null;
-  price: string | null;
-  price_range_from: string | null;
-  price_range_to: string | null;
-  price_type: string | null;
-  no_overbooking: string;
-  highlight_price_fluctuations: boolean;
-  is_seasonal_available: boolean;
-  number_of_orders_per_customer: number | null;
-  version: number;
-  created_at: string;
-}
-
-// The catalog's grouping level, and a record in its own right — this screen
-// edits both halves. Fetched as its own list rather than read off each
-// variety's embedded copy (which is what the old flat table did): a family
-// with no varieties yet has no variety row to be embedded in, and it still
-// needs a header row of its own to be renamed or photographed from.
-interface ProductFamily {
-  id: string;
-  name: string;
-  category: string | null;
-  image_url: string | null;
-}
-
-interface PalletCap {
-  customerCompanyId: string;
-  palletCap: number;
-}
-
-interface FormState {
-  familyId: string;
-  name: string;
-  sizes: string;
-  packType: PackType | "";
-  price: string;
-  priceRangeFrom: string;
-  priceRangeTo: string;
-  priceType: string;
-  noOverbooking: string;
-  highlightPriceFluctuations: boolean;
-  isSeasonalAvailable: boolean;
-  // Empty string = no variety-level cap (see product-variety.ts's schema
-  // comment). Kept as a string here for the same reason every other numeric
-  // form field is: an <input> can't hold `null`.
-  numberOfOrdersPerCustomer: string;
-  version: number | null;
-  customerPalletCaps: PalletCap[];
-}
-
-// Sentinel row id for a not-yet-created record: the draft row prepended to
-// the table while `onAdd` is active, so RecordTable's "is this row being
-// edited" logic (which compares ids) needs no separate create/update
-// concept of its own.
-const NEW_ROW_ID = "__new__";
-
-// The same idea one level up: a not-yet-created FAMILY, prepended to the
-// group list as a header row already in edit mode. RecordTable pins the
-// group whose id is `editingId`, so an unnamed draft survives whatever is
-// in the search box.
-const NEW_FAMILY_ID = "__new_family__";
-
-const CREATED_AT_FORMAT = new Intl.DateTimeFormat("he-IL", { dateStyle: "short" });
-
-// Storage backing for a family's photo (0058_product-photo-storage-bucket.sql).
-// Mirrors that migration's `allowed_mime_types` / `file_size_limit` so a
-// rejected file gets a Hebrew toast here rather than a raw Storage API error
-// — Storage itself is still the real enforcement, since a client-side-only
-// check can always be bypassed by calling the API directly.
-const PRODUCT_PHOTOS_BUCKET = "product-photos";
-const PHOTO_MIME_EXTENSIONS: Record<string, string> = {
-  "image/jpeg": "jpg",
-  "image/png": "png",
-  "image/webp": "webp",
-};
-const PHOTO_MAX_BYTES = 5 * 1024 * 1024;
-
-// Only a URL this app itself uploaded (via getPublicUrl, below) is ever
-// eligible for deletion — anything else, such as a URL pasted before this
-// feature existed or one carried over from the Bubble import, is left alone
-// because we don't own it and can't tell whether something else still reads
-// it.
-function productPhotoPathFromUrl(url: string): string | null {
-  const marker = `/storage/v1/object/public/${PRODUCT_PHOTOS_BUCKET}/`;
-  const index = url.indexOf(marker);
-  return index === -1 ? null : url.slice(index + marker.length);
-}
-
-const PACK_TYPE_LABEL: Record<PackType, string> = { pallets: "משטחים", crates: "ארגזים" };
-
-// An empty cell is a value too, and on this screen most varieties leave most
-// of the optional pricing fields unset — so a placeholder drawn in the same
-// ink as real data turns the table into a field of dashes with the handful of
-// actual numbers lost somewhere inside it. Drawn in the subtle ink instead:
-// still plainly "nothing set here", but no longer competing with the values
-// that ARE set. An empty string counts as unset for the same reason `||` did
-// before: these columns come back as "" rather than null when the source row
-// has never been given one.
-function orDash(value: string | number | null | undefined) {
-  if (value === null || value === undefined || value === "") {
-    return <span className="text-ink-subtle">—</span>;
-  }
-  return value;
-}
-
-// The name column carries a family's expand chevron and photo as well as a
-// name — and those two pushed the family name 4rem inboard of the varieties
-// listed directly underneath it, so the parent read as drifting away from its
-// own children. They now sit in a fixed-width gutter instead, and a variety's
-// name is padded by exactly that width, which puts every name in the column
-// on one edge whichever level it belongs to. Two halves of one measurement,
-// so they are declared together and must stay equal: `w-16` is 4rem and so is
-// `ps-16`. It costs the column nothing, because its width was already set by
-// the longest family name plus this same gutter.
-const NAME_GUTTER = "w-16";
-const NAME_GUTTER_PAD = "ps-16";
-
-function blankForm(defaultFamilyId: string): FormState {
-  return {
-    familyId: defaultFamilyId,
-    name: "",
-    sizes: "",
-    packType: "",
-    price: "",
-    priceRangeFrom: "",
-    priceRangeTo: "",
-    priceType: "",
-    noOverbooking: "0",
-    highlightPriceFluctuations: false,
-    isSeasonalAvailable: true,
-    numberOfOrdersPerCustomer: "",
-    version: null,
-    customerPalletCaps: [],
-  };
-}
-
-// `familyId` is the one field the draft row carries for real: the table
-// buckets rows into family groups by it, so a draft that held "" would sit
-// in no family at all and render outside every group. Threading the form's
-// current selection through means changing the משפחה dropdown mid-draft
-// visibly moves the half-filled row into the family it will be saved to.
-function blankRow(familyId: string): ProductVariety {
-  return {
-    id: NEW_ROW_ID,
-    family_id: familyId,
-    name: "",
-    sizes: null,
-    pack_type: null,
-    price: null,
-    price_range_from: null,
-    price_range_to: null,
-    price_type: null,
-    no_overbooking: "0",
-    highlight_price_fluctuations: false,
-    is_seasonal_available: true,
-    number_of_orders_per_customer: null,
-    version: 0,
-    created_at: "",
-  };
-}
-
-interface FamilyFormState {
-  name: string;
-  category: string;
-  imageUrl: string;
-}
-
-function blankFamilyForm(): FamilyFormState {
-  return { name: "", category: "", imageUrl: "" };
-}
-
-function toFamilyForm(family: ProductFamily): FamilyFormState {
-  return {
-    name: family.name,
-    category: family.category ?? "",
-    imageUrl: family.image_url ?? "",
-  };
-}
-
-// Hebrew takes no bare numeral before a plural for one: "1 זנים" is wrong
-// where "זן אחד" is right, and an empty family reads as "אין זנים" rather
-// than "0 זנים". Used by both the header chip and the delete dialog's
-// explanation, so the two can't disagree about how to count.
-function varietyCountLabel(count: number): string {
-  if (count === 0) return "אין זנים";
-  if (count === 1) return "זן אחד";
-  return `${count} זנים`;
-}
-
-// The synthetic family a draft header row is drawn from. Only the id is
-// ever read while it's on screen — every field shown comes from
-// `familyForm` — but it keeps the header renderer working off one type
-// instead of branching on "is this a real family or a draft".
-function blankFamily(): ProductFamily {
-  return { id: NEW_FAMILY_ID, name: "", category: null, image_url: null };
-}
-
-function toFormState(row: ProductVariety, caps: PalletCap[]): FormState {
-  return {
-    familyId: row.family_id,
-    name: row.name,
-    sizes: row.sizes ?? "",
-    packType: row.pack_type ?? "",
-    price: row.price ?? "",
-    priceRangeFrom: row.price_range_from ?? "",
-    priceRangeTo: row.price_range_to ?? "",
-    priceType: row.price_type ?? "",
-    noOverbooking: row.no_overbooking,
-    highlightPriceFluctuations: row.highlight_price_fluctuations,
-    isSeasonalAvailable: row.is_seasonal_available,
-    numberOfOrdersPerCustomer:
-      row.number_of_orders_per_customer == null ? "" : String(row.number_of_orders_per_customer),
-    version: row.version,
-    customerPalletCaps: caps,
-  };
-}
+import { DeleteFamilyDialog, DeleteVarietyDialog } from "./product-catalog/catalog-dialogs";
+import {
+  NEW_FAMILY_ID,
+  NEW_ROW_ID,
+  blankFamily,
+  blankFamilyForm,
+  blankForm,
+  blankRow,
+  toFamilyForm,
+  toFormState,
+  type FamilyFormState,
+  type FormState,
+} from "./product-catalog/catalog-form";
+import {
+  buildAddRow,
+  buildFamilyHeader,
+  type FamilyHeaderContext,
+} from "./product-catalog/family-header";
+import { useCatalogData } from "./product-catalog/use-catalog-data";
+import { useFamilyMutations } from "./product-catalog/use-family-mutations";
+import { useFamilyPhoto } from "./product-catalog/use-family-photo";
+import { useVarietyMutations } from "./product-catalog/use-variety-mutations";
+import { buildVarietyColumns } from "./product-catalog/variety-columns";
 
 // The Products management screen — catalog (family + variety), pricing,
 // overbooking, and the per-customer pallet cap control. `save_product` is
@@ -270,6 +52,12 @@ function toFormState(row: ProductVariety, caps: PalletCap[]): FormState {
 // a distributor changes while looking at today's picks goes through the same
 // `save_product` call, with the same version check (R7), as one changed from
 // the catalog.
+//
+// This file is the composition; its parts live in ./product-catalog/ — the
+// reads (use-catalog-data), the writes (use-variety-mutations,
+// use-family-mutations, use-family-photo), the table's columns
+// (variety-columns), a family's header row (family-header), the delete
+// dialogs, and the form helpers they share (catalog-form).
 export function ProductCatalogScreen({
   title,
   subtitle,
@@ -294,7 +82,6 @@ export function ProductCatalogScreen({
   extraLoading?: boolean;
   emptyLabel?: string;
 }) {
-  const supabase = createClient();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
 
@@ -315,27 +102,16 @@ export function ProductCatalogScreen({
   const [savingFamily, setSavingFamily] = useState(false);
   const [deleteFamilyTargetId, setDeleteFamilyTargetId] = useState<string | null>(null);
 
-  // A picked-but-not-yet-saved photo. Nothing is uploaded to Storage until
-  // the family is actually saved (handleSaveFamily) — the same "nothing
-  // touches the server until שמור" rule every other field on this form
-  // already follows — so cancelling an edit after picking a file uploads
-  // nothing and leaves no orphaned object behind.
-  const [pendingPhotoFile, setPendingPhotoFile] = useState<File | null>(null);
-  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
-  const photoInputRef = useRef<HTMLInputElement>(null);
-
-  // Local preview only, via a blob: URL. Revoked on every change and on
-  // unmount so switching photos (or switching away without saving) never
-  // leaks memory.
-  useEffect(() => {
-    if (!pendingPhotoFile) {
-      setPhotoPreviewUrl(null);
-      return;
-    }
-    const url = URL.createObjectURL(pendingPhotoFile);
-    setPhotoPreviewUrl(url);
-    return () => URL.revokeObjectURL(url);
-  }, [pendingPhotoFile]);
+  // A picked-but-not-yet-saved photo for the family form — see
+  // useFamilyPhoto. Nothing is uploaded until the family is saved.
+  const {
+    pendingPhotoFile,
+    setPendingPhotoFile,
+    photoPreviewUrl,
+    photoInputRef,
+    handlePhotoFileChange,
+    handleRemovePhoto,
+  } = useFamilyPhoto({ showToast, setFamilyForm });
 
   // Which families are open. Everything starts collapsed: the catalog runs
   // to ~78 families and ~600 varieties, and a screen that opens every one of
@@ -344,389 +120,38 @@ export function ProductCatalogScreen({
     () => new Set<string>(),
   );
 
-  const productsQueryKey = ["reference-data", "products"] as const;
-  const capsQueryKey = ["reference-data", "product-customer-caps-all"] as const;
-  const familiesQueryKey = ["reference-data", "product-families"] as const;
-
-  const familiesQuery = useQuery({
-    queryKey: familiesQueryKey,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("product_families")
-        .select("id, name, category, image_url")
-        .order("name");
-      if (error) throw error;
-      return data as ProductFamily[];
-    },
-  });
-  const familyById = useMemo(
-    () => new Map((familiesQuery.data ?? []).map((family) => [family.id, family])),
-    [familiesQuery.data],
-  );
-
-  const productsQuery = useQuery({
-    queryKey: productsQueryKey,
-    queryFn: async () => {
-      // No embedded `product_families(...)` any more: the family's name,
-      // category and photo are read from familiesQuery via `familyById`, so
-      // there is one copy of each family on this screen rather than one per
-      // variety — which also means a family edit doesn't leave ~600 stale
-      // duplicates behind in this cache until it refetches.
-      //
-      // Paged (see fetchAllRows): the catalog is ~900 varieties, close to
-      // PostgREST's 1,000-row cap, which cuts a longer answer short without
-      // an error — past it, the varieties that sort last would quietly
-      // vanish from this screen. `id` breaks ties between same-named
-      // varieties so no row can land on two pages or none.
-      return fetchAllRows<ProductVariety>((from, to) =>
-        supabase
-          .from("product_varieties")
-          .select(
-            "id, family_id, name, sizes, pack_type, price, price_range_from, price_range_to, price_type, no_overbooking, highlight_price_fluctuations, is_seasonal_available, number_of_orders_per_customer, version, created_at",
-          )
-          .order("name")
-          .order("id")
-          .range(from, to),
-      );
-    },
-  });
-
-  const customersQuery = useQuery({
-    queryKey: ["reference-data", "customers-for-caps"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("companies")
-        .select("id, name")
-        .eq("type", "customer")
-        .order("name");
-      if (error) throw error;
-      return data as Array<{ id: string; name: string }>;
-    },
-  });
-  const customerNameById = useMemo(
-    () => new Map((customersQuery.data ?? []).map((row) => [row.id, row.name])),
-    [customersQuery.data],
-  );
-
-  // Every variety's per-customer caps in ONE read, grouped client-side —
-  // same reasoning as growers.tsx's identical bulk read: the caps are a
-  // column now, so every visible row needs its own value.
-  const capsQuery = useQuery({
-    queryKey: capsQueryKey,
-    queryFn: async () => {
-      const rows = await fetchAllRows<{
-        product_variety_id: string;
-        customer_company_id: string;
-        pallet_cap: number;
-      }>((from, to) =>
-        supabase
-          .from("product_customer_caps")
-          .select("product_variety_id, customer_company_id, pallet_cap")
-          .order("product_variety_id")
-          .order("customer_company_id")
-          .range(from, to),
-      );
-      const byVariety = new Map<string, PalletCap[]>();
-      for (const row of rows) {
-        const cap = { customerCompanyId: row.customer_company_id, palletCap: row.pallet_cap };
-        const list = byVariety.get(row.product_variety_id);
-        if (list) list.push(cap);
-        else byVariety.set(row.product_variety_id, [cap]);
-      }
-      return byVariety;
-    },
-  });
+  const { familiesQuery, familyById, productsQuery, customersQuery, customerNameById, capsQuery } =
+    useCatalogData();
 
   const editingRowId = editingId !== null && editingId !== NEW_ROW_ID ? editingId : null;
   const selected = productsQuery.data?.find((row) => row.id === editingRowId) ?? null;
   const deleteTarget = productsQuery.data?.find((row) => row.id === deleteTargetId) ?? null;
 
-  // Patches every field the form edits except `version` — that's a real
-  // optimistic-concurrency column, bumped by the server only. Leaving it
-  // alone here means a stale version still gets caught by the real
-  // PRODUCT_VERSION_CONFLICT_ERROR_CODE check below; faking a bump here
-  // would just teach the UI to trust a number the server hasn't agreed to.
-  const saveOptimistic = optimisticUpdate<ProductVariety[], void>(
+  const { saveMutation, deleteMutation } = useVarietyMutations({
     queryClient,
-    productsQueryKey,
-    (rows) =>
-      rows?.map((row) =>
-        row.id === editingRowId
-          ? {
-              ...row,
-              family_id: form.familyId,
-              name: form.name,
-              sizes: form.sizes || null,
-              pack_type: form.packType || null,
-              price: form.price === "" ? null : form.price,
-              price_range_from: form.priceRangeFrom === "" ? null : form.priceRangeFrom,
-              price_range_to: form.priceRangeTo === "" ? null : form.priceRangeTo,
-              price_type: form.priceType || null,
-              no_overbooking: form.noOverbooking || "0",
-              highlight_price_fluctuations: form.highlightPriceFluctuations,
-              is_seasonal_available: form.isSeasonalAvailable,
-              number_of_orders_per_customer:
-                form.numberOfOrdersPerCustomer === ""
-                  ? null
-                  : Number(form.numberOfOrdersPerCustomer),
-            }
-          : row,
-      ),
-  );
-
-  const saveCapsOptimistic = optimisticUpdate<Map<string, PalletCap[]>, void>(
-    queryClient,
-    capsQueryKey,
-    (byVariety) => {
-      if (!byVariety || !editingRowId) return byVariety;
-      const next = new Map(byVariety);
-      next.set(editingRowId, form.customerPalletCaps);
-      return next;
-    },
-  );
-
-  const saveMutation = useMutation({
-    mutationFn: async () => {
-      const input = saveProductInputSchema.parse({
-        id: editingRowId,
-        familyId: form.familyId,
-        name: form.name,
-        sizes: form.sizes || null,
-        packType: form.packType || null,
-        price: form.price === "" ? null : Number(form.price),
-        priceRangeFrom: form.priceRangeFrom === "" ? null : Number(form.priceRangeFrom),
-        priceRangeTo: form.priceRangeTo === "" ? null : Number(form.priceRangeTo),
-        priceType: form.priceType || null,
-        noOverbooking: Number(form.noOverbooking || "0"),
-        highlightPriceFluctuations: form.highlightPriceFluctuations,
-        isSeasonalAvailable: form.isSeasonalAvailable,
-        numberOfOrdersPerCustomer:
-          form.numberOfOrdersPerCustomer === "" ? null : Number(form.numberOfOrdersPerCustomer),
-        expectedVersion: form.version,
-        customerPalletCaps: form.customerPalletCaps,
-      });
-      const { data, error } = await supabase.rpc("save_product", toSaveProductRpcArgs(input));
-      if (error) throw error;
-      return data as ProductVariety;
-    },
-    onMutate: async (variables) => {
-      const rows = await saveOptimistic.onMutate(variables);
-      const caps = await saveCapsOptimistic.onMutate(variables);
-      return { rows, caps };
-    },
-    onSuccess: () => {
-      showToast("הנתונים נשמרו.", "success");
-      setEditingId(null);
-      void queryClient.invalidateQueries({ queryKey: productsQueryKey });
-      void queryClient.invalidateQueries({ queryKey: capsQueryKey });
-    },
-    onError: async (
-      error: { message?: string; code?: string },
-      variables,
-      context:
-        | {
-            rows: { previous: ProductVariety[] | undefined } | undefined;
-            caps: { previous: Map<string, PalletCap[]> | undefined } | undefined;
-          }
-        | undefined,
-    ) => {
-      saveOptimistic.onError(error, variables, context?.rows);
-      saveCapsOptimistic.onError(error, variables, context?.caps);
-
-      if (error.code !== PRODUCT_VERSION_CONFLICT_ERROR_CODE) {
-        showToast(`השמירה נכשלה: ${errorMessage(error)}`, "error");
-        return;
-      }
-
-      // Someone else saved this product first (R7). Refetch and re-seed the
-      // row that's still open for editing from the values that actually
-      // won, so the next save carries THEIR version rather than retrying
-      // against a version the server has already moved past.
-      showToast("המוצר עודכן על ידי משתמש אחר בינתיים. הנתונים רועננו — בדוק ושמור שוב.", "error");
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: productsQueryKey }),
-        queryClient.invalidateQueries({ queryKey: capsQueryKey }),
-      ]);
-      if (!editingRowId) return;
-      const fresh = queryClient
-        .getQueryData<ProductVariety[]>(productsQueryKey)
-        ?.find((row) => row.id === editingRowId);
-      if (!fresh) {
-        setEditingId(null);
-        return;
-      }
-      const caps = queryClient.getQueryData<Map<string, PalletCap[]>>(capsQueryKey)?.get(fresh.id);
-      setForm(toFormState(fresh, caps ?? []));
-    },
-  });
-
-  const deleteOptimistic = optimisticUpdate<ProductVariety[], void>(
-    queryClient,
-    productsQueryKey,
-    (rows) => rows?.filter((row) => row.id !== deleteTargetId),
-  );
-
-  const deleteMutation = useMutation({
-    mutationFn: async () => {
-      if (!deleteTargetId) return;
-      const { error } = await supabase.from("product_varieties").delete().eq("id", deleteTargetId);
-      if (error) throw error;
-    },
-    onMutate: deleteOptimistic.onMutate,
-    onSuccess: () => {
-      showToast("המוצר נמחק.", "success");
-      setDeleteTargetId(null);
-      void queryClient.invalidateQueries({ queryKey: productsQueryKey });
-    },
-    onError: mergeOnError(deleteOptimistic.onError, (error: { message?: string }) => {
-      showToast(`המחיקה נכשלה: ${errorMessage(error)}`, "error");
-      setDeleteTargetId(null);
-    }),
+    showToast,
+    form,
+    setForm,
+    editingRowId,
+    setEditingId,
+    deleteTargetId,
+    setDeleteTargetId,
   });
 
   const editingFamily = familyById.get(editingFamilyId ?? "") ?? null;
 
-  const saveFamilyOptimistic = optimisticUpdate<ProductFamily[], void>(
+  const { saveFamilyMutation, deleteFamilyMutation } = useFamilyMutations({
     queryClient,
-    familiesQueryKey,
-    (families) =>
-      families?.map((family) =>
-        family.id === editingFamilyId
-          ? {
-              ...family,
-              name: familyForm.name.trim(),
-              category: familyForm.category.trim() || null,
-              image_url: familyForm.imageUrl.trim() || null,
-            }
-          : family,
-      ),
-  );
-
-  // A plain table write, not an RPC like `save_product` — a family is three
-  // independent text columns with no child rows to keep in step and no
-  // `version` column, so there is nothing here for a transaction-scoped
-  // function to make atomic. The write is allowed by the
-  // `product_families_write_backoffice` policy
-  // (0006_reference-data-rls.sql): only a signed-in user whose
-  // `current_role()` is 'backoffice' may insert/update/delete a family,
-  // while every authenticated role may read them — which is what stops a
-  // grower or a customer renaming the catalog everyone else orders from,
-  // and it is enforced in the database, not by this screen being
-  // backoffice-only.
-  //
-  // Editing a family carries no optimistic-concurrency check by design:
-  // unlike a variety (R7, where two distributors pricing the same product
-  // in the same minute is a real and costly collision), a family's name,
-  // category and photo are near-static and a last-write-wins overwrite of
-  // one of three text fields is recoverable by retyping it.
-  const saveFamilyMutation = useMutation({
-    mutationFn: async () => {
-      if (!editingFamilyId) return;
-      const previousImageUrl =
-        editingFamilyId === NEW_FAMILY_ID ? null : (editingFamily?.image_url ?? null);
-
-      let imageUrl = familyForm.imageUrl.trim() || null;
-      if (pendingPhotoFile) {
-        const extension = PHOTO_MIME_EXTENSIONS[pendingPhotoFile.type];
-        // A fresh random filename every time, never the family's own id:
-        // reusing one path across re-uploads would risk a CDN still serving
-        // the OLD photo's cached bytes from that same URL after a
-        // replacement is saved.
-        const path = `${crypto.randomUUID()}.${extension}`;
-        const { error: uploadError } = await supabase.storage
-          .from(PRODUCT_PHOTOS_BUCKET)
-          .upload(path, pendingPhotoFile, { contentType: pendingPhotoFile.type });
-        if (uploadError) throw uploadError;
-        imageUrl = supabase.storage.from(PRODUCT_PHOTOS_BUCKET).getPublicUrl(path).data.publicUrl;
-      }
-
-      const values = {
-        name: familyForm.name.trim(),
-        category: familyForm.category.trim() || null,
-        image_url: imageUrl,
-      };
-      // Create and update are the same three columns, so they're the same
-      // form and the same button — only the verb differs, exactly as the
-      // variety half of this screen treats its own draft row.
-      const { error } =
-        editingFamilyId === NEW_FAMILY_ID
-          ? await supabase.from("product_families").insert(values)
-          : await supabase.from("product_families").update(values).eq("id", editingFamilyId);
-      if (error) throw error;
-
-      // Best-effort cleanup of whatever photo this one just replaced. The row
-      // is already saved with the new photo at this point, so a failed
-      // removal here only leaves one unreferenced file in Storage rather than
-      // losing or blocking anything the user asked for — same reasoning as
-      // nudgeWhatsAppDispatch's fire-and-forget calls. productPhotoPathFromUrl
-      // guards against ever touching a URL this app didn't itself upload.
-      if (previousImageUrl && previousImageUrl !== imageUrl) {
-        const oldPath = productPhotoPathFromUrl(previousImageUrl);
-        if (oldPath) {
-          void supabase.storage
-            .from(PRODUCT_PHOTOS_BUCKET)
-            .remove([oldPath])
-            .then(({ error: removeError }) => {
-              if (removeError) {
-                console.warn("[product-photos] failed to remove replaced photo", removeError);
-              }
-            });
-        }
-      }
-    },
-    onMutate: saveFamilyOptimistic.onMutate,
-    onSuccess: () => {
-      showToast(editingFamilyId === NEW_FAMILY_ID ? "המשפחה נוצרה." : "המשפחה נשמרה.", "success");
-      setEditingFamilyId(null);
-      setPendingPhotoFile(null);
-      void queryClient.invalidateQueries({ queryKey: familiesQueryKey });
-    },
-    onError: mergeOnError(saveFamilyOptimistic.onError, (error: { message?: string }) => {
-      showToast(`שמירת המשפחה נכשלה: ${errorMessage(error)}`, "error");
-    }),
-  });
-
-  const deleteFamilyOptimistic = optimisticUpdate<ProductFamily[], void>(
-    queryClient,
-    familiesQueryKey,
-    (families) => families?.filter((family) => family.id !== deleteFamilyTargetId),
-  );
-
-  const deleteFamilyMutation = useMutation({
-    mutationFn: async () => {
-      if (!deleteFamilyTargetId) return;
-      const photoUrl = familyById.get(deleteFamilyTargetId)?.image_url ?? null;
-      const { error } = await supabase
-        .from("product_families")
-        .delete()
-        .eq("id", deleteFamilyTargetId);
-      if (error) throw error;
-
-      // Best-effort, same reasoning as the replace-on-save cleanup above: the
-      // family is already gone, so nothing but one unreferenced Storage file
-      // is at stake if this fails.
-      const photoPath = photoUrl ? productPhotoPathFromUrl(photoUrl) : null;
-      if (photoPath) {
-        void supabase.storage
-          .from(PRODUCT_PHOTOS_BUCKET)
-          .remove([photoPath])
-          .then(({ error: removeError }) => {
-            if (removeError) {
-              console.warn("[product-photos] failed to remove deleted family's photo", removeError);
-            }
-          });
-      }
-    },
-    onMutate: deleteFamilyOptimistic.onMutate,
-    onSuccess: () => {
-      showToast("המשפחה נמחקה.", "success");
-      setDeleteFamilyTargetId(null);
-      void queryClient.invalidateQueries({ queryKey: familiesQueryKey });
-    },
-    onError: mergeOnError(deleteFamilyOptimistic.onError, (error: { message?: string }) => {
-      showToast(`מחיקת המשפחה נכשלה: ${errorMessage(error)}`, "error");
-      setDeleteFamilyTargetId(null);
-    }),
+    showToast,
+    editingFamilyId,
+    setEditingFamilyId,
+    familyForm,
+    editingFamily,
+    pendingPhotoFile,
+    setPendingPhotoFile,
+    deleteFamilyTargetId,
+    setDeleteFamilyTargetId,
+    familyById,
   });
 
   // A draft family's baseline is the blank form, so "שמור" lights up the
@@ -783,32 +208,6 @@ export function ProductCatalogScreen({
   function handleSaveFamily() {
     setSavingFamily(true);
     saveFamilyMutation.mutate(undefined, { onSettled: () => setSavingFamily(false) });
-  }
-
-  // Validated against the same limits Storage itself enforces
-  // (0058_product-photo-storage-bucket.sql) so a rejected file gets a Hebrew
-  // toast here rather than a raw API error after an upload attempt.
-  function handlePhotoFileChange(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0] ?? null;
-    // Clears the input's own value so picking the exact same file again
-    // still fires this handler (a file input otherwise treats an unchanged
-    // selection as a no-op change).
-    event.target.value = "";
-    if (!file) return;
-    if (!(file.type in PHOTO_MIME_EXTENSIONS)) {
-      showToast("ניתן להעלות תמונות מסוג JPEG, PNG או WebP בלבד.", "error");
-      return;
-    }
-    if (file.size > PHOTO_MAX_BYTES) {
-      showToast("התמונה גדולה מדי (עד 5MB).", "error");
-      return;
-    }
-    setPendingPhotoFile(file);
-  }
-
-  function handleRemovePhoto() {
-    setPendingPhotoFile(null);
-    setFamilyForm((current) => ({ ...current, imageUrl: "" }));
   }
 
   // Seeded synchronously from data the table already has — the caps are
@@ -889,335 +288,21 @@ export function ProductCatalogScreen({
     }));
   }
 
-  // The two family-level fields the flat table used to repeat on every
-  // variety row — the photo and the category — are gone from the columns
-  // below. They now appear once, on their family's own header row, where
-  // they are also editable; keeping a read-only copy per variety would show
-  // the same value in two places and let only one of them be changed.
-  const columns: RecordTableColumn<ProductVariety>[] = [
-    {
-      key: "name",
-      label: "זן",
-      groupLabel: "משפחה",
-      // Every family's expand toggle and "זן חדש" button live in this
-      // column, so hiding it would strand the whole catalog closed.
-      alwaysVisible: true,
-      render: (row) => (
-        <span className={`block font-medium text-ink ${NAME_GUTTER_PAD}`}>{row.name}</span>
-      ),
-      renderEdit: () => (
-        // Padded to the same gutter as the read state, so the field opens
-        // exactly where the name it replaces was sitting rather than jumping
-        // to the cell edge the moment the row goes into edit mode.
-        <div className={NAME_GUTTER_PAD}>
-          <input
-            aria-label="זן / שם"
-            autoFocus
-            required
-            className={`${inputClassName} w-full min-w-[9rem]`}
-            value={form.name}
-            onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-          />
-        </div>
-      ),
-    },
-    {
-      key: "family",
-      label: "משפחה",
-      groupLabel: "קטגוריה",
-      // Redundant with the header row this variety already sits under while
-      // it's only being read — but it stays, because MOVING a variety to a
-      // different family is a real edit and this dropdown is the only place
-      // it can be made. Changing it moves the row under the family it names
-      // straight away (see `getGroupId` below — an editing row is grouped by
-      // the family it is about to be SAVED to, not the one it came from),
-      // which is why the target family is opened here too: otherwise the row
-      // would drop into a collapsed group and vanish mid-edit.
-      // Drawn in the muted ink rather than the body ink: in a grouped table
-      // every row of a section repeats that section's own name, which makes
-      // this the most-repeated text on the screen and, at full strength, the
-      // thing the eye keeps landing on instead of the fields that actually
-      // differ from row to row. It stays visible — a row can be searched into
-      // view away from its family, and an orphan row has no header above it
-      // at all — just quieter.
-      render: (row) => (
-        <span className="text-ink-muted">{orDash(familyById.get(row.family_id)?.name)}</span>
-      ),
-      renderEdit: () => (
-        <Select
-          aria-label="משפחה"
-          className="w-full min-w-[8rem]"
-          value={form.familyId}
-          onChange={(next) => {
-            openFamily(next);
-            setForm((current) => ({ ...current, familyId: next }));
-          }}
-          options={
-            familiesQuery.data?.map((family) => ({ value: family.id, label: family.name })) ?? []
-          }
-        />
-      ),
-    },
-    {
-      key: "sizes",
-      label: "גודל",
-      groupLabel: "מספר זנים",
-      render: (row) => orDash(row.sizes),
-      renderEdit: () => (
-        <input
-          aria-label="גדלים"
-          className={`${inputClassName} w-28`}
-          value={form.sizes}
-          onChange={(event) => setForm((current) => ({ ...current, sizes: event.target.value }))}
-        />
-      ),
-    },
-    {
-      key: "packType",
-      label: "סוג אריזה",
-      render: (row) => orDash(row.pack_type ? PACK_TYPE_LABEL[row.pack_type] : null),
-      renderEdit: () => (
-        <Select
-          aria-label="סוג אריזה"
-          className="w-28"
-          value={form.packType}
-          onChange={(next) =>
-            setForm((current) => ({ ...current, packType: next as PackType | "" }))
-          }
-          options={[
-            { value: "", label: "—" },
-            { value: "pallets", label: "משטחים" },
-            { value: "crates", label: "ארגזים" },
-          ]}
-        />
-      ),
-    },
-    {
-      key: "price",
-      label: "מחיר",
-      render: (row) => orDash(row.price),
-      renderEdit: () => (
-        <input
-          type="number"
-          step="0.01"
-          aria-label="מחיר"
-          className={`${inputClassName} w-24`}
-          value={form.price}
-          onWheel={blockWheel}
-          onChange={(event) => setForm((current) => ({ ...current, price: event.target.value }))}
-        />
-      ),
-    },
-    {
-      key: "priceFrom",
-      label: "טווח מ-",
-      render: (row) => orDash(row.price_range_from),
-      renderEdit: () => (
-        <input
-          type="number"
-          step="0.01"
-          aria-label="טווח מ-"
-          className={`${inputClassName} w-24`}
-          value={form.priceRangeFrom}
-          onWheel={blockWheel}
-          onChange={(event) =>
-            setForm((current) => ({ ...current, priceRangeFrom: event.target.value }))
-          }
-        />
-      ),
-    },
-    {
-      key: "priceTo",
-      label: "טווח עד",
-      render: (row) => orDash(row.price_range_to),
-      renderEdit: () => (
-        <input
-          type="number"
-          step="0.01"
-          aria-label="טווח עד"
-          className={`${inputClassName} w-24`}
-          value={form.priceRangeTo}
-          onWheel={blockWheel}
-          onChange={(event) =>
-            setForm((current) => ({ ...current, priceRangeTo: event.target.value }))
-          }
-        />
-      ),
-    },
-    {
-      key: "priceType",
-      label: "סוג מחיר",
-      render: (row) => orDash(row.price_type),
-      renderEdit: () => (
-        <input
-          aria-label="סוג תמחור"
-          className={`${inputClassName} w-28`}
-          value={form.priceType}
-          onChange={(event) =>
-            setForm((current) => ({ ...current, priceType: event.target.value }))
-          }
-        />
-      ),
-    },
-    {
-      key: "overbooking",
-      label: "הזמנת יתר",
-      render: (row) => row.no_overbooking,
-      renderEdit: () => (
-        <input
-          type="number"
-          step="1"
-          min={0}
-          aria-label="חריגת הזמנה מותרת (No Overbooking)"
-          className={`${inputClassName} w-24`}
-          value={form.noOverbooking}
-          onWheel={blockWheel}
-          onChange={(event) =>
-            setForm((current) => ({ ...current, noOverbooking: event.target.value }))
-          }
-        />
-      ),
-    },
-    {
-      key: "orderCap",
-      label: "מקס' הזמנות ללקוח",
-      // The customer order screen's dropdown (order-product-list.tsx) reads
-      // this as its own ceiling — never applied to a backoffice
-      // on-behalf-of edit, where staff may deliberately exceed it. Empty
-      // means uncapped. See product-variety.ts's schema comment for how it
-      // differs from the per-customer caps column (one default for every
-      // customer vs. an override for one).
-      render: (row) => orDash(row.number_of_orders_per_customer),
-      renderEdit: () => (
-        <input
-          type="number"
-          step="1"
-          // 1, not 0: saveProductInputSchema requires a positive cap, and
-          // "no cap" is the empty box, not zero.
-          min={1}
-          placeholder="ללא הגבלה"
-          aria-label="כמות מקסימלית להזמנה ללקוח (Number of Orders per Customer)"
-          className={`${inputClassName} w-28`}
-          value={form.numberOfOrdersPerCustomer}
-          onWheel={blockWheel}
-          onChange={(event) =>
-            setForm((current) => ({ ...current, numberOfOrdersPerCustomer: event.target.value }))
-          }
-        />
-      ),
-    },
-    {
-      key: "caps",
-      label: "תקרות ללקוח",
-      render: (row) => (
-        <CellChipList
-          items={(capsQuery.data?.get(row.id) ?? []).map(
-            (cap) =>
-              `${customerNameById.get(cap.customerCompanyId) ?? cap.customerCompanyId}: ${cap.palletCap}`,
-          )}
-          emptyLabel="אין תקרות"
-        />
-      ),
-      renderEdit: () => (
-        <CellPopover
-          label="תקרות משטחים ללקוח"
-          summary={`${form.customerPalletCaps.length} תקרות`}
-          panelClassName="w-[26rem]"
-        >
-          <div className="flex flex-col gap-2">
-            {form.customerPalletCaps.map((cap, index) => (
-              <div key={index} className="flex flex-wrap items-center gap-2">
-                <Select
-                  aria-label="לקוח"
-                  className="min-w-0 flex-1"
-                  value={cap.customerCompanyId}
-                  onChange={(next) => updateCap(index, { customerCompanyId: next })}
-                  options={
-                    customersQuery.data?.map((customer) => ({
-                      value: customer.id,
-                      label: customer.name,
-                    })) ?? []
-                  }
-                />
-                <input
-                  type="number"
-                  min={0}
-                  aria-label="תקרת משטחים"
-                  className={`${inputClassName} w-20`}
-                  value={cap.palletCap}
-                  onWheel={blockWheel}
-                  onChange={(event) => updateCap(index, { palletCap: Number(event.target.value) })}
-                />
-                <Button type="button" variant="ghost" size="sm" onClick={() => removeCap(index)}>
-                  הסר
-                </Button>
-              </div>
-            ))}
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={addCap}
-              disabled={!customersQuery.data?.length}
-            >
-              הוסף תקרה
-            </Button>
-          </div>
-        </CellPopover>
-      ),
-    },
-    {
-      key: "seasonal",
-      label: "בעונה",
-      render: (row) => (
-        <StatusPill tone={row.is_seasonal_available ? "accent" : "neutral"} dot>
-          {row.is_seasonal_available ? "בעונה" : "לא בעונה"}
-        </StatusPill>
-      ),
-      renderEdit: () => (
-        <label className="flex cursor-pointer items-center gap-2 text-sm text-ink">
-          <input
-            type="checkbox"
-            className={checkboxClassName}
-            aria-label="זמין בעונה הנוכחית"
-            checked={form.isSeasonalAvailable}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, isSeasonalAvailable: event.target.checked }))
-            }
-          />
-          {form.isSeasonalAvailable ? "בעונה" : "לא בעונה"}
-        </label>
-      ),
-    },
-    {
-      key: "highlight",
-      label: "הבלטת תנודות מחיר",
-      render: (row) => (row.highlight_price_fluctuations ? "כן" : "לא"),
-      renderEdit: () => (
-        <label className="flex cursor-pointer items-center gap-2 text-sm text-ink">
-          <input
-            type="checkbox"
-            className={checkboxClassName}
-            aria-label="הדגש תנודות מחיר"
-            checked={form.highlightPriceFluctuations}
-            onChange={(event) =>
-              setForm((current) => ({
-                ...current,
-                highlightPriceFluctuations: event.target.checked,
-              }))
-            }
-          />
-          {form.highlightPriceFluctuations ? "כן" : "לא"}
-        </label>
-      ),
-    },
-    {
-      key: "created",
-      label: "נוצר",
-      render: (row) =>
-        orDash(row.created_at ? CREATED_AT_FORMAT.format(new Date(row.created_at)) : null),
-    },
-  ];
+  // The table's columns — the read and edit cell of every field (see
+  // buildVarietyColumns).
+  const columns = buildVarietyColumns({
+    form,
+    setForm,
+    familyById,
+    familiesQuery,
+    customersQuery,
+    capsQuery,
+    customerNameById,
+    openFamily,
+    addCap,
+    updateCap,
+    removeCap,
+  });
 
   // Creating a record is offered on the unfiltered catalog only. A brand-new
   // variety has no pick line and a brand-new family has no varieties, so
@@ -1308,269 +393,38 @@ export function ProductCatalogScreen({
     ...listedFamilies.map(toGroup),
   ];
 
-  function renderAddRow(group: RecordTableGroup): RecordTableGroupContent {
-    return {
-      kind: "cells",
-      actions: null,
-      cells: {
-        name: (
-          <button
-            type="button"
-            onClick={() => handleNewInFamily(group.id)}
-            // One of these exists per open family, so the visible "זן חדש"
-            // alone would name several buttons identically. The family name is
-            // appended rather than substituted, so the accessible name still
-            // starts with the text on screen.
-            aria-label={`זן חדש ${familyById.get(group.id)?.name ?? ""}`.trim()}
-            className="group/add flex items-center text-start"
-          >
-            {/* The plus rides in the same gutter the family's chevron and
-                photo use, so the label beside it lines up with every variety
-                name in the column and the row reads as the first entry in the
-                list rather than a banner over it. */}
-            <span className={`flex ${NAME_GUTTER} shrink-0 items-center`}>
-              <Icon
-                name="plusCircle"
-                className="h-4 w-4 text-ink-subtle transition-colors duration-150 group-hover/add:text-accent"
-              />
-            </span>
-            <span className="text-sm font-medium text-ink-muted transition-colors duration-150 group-hover/add:text-accent">
-              זן חדש
-            </span>
-          </button>
-        ),
-      },
-    };
-  }
-
-  // The family's photo control, live only while its own edit form is open.
-  // Clicking the picture itself opens the file picker (handlePhotoFileChange)
-  // — one control on the thing it acts on, rather than a separate "add
-  // photo" / "remove photo" pair of icon buttons sitting elsewhere in the
-  // row. The × badge only appears once a photo actually exists, so an empty
-  // slot shows nothing to remove.
-  function renderPhotoButton() {
-    const hasPhoto = Boolean(pendingPhotoFile || familyForm.imageUrl.trim());
-    return (
-      <span className="group/photo relative inline-flex shrink-0">
-        <button
-          type="button"
-          onClick={() => photoInputRef.current?.click()}
-          disabled={savingFamily}
-          aria-label={hasPhoto ? "החלפת תמונת המשפחה" : "העלאת תמונת המשפחה"}
-          className="block rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:pointer-events-none disabled:opacity-40"
-        >
-          <ProductThumbnail imageUrl={photoPreviewUrl ?? familyForm.imageUrl} size="sm" />
-        </button>
-        {hasPhoto && (
-          <button
-            type="button"
-            onClick={(event) => {
-              // Otherwise this click bubbles up through the photo button
-              // above and reopens the file picker the same instant the
-              // photo clears.
-              event.stopPropagation();
-              handleRemovePhoto();
-            }}
-            disabled={savingFamily}
-            aria-label="הסרת תמונה"
-            className="absolute -end-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-danger text-danger-ink opacity-0 shadow-sm ring-1 ring-inset ring-border transition-opacity duration-150 group-hover/photo:opacity-100 focus-visible:opacity-100 disabled:pointer-events-none"
-          >
-            <Icon name="close" className="h-2.5 w-2.5" />
-          </button>
-        )}
-      </span>
-    );
-  }
+  // A family's header row — its toggle, photo, name, category, variety
+  // count and buttons, or its edit band while it is being edited (see
+  // buildFamilyHeader). Both helpers are called by RecordTable as it draws.
+  const familyHeader: FamilyHeaderContext = {
+    editingFamilyId,
+    tableEditingId,
+    savingFamily,
+    familyDirty,
+    familyForm,
+    setFamilyForm,
+    pendingPhotoFile,
+    photoPreviewUrl,
+    photoInputRef,
+    handlePhotoFileChange,
+    handleRemovePhoto,
+    toggleFamily,
+    handleSaveFamily,
+    handleCancelFamily,
+    handleEditFamily,
+    setDeleteFamilyTargetId,
+  };
 
   function renderFamilyHeader(
     family: ProductFamily,
     varietyCount: number,
     expanded: boolean,
   ): RecordTableGroupContent {
-    const isEditing = editingFamilyId === family.id;
-    const isDraft = family.id === NEW_FAMILY_ID;
-    // Locked while any OTHER edit is open — a row's, or another family's.
-    const locked = tableEditingId !== null && !isEditing;
+    return buildFamilyHeader(familyHeader, family, varietyCount, expanded);
+  }
 
-    // The family's expand toggle, drawn wherever the caller of this helper
-    // puts it. It stays available while the family is being edited —
-    // renaming a family and checking what's inside it are independent, and
-    // taking the chevron away mid-edit would be a dead end. A draft family
-    // has nothing to expand onto, so it gets a plain photo control instead.
-    //
-    // While the family is only being read, the rest of its row toggles too
-    // (the group's `onToggle`, in `toGroup`), so the chevron lights up when
-    // the pointer is anywhere on the row (`group-hover/section:`), not just
-    // over this button.
-    //
-    // Mid-edit, the chevron and the photo split into two independent
-    // controls (renderPhotoButton) instead of sharing one button: the
-    // chevron still toggles expand/collapse, but the photo itself now needs
-    // its own click target to open the file picker, and one <button> can't
-    // do both jobs at once.
-    const toggle = isDraft ? (
-      renderPhotoButton()
-    ) : isEditing ? (
-      <span className={`flex ${NAME_GUTTER} shrink-0 items-center gap-2`}>
-        <button
-          type="button"
-          onClick={() => toggleFamily(family.id)}
-          aria-expanded={expanded}
-          aria-label={`${expanded ? "כווץ" : "הרחב"} ${family.name}`}
-          className="group flex shrink-0 items-center rounded-md p-1"
-        >
-          <Icon
-            name="chevronDown"
-            className={`h-4 w-4 shrink-0 transition-[transform,color] duration-300 ease-[cubic-bezier(0.22,0.61,0.36,1)] ${
-              expanded ? "rotate-180 text-accent" : "text-ink-muted group-hover:text-accent"
-            }`}
-          />
-        </button>
-        {renderPhotoButton()}
-      </span>
-    ) : (
-      <button
-        type="button"
-        onClick={() => toggleFamily(family.id)}
-        aria-expanded={expanded}
-        aria-label={`${expanded ? "כווץ" : "הרחב"} ${family.name}`}
-        className="group flex shrink-0 items-center rounded-md py-1 text-start"
-      >
-        {/* The gutter. Fixed at NAME_GUTTER so the name after it starts on the
-            same edge as every variety name in this column; its contents come
-            to 56px (chevron, gap, photo), which leaves the remaining 8px as
-            the gap before the name. */}
-        <span className={`flex ${NAME_GUTTER} shrink-0 items-center gap-2`}>
-          <Icon
-            name="chevronDown"
-            className={`h-4 w-4 shrink-0 transition-[transform,color] duration-300 ease-[cubic-bezier(0.22,0.61,0.36,1)] ${
-              expanded
-                ? "rotate-180 text-accent"
-                : "text-ink-muted group-hover:text-accent group-hover/section:text-accent"
-            }`}
-          />
-          <ProductThumbnail imageUrl={family.image_url} size="sm" />
-        </span>
-        {/* A shade larger than a row's own text: this is a section title, and
-            the band it sits on reads as a section, so the name should lead it
-            rather than match the varieties listed underneath. */}
-        <span className="truncate text-[0.9375rem] font-semibold text-ink">{family.name}</span>
-      </button>
-    );
-
-    // Editing falls back to one full-width band rather than the column grid
-    // the read state uses. The category and photo fields are the reason: they
-    // need more room than a `גודל` column that is barely 4rem, so sitting them
-    // in a cell would re-measure every column in the table and shove the
-    // variety rows sideways on each keystroke. `sticky start-0` keeps the form
-    // parked at the frozen edge while the table scrolls under it; `px-4`
-    // matches the padding a row's own cells carry (table.tsx), so the
-    // controls stay in line with the varieties' edit/delete.
-    if (isEditing) {
-      return {
-        kind: "band",
-        content: (
-          <div className="sticky start-0 flex w-fit max-w-full items-center gap-2.5 px-4 py-2.5">
-            <RowIconButton
-              icon="checkCircle"
-              label="שמור משפחה"
-              tone="accent"
-              onClick={handleSaveFamily}
-              disabled={savingFamily || !familyDirty || familyForm.name.trim() === ""}
-            />
-            <RowIconButton
-              icon="close"
-              label="ביטול עריכת משפחה"
-              tone="neutral"
-              onClick={handleCancelFamily}
-              disabled={savingFamily}
-            />
-            {toggle}
-            <input
-              aria-label="שם המשפחה"
-              autoFocus
-              required
-              placeholder={isDraft ? "שם המשפחה" : undefined}
-              className={`${inputClassName} w-40`}
-              value={familyForm.name}
-              onChange={(event) =>
-                setFamilyForm((current) => ({ ...current, name: event.target.value }))
-              }
-            />
-            <input
-              aria-label="קטגוריית המשפחה"
-              placeholder="קטגוריה"
-              className={`${inputClassName} w-32`}
-              value={familyForm.category}
-              onChange={(event) =>
-                setFamilyForm((current) => ({ ...current, category: event.target.value }))
-              }
-            />
-            {/* File picker for the family's photo, opened by clicking the
-                thumbnail itself (renderPhotoButton, inside `toggle` above) —
-                uploaded to Storage only on שמור (see saveFamilyMutation), not
-                the moment it's picked, so cancelling this edit uploads
-                nothing. Replaces what used to be a raw "paste a URL" box:
-                nothing else in this app hosts an image anywhere else a URL
-                could sensibly come from. */}
-            <input
-              ref={photoInputRef}
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              className="hidden"
-              onChange={handlePhotoFileChange}
-            />
-          </div>
-        ),
-      };
-    }
-
-    // Reading: the family's own fields go in the very columns its varieties
-    // use, so the one header row stands for both levels — name under
-    // "זן / משפחה", category under "משפחה / קטגוריה", the variety count under
-    // "גודל / מספר זנים". The family name no longer stays frozen at the start
-    // edge as it did when this was a band, and doesn't need to: every variety
-    // row carries its family in its own column, which is the redundancy that
-    // now earns its keep.
-    return {
-      kind: "cells",
-      actions: (
-        <div className="flex items-center gap-1.5">
-          {/* Deliberately not disabled for a family that still holds
-              varieties: the button opens a dialog that explains WHY it can't
-              go (and offers no delete), which teaches the rule. A greyed-out
-              trash teaches nothing, and its `title` tooltip never fires on a
-              disabled control. */}
-          <RowIconButton
-            icon="trash"
-            label="מחק משפחה"
-            tone="danger"
-            onClick={() => setDeleteFamilyTargetId(family.id)}
-            disabled={locked}
-          />
-          <RowIconButton
-            icon="pencil"
-            label="ערוך משפחה"
-            tone="neutral"
-            onClick={() => handleEditFamily(family)}
-            disabled={locked}
-          />
-        </div>
-      ),
-      cells: {
-        name: toggle,
-        family: family.category ? <StatusPill tone="neutral">{family.category}</StatusPill> : null,
-        sizes: (
-          // ink-muted, not ink-subtle: this sits on the family row's tinted
-          // band, where ink-subtle measures under 4.5:1 (4.1:1 light, 4.0:1
-          // dark) — see the band notes in globals.css.
-          <span className="whitespace-nowrap text-xs font-semibold text-ink-muted">
-            {varietyCountLabel(varietyCount)}
-          </span>
-        ),
-      },
-    };
+  function renderAddRow(group: RecordTableGroup): RecordTableGroupContent {
+    return buildAddRow(group, familyById, handleNewInFamily);
   }
 
   return (
@@ -1656,69 +510,22 @@ export function ProductCatalogScreen({
         emptyLabel={emptyLabel}
       />
 
-      <Dialog
+      <DeleteVarietyDialog
         open={deleteTargetId !== null}
+        target={deleteTarget}
+        pending={deleteMutation.isPending}
         onClose={() => setDeleteTargetId(null)}
-        title="מחיקת מוצר"
-      >
-        <p className="mb-4 text-sm">
-          האם למחוק את המוצר &quot;
-          {deleteTarget ? formatVarietyName(deleteTarget.name, deleteTarget.sizes) : ""}&quot;?
-          פעולה זו אינה הפיכה.
-        </p>
-        <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={() => setDeleteTargetId(null)}>
-            ביטול
-          </Button>
-          <Button
-            variant="danger"
-            onClick={() => deleteMutation.mutate()}
-            disabled={deleteMutation.isPending}
-          >
-            {deleteMutation.isPending ? "מוחק…" : "מחק"}
-          </Button>
-        </div>
-      </Dialog>
+        onConfirm={() => deleteMutation.mutate()}
+      />
 
-      {/* Deleting a family is blocked while it still holds varieties —
-          product_varieties.family_id is a NOT NULL foreign key with no
-          cascade (product-variety.ts), so the database would refuse the
-          delete anyway. Refusing it HERE, with the count and the reason,
-          turns an opaque 23503 error toast into an instruction; and the
-          alternative the FK rules out — deleting a family and silently
-          taking its varieties with it — would erase catalog items that
-          growers' picks and customers' orders still reference. */}
-      <Dialog
+      <DeleteFamilyDialog
         open={deleteFamilyTargetId !== null}
+        familyName={deleteFamilyTarget?.name}
+        varietyCount={deleteFamilyVarietyCount}
+        pending={deleteFamilyMutation.isPending}
         onClose={() => setDeleteFamilyTargetId(null)}
-        title="מחיקת משפחה"
-      >
-        {deleteFamilyVarietyCount > 0 ? (
-          <p className="mb-4 text-sm">
-            לא ניתן למחוק את המשפחה &quot;{deleteFamilyTarget?.name}&quot; — יש בה{" "}
-            {varietyCountLabel(deleteFamilyVarietyCount)}. יש למחוק אותם, או להעביר אותם למשפחה
-            אחרת, ואז למחוק את המשפחה.
-          </p>
-        ) : (
-          <p className="mb-4 text-sm">
-            האם למחוק את המשפחה &quot;{deleteFamilyTarget?.name}&quot;? פעולה זו אינה הפיכה.
-          </p>
-        )}
-        <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={() => setDeleteFamilyTargetId(null)}>
-            {deleteFamilyVarietyCount > 0 ? "סגור" : "ביטול"}
-          </Button>
-          {deleteFamilyVarietyCount === 0 && (
-            <Button
-              variant="danger"
-              onClick={() => deleteFamilyMutation.mutate()}
-              disabled={deleteFamilyMutation.isPending}
-            >
-              {deleteFamilyMutation.isPending ? "מוחק…" : "מחק"}
-            </Button>
-          )}
-        </div>
-      </Dialog>
+        onConfirm={() => deleteFamilyMutation.mutate()}
+      />
     </>
   );
 }

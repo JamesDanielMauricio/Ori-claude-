@@ -14,28 +14,12 @@ import { StatusPill } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { errorMessage } from "@/lib/error-message";
-import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { hasChanges } from "@/lib/has-changes";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
+import { referenceDataQueries, type GrowerCompany } from "@/lib/queries/reference-data";
 import { createClient } from "@/lib/supabase/client";
 import { useContactPersonDirectory } from "@/lib/use-contact-person-directory";
 import { formatVarietyName } from "@/lib/variety-label";
-
-interface GrowerCompany {
-  id: string;
-  name: string;
-  status: "active" | "inactive";
-  default_pickup_time: string | null;
-  whatsapp_group_id: string | null;
-  transporter_company_id: string | null;
-  contact_person_id: string | null;
-  created_at: string;
-}
-
-interface TransporterOption {
-  id: string;
-  name: string;
-}
 
 interface FormState {
   name: string;
@@ -110,96 +94,27 @@ export default function GrowersPage() {
   // not inline, so it needs its own target rather than reusing edit state.
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
 
-  const growersQueryKey = ["reference-data", "growers"] as const;
-  const growerProductsQueryKey = ["reference-data", "grower-products-all"] as const;
+  const growersQueryKey = referenceDataQueries.growers().queryKey;
+  const growerProductsQueryKey = referenceDataQueries.growerProducts().queryKey;
 
-  const growersQuery = useQuery({
-    queryKey: growersQueryKey,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("companies")
-        .select(
-          "id, name, status, default_pickup_time, whatsapp_group_id, transporter_company_id, contact_person_id, created_at",
-        )
-        .eq("type", "grower")
-        .order("name");
-      if (error) throw error;
-      return data as GrowerCompany[];
-    },
-  });
+  const growersQuery = useQuery(referenceDataQueries.growers());
 
   const contactDirectory = useContactPersonDirectory();
 
-  // Every grower's in-season selection in ONE read, grouped client-side —
-  // not a query per row. The in-season list is a column now, so every
-  // visible row needs its own value; per-row queries would mean one request
-  // per grower on first paint. Paged (see fetchAllRows) because this table
-  // is the one that outgrows PostgREST's row cap.
-  const growerProductsQuery = useQuery({
-    queryKey: growerProductsQueryKey,
-    queryFn: async () => {
-      const rows = await fetchAllRows<{ company_id: string; product_variety_id: string }>(
-        (from, to) =>
-          supabase
-            .from("grower_products")
-            .select("company_id, product_variety_id")
-            .order("company_id")
-            .order("product_variety_id")
-            .range(from, to),
-      );
-      const byCompany = new Map<string, string[]>();
-      for (const row of rows) {
-        const list = byCompany.get(row.company_id);
-        if (list) list.push(row.product_variety_id);
-        else byCompany.set(row.company_id, [row.product_variety_id]);
-      }
-      return byCompany;
-    },
-  });
+  // Every grower's in-season selection in ONE read (see
+  // referenceDataQueries.growerProducts).
+  const growerProductsQuery = useQuery(referenceDataQueries.growerProducts());
 
-  // Active transporters only — the "מוביל" dropdown lets a distributor
-  // assign the transporter that gets cc'd on this grower's arrangement-
-  // finalization message (id 8, packages/db/migrations/0031/0033).
-  const transportersQuery = useQuery({
-    queryKey: ["reference-data", "transporters-for-grower-assignment"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("companies")
-        .select("id, name")
-        .eq("type", "transporter")
-        .eq("status", "active")
-        .order("name");
-      if (error) throw error;
-      return data as TransporterOption[];
-    },
-  });
+  // Active transporters only, for the "מוביל" dropdown.
+  const transportersQuery = useQuery(referenceDataQueries.transportersForGrowerAssignment());
   const transporterNameById = useMemo(
     () => new Map((transportersQuery.data ?? []).map((row) => [row.id, row.name])),
     [transportersQuery.data],
   );
 
-  const catalogQuery = useQuery({
-    queryKey: ["reference-data", "product-catalog"],
-    queryFn: async () => {
-      // Paged like grower_products above: the catalog (~900 varieties) is
-      // near PostgREST's 1,000-row cap, and a truncated read would drop the
-      // varieties that sort last from every chip and picker on this screen.
-      // `id` breaks ties between same-named varieties so pages can't overlap.
-      return fetchAllRows<{
-        id: string;
-        name: string;
-        sizes: string | null;
-        product_families: { name: string } | null;
-      }>((from, to) =>
-        supabase
-          .from("product_varieties")
-          .select("id, name, sizes, product_families(name)")
-          .order("name")
-          .order("id")
-          .range(from, to),
-      );
-    },
-  });
+  // The whole catalog for the in-season chips and picker — the same entry
+  // the Users screen reads (referenceDataQueries.productCatalog).
+  const catalogQuery = useQuery(referenceDataQueries.productCatalog());
 
   const catalogOptions = useMemo(
     () =>
@@ -258,7 +173,7 @@ export default function GrowersPage() {
   );
 
   const saveMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (): Promise<GrowerCompany> => {
       const input = saveGrowerInputSchema.parse({
         id: editingRowId,
         name: form.name,
@@ -271,7 +186,7 @@ export default function GrowersPage() {
       });
       const { data, error } = await supabase.rpc("save_grower", toSaveGrowerRpcArgs(input));
       if (error) throw error;
-      return data as GrowerCompany;
+      return data;
     },
     onMutate: async (variables) => {
       const rows = await saveOptimistic.onMutate(variables);

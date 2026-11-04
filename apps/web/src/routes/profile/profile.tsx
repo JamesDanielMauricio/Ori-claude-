@@ -10,12 +10,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { errorMessage } from "@/lib/error-message";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
+import { profileQueries, type OwnProfile } from "@/lib/queries/profile";
 import { createClient } from "@/lib/supabase/client";
-
-interface ProfileRow {
-  displayName: string;
-  phoneNumber: string | null;
-}
 
 // Self-service Edit Profile (PRD: reference/prd/user-profile.md,
 // edit-profile.md). Scoped deliberately to what `profiles` itself holds —
@@ -37,24 +33,9 @@ export default function UserProfilePage() {
   const [displayName, setDisplayName] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
 
-  const profileQueryKey = ["profile", "self"] as const;
+  const profileQueryKey = profileQueries.own().queryKey;
 
-  const profileQuery = useQuery({
-    queryKey: profileQueryKey,
-    queryFn: async () => {
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-      if (userError) throw userError;
-      if (!userData.user) throw new Error("not signed in");
-
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("display_name, phone_number")
-        .eq("user_id", userData.user.id)
-        .single();
-      if (error) throw error;
-      return { displayName: data.display_name, phoneNumber: data.phone_number } as ProfileRow;
-    },
-  });
+  const profileQuery = useQuery(profileQueries.own());
 
   useEffect(() => {
     if (profileQuery.data) {
@@ -63,7 +44,7 @@ export default function UserProfilePage() {
     }
   }, [profileQuery.data]);
 
-  const saveOptimistic = optimisticUpdate<ProfileRow, void>(queryClient, profileQueryKey, (row) =>
+  const saveOptimistic = optimisticUpdate<OwnProfile, void>(queryClient, profileQueryKey, (row) =>
     row
       ? { displayName: displayName.trim(), phoneNumber: phoneNumber.trim() || null }
       : row,

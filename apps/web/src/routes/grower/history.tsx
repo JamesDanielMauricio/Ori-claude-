@@ -9,20 +9,9 @@ import { Icon } from "@/components/ui/icon";
 import { PageHeader } from "@/components/ui/page-header";
 import { QueryError } from "@/components/ui/query-error";
 import { Skeleton } from "@/components/ui/skeleton";
-import { createClient } from "@/lib/supabase/client";
+import { growerQueries, type GrowerHistoryDay } from "@/lib/queries/grower";
 
 import { PICK_STATUS_TONE, STATUS_LABEL } from "./picks";
-
-interface DayRow {
-  id: string;
-  trade_date: string;
-  // Reverse relation (trading_days -> daily_picks): RLS
-  // (daily_picks_select_own) already scopes this to the caller's own
-  // company, and the table's `unique(trading_day_id, grower_company_id)`
-  // means there is at most one entry here — an array only because that's
-  // how PostgREST shapes a one-to-many embed.
-  daily_picks: Array<{ id: string; status: "draft" | "submitted" | "closed" }>;
-}
 
 // Built once, not per call: creating an Intl.DateTimeFormat is expensive, and
 // this formats every row on every render and on every search keystroke —
@@ -36,13 +25,6 @@ const SHORT_DATE_FORMAT = new Intl.DateTimeFormat("he-IL", {
 function shortDateLabel(isoDate: string): string {
   return SHORT_DATE_FORMAT.format(new Date(isoDate));
 }
-
-// Days per "הצג עוד" batch — about two and a half months of trading. Loading
-// every day at once grew with every day the business ran (measured: ~0.8 s
-// at 323 days, ~3 s at 1,600 on a laptop, several times that on a phone),
-// and a single request past Supabase's 1,000-row cap is silently cut short,
-// which would have dropped the oldest days from this list without a word.
-const PAGE_SIZE = 60;
 
 // Read-only pick history, the grower-module counterpart of
 // CustomerOrderHistoryPage — every trading day, newest first, not just the
@@ -64,40 +46,20 @@ const PAGE_SIZE = 60;
 // with no pick navigates via `tradingDayId` instead, straight to an
 // empty-state view.
 export default function GrowerPickHistoryPage() {
-  const supabase = createClient();
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
 
   // One page per "הצג עוד" click. A live update re-reads every page already
   // shown (React Query refetches an infinite query page by page), so a
   // longer list stays current the same way the first page does.
-  const daysQuery = useInfiniteQuery({
-    queryKey: ["grower", "pick-history"],
-    initialPageParam: 0,
-    queryFn: async ({ pageParam }) => {
-      const { data, error } = await supabase
-        .from("trading_days")
-        .select("id, trade_date, daily_picks(id, status)")
-        .order("trade_date", { ascending: false })
-        // trade_date isn't unique, and pages are cut by position: without a
-        // unique tie-breaker two same-date rows could swap between requests
-        // and one would show on both pages while the other showed on none.
-        .order("id")
-        .range(pageParam, pageParam + PAGE_SIZE - 1);
-      if (error) throw error;
-      return data as unknown as DayRow[];
-    },
-    // A short page means there is nothing older left.
-    getNextPageParam: (lastPage, allPages) =>
-      lastPage.length < PAGE_SIZE ? undefined : allPages.length * PAGE_SIZE,
-  });
+  const daysQuery = useInfiniteQuery(growerQueries.pickHistory());
 
   // Pages are cut by position, so a day started between two clicks shifts
   // everything down one and the next page repeats the previous page's last
   // row — keep the first copy of each day.
   const sortedDays = useMemo(() => {
     const seen = new Set<string>();
-    const rows: DayRow[] = [];
+    const rows: GrowerHistoryDay[] = [];
     for (const row of daysQuery.data?.pages.flat() ?? []) {
       if (seen.has(row.id)) continue;
       seen.add(row.id);

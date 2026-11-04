@@ -17,15 +17,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { createClient } from "@/lib/supabase/client";
+import { usersAdminQueries } from "@/lib/queries/users-admin";
 import { trpc } from "@/lib/trpc-client";
-
-interface CompanyOption {
-  id: string;
-  name: string;
-  type: string;
-  status: "active" | "inactive";
-}
 
 interface DraftRow {
   email: string;
@@ -48,24 +41,12 @@ const ROLE_LABEL: Record<DraftRow["role"], string> = {
 };
 
 export default function BulkImportUsersPage() {
-  const supabase = createClient();
   const [rows, setRows] = useState<DraftRow[]>([emptyRow()]);
   const [missingCompany, setMissingCompany] = useState(false);
   const bulkCreate = trpc.auth.bulkCreateUsers.useMutation();
 
   // Picked by name rather than typed in as a UUID, which no screen shows.
-  // Readable by backoffice through the companies RLS policies.
-  const companiesQuery = useQuery({
-    queryKey: ["users-import", "companies"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("companies")
-        .select("id, name, type, status")
-        .order("name");
-      if (error) throw error;
-      return data as CompanyOption[];
-    },
-  });
+  const companiesQuery = useQuery(usersAdminQueries.importCompanies());
 
   // A user's company is always of the type matching their role (every
   // existing account is), so each row only offers those.

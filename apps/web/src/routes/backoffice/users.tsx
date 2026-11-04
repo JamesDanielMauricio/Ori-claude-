@@ -15,34 +15,12 @@ import { Dialog } from "@/components/ui/dialog";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { errorMessage } from "@/lib/error-message";
-import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { hasChanges } from "@/lib/has-changes";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
+import { referenceDataQueries, type ProfileRow } from "@/lib/queries/reference-data";
 import { createClient } from "@/lib/supabase/client";
 import { formatVarietyName } from "@/lib/variety-label";
 import { trpc } from "@/lib/trpc-client";
-
-interface ProfileRow {
-  user_id: string;
-  display_name: string;
-  role: UserRole;
-  company_id: string;
-  // Optional editable field (reference/prd/edit-profile.md) and the source
-  // of the individual-WhatsApp-dispatch batch when a company has no
-  // whatsapp_group_id set — see profile.ts's schema comment. Not part of
-  // `save_user`'s RPC signature (packages/db/migrations/0007), so saving it
-  // is a plain `.update()` against `profiles` — already permitted by the
-  // "profiles_update_backoffice" RLS policy (packages/db/migrations/0006),
-  // no new function or migration required.
-  phone_number: string | null;
-  // True while the account is still on an admin-issued temporary password
-  // (the PRD's "Temp Pass" state) — cleared by the client the moment the
-  // user sets their own. Read-only here: it's set by the import/reset
-  // flows, not something to toggle by hand.
-  must_change_password: boolean;
-  created_at: string;
-  companies: { name: string } | null;
-}
 
 // One place for the role wording, so the table's badge and the <select>
 // below can never drift apart.
@@ -92,90 +70,25 @@ export default function UsersPage() {
   const [saving, setSaving] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
 
-  const usersQueryKey = ["reference-data", "users"] as const;
-  const blockedQueryKey = ["reference-data", "blocked-products-all"] as const;
+  const usersQueryKey = referenceDataQueries.users().queryKey;
+  const blockedQueryKey = referenceDataQueries.blockedProducts().queryKey;
 
-  const usersQuery = useQuery({
-    queryKey: usersQueryKey,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select(
-          // `companies!company_id(...)`: profiles now has two FK paths to
-          // companies (company_id, and the reverse via
-          // companies.contact_person_id since migration 0057), so the bare
-          // embed PostgREST used to infer on its own is ambiguous and
-          // returns 300 — see auth-context.tsx's loadProfile for the fuller
-          // note.
-          "user_id, display_name, role, company_id, phone_number, must_change_password, created_at, companies!company_id(name)",
-        )
-        .order("display_name");
-      if (error) throw error;
-      return data as unknown as ProfileRow[];
-    },
-  });
+  const usersQuery = useQuery(referenceDataQueries.users());
 
   // Login emails live in `auth.users`, which PostgREST doesn't expose — so
   // they come from the API's service-role endpoint and get joined onto the
   // profiles rows by id here. See apps/api/src/routers/auth.ts.
   const emailsQuery = trpc.auth.listUserEmails.useQuery();
 
-  // Every user's blocked-product selection in ONE read, grouped
-  // client-side — same reasoning as growers.tsx's identical bulk read: the
-  // blacklist is a column now, so every visible row needs its own value.
-  const blockedQuery = useQuery({
-    queryKey: blockedQueryKey,
-    queryFn: async () => {
-      const rows = await fetchAllRows<{ user_id: string; product_variety_id: string }>((from, to) =>
-        supabase
-          .from("profile_blocked_products")
-          .select("user_id, product_variety_id")
-          .order("user_id")
-          .order("product_variety_id")
-          .range(from, to),
-      );
-      const byUser = new Map<string, string[]>();
-      for (const row of rows) {
-        const list = byUser.get(row.user_id);
-        if (list) list.push(row.product_variety_id);
-        else byUser.set(row.user_id, [row.product_variety_id]);
-      }
-      return byUser;
-    },
-  });
+  // Every user's blocked-product selection in ONE read (see
+  // referenceDataQueries.blockedProducts).
+  const blockedQuery = useQuery(referenceDataQueries.blockedProducts());
 
-  const companiesQuery = useQuery({
-    queryKey: ["reference-data", "companies-for-users"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("companies")
-        .select("id, name, type")
-        .order("name");
-      if (error) throw error;
-      return data as Array<{ id: string; name: string; type: string }>;
-    },
-  });
+  const companiesQuery = useQuery(referenceDataQueries.companiesForUsers());
 
-  const catalogQuery = useQuery({
-    queryKey: ["reference-data", "product-catalog"],
-    queryFn: async () => {
-      // Paged like profile_blocked_products above — same query and cache
-      // key as growers.tsx's catalog read, which explains why.
-      return fetchAllRows<{
-        id: string;
-        name: string;
-        sizes: string | null;
-        product_families: { name: string } | null;
-      }>((from, to) =>
-        supabase
-          .from("product_varieties")
-          .select("id, name, sizes, product_families(name)")
-          .order("name")
-          .order("id")
-          .range(from, to),
-      );
-    },
-  });
+  // The whole catalog for the blocked-product chips and picker — the same
+  // entry the Growers screen reads (referenceDataQueries.productCatalog).
+  const catalogQuery = useQuery(referenceDataQueries.productCatalog());
 
   const catalogOptions = useMemo(
     () =>
@@ -226,7 +139,7 @@ export default function UsersPage() {
   );
 
   const saveMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (): Promise<{ user_id: string }> => {
       if (!editingId || !form) throw new Error("No user selected");
       const input = saveUserInputSchema.parse({
         userId: editingId,
@@ -245,7 +158,7 @@ export default function UsersPage() {
         .update({ phone_number: form.phoneNumber || null })
         .eq("user_id", editingId);
       if (phoneError) throw phoneError;
-      return data as { user_id: string };
+      return data;
     },
     onMutate: async (variables) => {
       const rows = await saveOptimistic.onMutate(variables);

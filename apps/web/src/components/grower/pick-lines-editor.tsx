@@ -19,21 +19,9 @@ import { errorMessage } from "@/lib/error-message";
 import { hasChanges } from "@/lib/has-changes";
 import { blockDecimalKey, blockWheel, stripDecimal } from "@/lib/integer-input";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
+import { growerQueries, type PickProductLineRow } from "@/lib/queries/grower";
 import { createClient } from "@/lib/supabase/client";
 import { formatVarietyName } from "@/lib/variety-label";
-
-interface PickProductLineRow {
-  id: string;
-  pallets_picked: string;
-  leftover_pallets: string;
-  comment: string | null;
-  product_varieties: {
-    name: string;
-    sizes: string | null;
-    family_id: string;
-    product_families: { name: string; image_url: string | null } | null;
-  } | null;
-}
 
 interface DraftLine {
   id: string;
@@ -42,11 +30,13 @@ interface DraftLine {
   comment: string;
 }
 
+// The draft holds what the inputs hold — text — while the counts arrive as
+// numbers.
 function toDraftLines(rows: PickProductLineRow[]): DraftLine[] {
   return rows.map((row) => ({
     id: row.id,
-    pallets: row.pallets_picked,
-    leftover: row.leftover_pallets,
+    pallets: String(row.pallets_picked),
+    leftover: String(row.leftover_pallets),
     comment: row.comment ?? "",
   }));
 }
@@ -109,12 +99,12 @@ function groupDraftByFamily(rows: PickProductLineRow[], draft: DraftLine[]): Pic
 // ActionBar's buttons, so that question is answered by the payload rather
 // than by the text in the inputs.
 //
-// That distinction is the whole point here. `pallets_picked` arrives from
-// Postgres as a numeric string — "8.00" for a pick of 8 — so a grower who
-// clears the field and retypes "8" has a draft that differs textually from
-// the server while meaning exactly the same thing. Comparing the sent values
-// (8 === 8) calls that unchanged, which it is. `productLabel` drops out for
-// the same reason: it is display text this editor never saves.
+// That distinction is the whole point here. The draft is text, so a grower
+// who clears a field showing "8" and types "08" — or clears a "0" and leaves
+// it empty — has a draft that differs textually from the server while
+// meaning exactly the same thing. Comparing the sent values (8 === 8, 0 ===
+// 0) calls that unchanged, which it is. `productLabel` drops out for the
+// same reason: it is display text this editor never saves.
 function toSavedLines(lines: DraftLine[]) {
   return lines.map((line) => ({
     dailyPickProductId: line.id,
@@ -277,22 +267,10 @@ export function PickLinesEditor({
     });
   }
 
-  const queryKey = ["grower", "pick-lines", dailyPickId];
+  const linesOptions = growerQueries.pickLines(dailyPickId);
+  const queryKey = linesOptions.queryKey;
 
-  const linesQuery = useQuery({
-    queryKey,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("daily_pick_products")
-        .select(
-          "id, pallets_picked, leftover_pallets, comment, product_varieties(name, sizes, family_id, product_families(name, image_url))",
-        )
-        .eq("daily_pick_id", dailyPickId)
-        .order("product_variety_id");
-      if (error) throw error;
-      return data as PickProductLineRow[];
-    },
-  });
+  const linesQuery = useQuery(linesOptions);
 
   // Keeps the draft tracking the server without ever clobbering typing in
   // progress. The gate used to supply an idle state that was always safe to
@@ -338,8 +316,9 @@ export function PickLinesEditor({
         return line
           ? {
               ...row,
-              pallets_picked: line.pallets,
-              leftover_pallets: line.leftover,
+              // The numbers save_pick_lines is about to store (toSavedLines).
+              pallets_picked: Number(line.pallets || 0),
+              leftover_pallets: Number(line.leftover || 0),
               comment: line.comment || null,
             }
           : row;

@@ -19,9 +19,6 @@ import {
   findPickLine,
   flattenRecords,
   markSelected,
-  type BoardCompany,
-  type BoardOrder,
-  type BoardPick,
   type BoardRecord,
   type GrowerSupply,
   type PickSelection,
@@ -45,27 +42,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { errorMessage } from "@/lib/error-message";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
+import {
+  arrangementKeys,
+  arrangementQueries,
+  type ArrangementDay,
+} from "@/lib/queries/arrangement";
 import { createClient } from "@/lib/supabase/client";
 import { useTradingDayView } from "@/lib/trading-day-view";
-
-// The whole screen's data as ONE nested row — see the board query below for
-// why this is a single shape rather than seven separate queries.
-interface TradingDay {
-  id: string;
-  trade_date: string;
-  phase: "initiated" | "shop_open" | "shop_closed" | "closed";
-  // `unique(trading_day_id)` on daily_arrangements makes this a
-  // one-to-one embed, so PostgREST returns an object here, not an array.
-  daily_arrangements: DailyArrangement | null;
-  daily_picks: BoardPick[];
-  daily_orders: BoardOrder[];
-}
-
-interface DailyArrangement {
-  id: string;
-  status: "open" | "closed";
-  arrangement_records: BoardRecord[];
-}
 
 // The distributor's matchmaking workspace (PRD: arrangement-view.md), laid
 // out the way the source app's own arrangement screen was.
@@ -143,74 +126,15 @@ export default function ArrangementPage() {
   const dayView = useTradingDayView();
   const day = dayView.day;
 
-  // Everything else in ONE request, once the day above is known. Every
-  // table here hangs off that day by a foreign key, so PostgREST can
-  // return the entire tree in a single round trip — the arrangement +
-  // records, every grower's pick and pick lines, every customer's order
-  // and order lines, and each line's variety/family for labelling.
-  //
-  // This replaced a 7-query chain that was 3 round trips deep: the day had
-  // to land before picks/orders could be asked for, and those had to land
-  // before the varieties they referenced could be looked up. None of that
-  // was a real data dependency — the children all key off the day's id,
-  // which PostgREST already knows how to follow. Measured against this
-  // project's Supabase region (ap-northeast-1), each hop cost ~130-300ms,
-  // so the waterfall was the dominant cost of opening this screen, not the
-  // query work itself.
-  //
-  // The redesign added four fields to this same tree rather than a second
-  // query for any of them: pick/order `status` (the cards' state chips),
-  // `pickup_time` (the growers column is ordered by collection time),
-  // per-line `comment` (shown under the line it belongs to, as in the
-  // reference), and the family's `image_url` (migration 0036) for the
-  // product photos. All are columns on rows already being fetched, so the
-  // request count is unchanged.
-  //
-  // Also embedded per order: `order_submission_logs`, the append-only audit
-  // trail submit_order already writes on every customer submission (0017,
-  // "for dispute resolution"). The customer list uses it to show a line's
-  // pallet count next to what it was one submission ago, so a distributor
-  // can see "they just changed this" instead of only ever seeing the latest
-  // number. Still one request — it's a fourth child table alongside picks,
-  // orders and records, not a second query.
-  //
-  // `companies` stays separate below: it's whole-table reference data with
-  // no dependency on the day, so it starts immediately and resolves in
-  // parallel rather than adding a hop.
-  const boardDataQueryKey = ["arrangement", "board-data", day?.id ?? null] as const;
+  // Everything else in ONE request, once the day above is known — see
+  // arrangementQueries.boardData for why it is one nested read. `companies`
+  // stays separate: it has no dependency on the day, so it starts
+  // immediately and resolves in parallel rather than adding a hop.
+  const boardDataQueryKey = arrangementQueries.boardData(day?.id ?? null).queryKey;
 
-  const boardDataQuery = useQuery({
-    queryKey: boardDataQueryKey,
-    enabled: !!day?.id,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("trading_days")
-        .select(
-          `id, trade_date, phase,
-           daily_arrangements(id, status, arrangement_records(id, daily_pick_product_id, daily_order_product_id, customer_company_id, quantity_pallets, price, price_type)),
-           daily_picks(id, grower_company_id, status, submitted_at, pickup_time, daily_pick_products(id, daily_pick_id, product_variety_id, pallets_picked, leftover_pallets, comment, product_varieties(id, name, sizes, family_id, product_families(name, image_url)))),
-           daily_orders(id, customer_company_id, status, daily_order_products(id, daily_order_id, product_variety_id, pallets_ordered, comment, product_varieties(id, name, sizes, family_id, product_families(name, image_url))), order_submission_logs(id, snapshot, created_at))`,
-        )
-        .eq("id", day!.id)
-        .maybeSingle();
-      if (error) throw error;
-      // numeric columns come back as bare JSON numbers over PostgREST, not
-      // decimal-preserving strings — see docs/SCHEMA_DECISIONS.md.
-      return data as unknown as TradingDay | null;
-    },
-  });
+  const boardDataQuery = useQuery(arrangementQueries.boardData(day?.id ?? null));
 
-  const companiesQuery = useQuery({
-    queryKey: ["arrangement", "companies"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("companies")
-        .select("id, name, default_pickup_time")
-        .in("type", ["grower", "customer"]);
-      if (error) throw error;
-      return data as BoardCompany[];
-    },
-  });
+  const companiesQuery = useQuery(arrangementQueries.companies());
 
   const boardDay = boardDataQuery.data ?? null;
   const arrangement = boardDay?.daily_arrangements ?? null;
@@ -271,9 +195,9 @@ export default function ArrangementPage() {
   // every total (חולק/נותר/OOS, per-grower and per-customer sums) from this
   // array automatically, so nothing here needs to know how to total pallets.
   function recordsOptimistic<TVariables>(
-    updater: (records: BoardRecord[], variables: TVariables, current: TradingDay) => BoardRecord[],
+    updater: (records: BoardRecord[], variables: TVariables, current: ArrangementDay) => BoardRecord[],
   ) {
-    return optimisticUpdate<TradingDay | null, TVariables>(
+    return optimisticUpdate<ArrangementDay | null, TVariables>(
       queryClient,
       boardDataQueryKey,
       (current, variables) =>
@@ -482,7 +406,7 @@ export default function ArrangementPage() {
   // FORBIDDEN/INVALID_STATE get their own messages here rather than reusing
   // describeRpcError above: that one's copy ("הסידור כבר סגור") is written for
   // the arrangement-record functions and would mislead for this pick action.
-  const toggleTruckOptimistic = optimisticUpdate<TradingDay | null, GrowerSupply>(
+  const toggleTruckOptimistic = optimisticUpdate<ArrangementDay | null, GrowerSupply>(
     queryClient,
     boardDataQueryKey,
     (current, grower) =>
@@ -723,7 +647,7 @@ export default function ArrangementPage() {
           // Pallets picked is the supply half of every figure on this board
           // and the ceiling each ✓ is checked against, so the board has to
           // re-read before it starts validating against a stale number.
-          void queryClient.invalidateQueries({ queryKey: ["arrangement", "board-data"] });
+          void queryClient.invalidateQueries({ queryKey: arrangementKeys.boardDataAll });
           setPickDialogGrower(null);
         }}
         // See PickLinesEditor's own `readOnly` comment for why this can't be
@@ -740,7 +664,7 @@ export default function ArrangementPage() {
           // The order that was just saved is one of the two sides every
           // figure on this board is computed from, so the board has to
           // re-read before the popup's numbers and its own disagree.
-          void queryClient.invalidateQueries({ queryKey: ["arrangement", "board-data"] });
+          void queryClient.invalidateQueries({ queryKey: arrangementKeys.boardDataAll });
           setOrdersCustomerId(null);
         }}
         // No status of its own to fall back on the way a pick has — see
@@ -751,7 +675,7 @@ export default function ArrangementPage() {
   );
 }
 
-const PHASE_LABEL: Record<TradingDay["phase"], string> = {
+const PHASE_LABEL: Record<ArrangementDay["phase"], string> = {
   initiated: "פתיחת יום",
   shop_open: "חנות פתוחה",
   shop_closed: "חנות סגורה",

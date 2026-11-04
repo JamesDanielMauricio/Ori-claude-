@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
 import type { ContactPersonOption } from "@/components/reference-data/contact-person-cell";
-import { createClient } from "@/lib/supabase/client";
+import { referenceDataQueries } from "@/lib/queries/reference-data";
 import { trpc } from "@/lib/trpc-client";
 
 // Backs the "contact person" picker on the Growers/Customers/Transporters
@@ -15,29 +15,7 @@ import { trpc } from "@/lib/trpc-client";
 // since they need the exact same join users.tsx already does for its own
 // email column.
 export function useContactPersonDirectory() {
-  const supabase = createClient();
-
-  const profilesQuery = useQuery({
-    queryKey: ["reference-data", "contact-person-directory-profiles"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("profiles")
-        // `companies!company_id(...)`, not the bare embed: profiles has two
-        // FK paths to companies since this feature's own migration (0057
-        // added companies.contact_person_id, a second FK back to profiles)
-        // — see auth-context.tsx's loadProfile for the fuller note on why
-        // the bare form 300s.
-        .select("user_id, display_name, phone_number, companies!company_id(name)")
-        .order("display_name");
-      if (error) throw error;
-      return data as unknown as Array<{
-        user_id: string;
-        display_name: string;
-        phone_number: string | null;
-        companies: { name: string } | null;
-      }>;
-    },
-  });
+  const profilesQuery = useQuery(referenceDataQueries.contactPersonProfiles());
 
   // Login emails live in `auth.users`, which PostgREST doesn't expose — see
   // users.tsx's identical join and apps/api/src/routers/auth.ts.

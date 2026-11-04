@@ -14,17 +14,9 @@ import { useToast } from "@/components/ui/toast";
 import { errorMessage } from "@/lib/error-message";
 import { hasChanges } from "@/lib/has-changes";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
+import { referenceDataQueries, type TransporterCompany } from "@/lib/queries/reference-data";
 import { createClient } from "@/lib/supabase/client";
 import { useContactPersonDirectory } from "@/lib/use-contact-person-directory";
-
-interface TransporterCompany {
-  id: string;
-  name: string;
-  status: "active" | "inactive";
-  whatsapp_group_id: string | null;
-  contact_person_id: string | null;
-  created_at: string;
-}
 
 interface FormState {
   name: string;
@@ -85,20 +77,9 @@ export default function TransportersPage() {
   // not inline, so it needs its own target rather than reusing edit state.
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
 
-  const transportersQueryKey = ["reference-data", "transporters"] as const;
+  const transportersQueryKey = referenceDataQueries.transporters().queryKey;
 
-  const transportersQuery = useQuery({
-    queryKey: transportersQueryKey,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("companies")
-        .select("id, name, status, whatsapp_group_id, contact_person_id, created_at")
-        .eq("type", "transporter")
-        .order("name");
-      if (error) throw error;
-      return data as TransporterCompany[];
-    },
-  });
+  const transportersQuery = useQuery(referenceDataQueries.transporters());
 
   const contactDirectory = useContactPersonDirectory();
 
@@ -124,7 +105,7 @@ export default function TransportersPage() {
   );
 
   const saveMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (): Promise<TransporterCompany> => {
       const input = saveTransporterInputSchema.parse({
         id: editingRowId,
         name: form.name,
@@ -137,7 +118,7 @@ export default function TransportersPage() {
         toSaveTransporterRpcArgs(input),
       );
       if (error) throw error;
-      return data as TransporterCompany;
+      return data;
     },
     onMutate: saveOptimistic.onMutate,
     onSuccess: () => {

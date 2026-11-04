@@ -504,7 +504,7 @@ describe("lifecycle engine", () => {
 
     const directLine = await backoffice
       .from("daily_pick_products")
-      .insert({ daily_pick_id: dailyPickId, product_variety_id: grower.varietyId, pallets_picked: "10" })
+      .insert({ daily_pick_id: dailyPickId, product_variety_id: grower.varietyId, pallets_picked: 10 })
       .select()
       .single();
     expect(directLine.error).toBeNull();
@@ -579,7 +579,7 @@ describe("lifecycle engine", () => {
     const dailyPickId = directPick.data!.id;
     const directLine = await backoffice
       .from("daily_pick_products")
-      .insert({ daily_pick_id: dailyPickId, product_variety_id: grower.varietyId, pallets_picked: "0" })
+      .insert({ daily_pick_id: dailyPickId, product_variety_id: grower.varietyId, pallets_picked: 0 })
       .select()
       .single();
     const lineId = directLine.data!.id;
@@ -730,7 +730,7 @@ describe("lifecycle engine", () => {
       .insert({
         daily_pick_id: dailyPickId,
         product_variety_id: grower.varietyId,
-        pallets_picked: "0",
+        pallets_picked: 0,
       })
       .select()
       .single();

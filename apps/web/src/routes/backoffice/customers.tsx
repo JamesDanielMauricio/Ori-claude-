@@ -14,18 +14,9 @@ import { useToast } from "@/components/ui/toast";
 import { errorMessage } from "@/lib/error-message";
 import { hasChanges } from "@/lib/has-changes";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
+import { referenceDataQueries, type CustomerCompany } from "@/lib/queries/reference-data";
 import { createClient } from "@/lib/supabase/client";
 import { useContactPersonDirectory } from "@/lib/use-contact-person-directory";
-
-interface CustomerCompany {
-  id: string;
-  name: string;
-  status: "active" | "inactive";
-  can_see_product_prices: boolean | null;
-  whatsapp_group_id: string | null;
-  contact_person_id: string | null;
-  created_at: string;
-}
 
 interface FormState {
   name: string;
@@ -95,22 +86,9 @@ export default function CustomersPage() {
   // not inline, so it needs its own target rather than reusing edit state.
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
 
-  const customersQueryKey = ["reference-data", "customers"] as const;
+  const customersQueryKey = referenceDataQueries.customers().queryKey;
 
-  const customersQuery = useQuery({
-    queryKey: customersQueryKey,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("companies")
-        .select(
-          "id, name, status, can_see_product_prices, whatsapp_group_id, contact_person_id, created_at",
-        )
-        .eq("type", "customer")
-        .order("name");
-      if (error) throw error;
-      return data as CustomerCompany[];
-    },
-  });
+  const customersQuery = useQuery(referenceDataQueries.customers());
 
   const contactDirectory = useContactPersonDirectory();
 
@@ -137,7 +115,7 @@ export default function CustomersPage() {
   );
 
   const saveMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (): Promise<CustomerCompany> => {
       const input = saveCustomerInputSchema.parse({
         id: editingRowId,
         name: form.name,
@@ -148,7 +126,7 @@ export default function CustomersPage() {
       });
       const { data, error } = await supabase.rpc("save_customer", toSaveCustomerRpcArgs(input));
       if (error) throw error;
-      return data as CustomerCompany;
+      return data;
     },
     onMutate: saveOptimistic.onMutate,
     onSuccess: () => {

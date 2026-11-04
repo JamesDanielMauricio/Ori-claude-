@@ -18,30 +18,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { createClient } from "@/lib/supabase/client";
+import {
+  orderHistoryQueries,
+  type HistoryOrderLineRow,
+  type HistoryOrderRow,
+} from "@/lib/queries/order-history";
 import { useSelectedTradingDay, useTradingDayView } from "@/lib/trading-day-view";
 import { formatVarietyName } from "@/lib/variety-label";
 
-interface OrderRow {
-  id: string;
-  status: "open" | "submitted";
-  submitted_at: string | null;
-  companies: { name: string } | null;
-}
-
-interface OrderLineRow {
-  id: string;
-  pallets_ordered: number;
-  comment: string | null;
-  product_varieties: {
-    name: string;
-    sizes: string | null;
-    product_families: { name: string } | null;
-  } | null;
-  arrangement_records: Array<{ quantity_pallets: number; price: number | null }>;
-}
-
-const STATUS_LABEL: Record<OrderRow["status"], string> = {
+const STATUS_LABEL: Record<HistoryOrderRow["status"], string> = {
   open: "פתוח",
   submitted: "נשלח",
 };
@@ -59,7 +44,6 @@ const DATE_LABEL_FORMAT = new Intl.DateTimeFormat("he-IL", { dateStyle: "long" }
 // (daily_orders_select_backoffice, arrangement_records_select_backoffice)
 // is what actually enforces that, not a client-side filter.
 export default function ArrangedOrderHistoryPage() {
-  const supabase = createClient();
   // Shows the day the sidebar is on — the live day, or the date pinned in its
   // calendar — like every other date-aware backoffice screen. The sidebar's
   // calendar is the one place a date is chosen: this screen used to carry a
@@ -83,36 +67,11 @@ export default function ArrangedOrderHistoryPage() {
   // stops loading its lines) without anything here having to reset it.
   const [selection, setSelection] = useState<{ dayId: string; orderId: string } | null>(null);
 
-  const dayQuery = useQuery({
-    queryKey: ["order-history", "trading-day", date],
-    enabled: date !== null,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("trading_days")
-        .select("id, trade_date")
-        .eq("trade_date", date!)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (error) throw error;
-      return data as { id: string; trade_date: string } | null;
-    },
-  });
+  const dayQuery = useQuery(orderHistoryQueries.tradingDay(date));
   const dayId = dayQuery.data?.id;
   const selectedOrderId = selection !== null && selection.dayId === dayId ? selection.orderId : null;
 
-  const ordersQuery = useQuery({
-    queryKey: ["order-history", "orders", dayId],
-    enabled: !!dayId,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("daily_orders")
-        .select("id, status, submitted_at, companies(name)")
-        .eq("trading_day_id", dayId!);
-      if (error) throw error;
-      return data as unknown as OrderRow[];
-    },
-  });
+  const ordersQuery = useQuery(orderHistoryQueries.orders(dayId));
 
   const sortedOrders = useMemo(() => {
     return [...(ordersQuery.data ?? [])].sort((a, b) =>
@@ -122,23 +81,9 @@ export default function ArrangedOrderHistoryPage() {
 
   const selected = sortedOrders.find((row) => row.id === selectedOrderId) ?? null;
 
-  const linesQuery = useQuery({
-    queryKey: ["order-history", "lines", selectedOrderId],
-    enabled: !!selectedOrderId,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("daily_order_products")
-        .select(
-          "id, pallets_ordered, comment, product_varieties(name, sizes, product_families(name)), arrangement_records(quantity_pallets, price)",
-        )
-        .eq("daily_order_id", selectedOrderId!)
-        .order("product_variety_id");
-      if (error) throw error;
-      return data as unknown as OrderLineRow[];
-    },
-  });
+  const linesQuery = useQuery(orderHistoryQueries.lines(selectedOrderId));
 
-  function arrangedTotal(line: OrderLineRow): number {
+  function arrangedTotal(line: HistoryOrderLineRow): number {
     return line.arrangement_records.reduce((sum, record) => sum + record.quantity_pallets, 0);
   }
 

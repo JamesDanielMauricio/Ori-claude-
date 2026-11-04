@@ -1,15 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 
-import { createClient } from "./supabase/client";
-
-export type TradingDayPhase = "initiated" | "shop_open" | "shop_closed" | "closed";
-
-export interface TradingDayView {
-  id: string;
-  trade_date: string;
-  phase: TradingDayPhase;
-}
+import { tradingDayQueries } from "./queries/trading-day";
 
 interface SelectedTradingDayState {
   // null = "follow the live trading day" — the ordinary, load-bearing state,
@@ -54,41 +46,12 @@ export function useSelectedTradingDay(): SelectedTradingDayState {
   return context;
 }
 
-// One shared query key for "the live open trading day" — the same row
-// BusinessDayPanel's lifecycle buttons have always operated on, unaffected
-// by anything pinned in the picker. Every date-aware screen's
-// useTradingDayView (below) reads it too when nothing is pinned, and
-// because TanStack Query dedupes by key regardless of which component
-// calls useQuery, every screen sharing this key shares one request and one
-// cache entry rather than each re-fetching "is there an open day" on its
-// own.
-export const OPEN_TRADING_DAY_QUERY_KEY = ["trading-day", "open"] as const;
-
-// The live open trading day's row — at most one (trading_days_single_open_idx).
-// Shared by useOpenTradingDay and by anything that must check the day's phase
-// fresh at the moment it acts (see OrderLinesEditor's submit).
-export async function fetchOpenTradingDay(): Promise<TradingDayView | null> {
-  const { data, error } = await createClient()
-    .from("trading_days")
-    .select("id, trade_date, phase")
-    .neq("phase", "closed")
-    .maybeSingle();
-  if (error) throw error;
-  return data as TradingDayView | null;
-}
-
-// Kept current by lib/live-updates.ts, like every other query: a day started,
-// opened or closed on one device shows up on every other open device within
-// about a second.
+// The live open trading day (see tradingDayQueries.open). Kept current by
+// lib/live-updates.ts, like every other query: a day started, opened or
+// closed on one device shows up on every other open device within about a
+// second.
 export function useOpenTradingDay() {
-  return useQuery({
-    queryKey: OPEN_TRADING_DAY_QUERY_KEY,
-    queryFn: fetchOpenTradingDay,
-    // No polling interval. This used to re-read every 60 seconds on every
-    // open device, used or not; it is now re-read when the day actually
-    // changes (lib/live-updates.ts) or someone comes back to the app
-    // (lib/refresh-on-return.ts).
-  });
+  return useQuery(tradingDayQueries.open());
 }
 
 // The day every date-aware backoffice screen (Shop, Arrangement, Grower
@@ -103,31 +66,10 @@ export function useOpenTradingDay() {
 // not on a frozen read-only copy of it — even though the row is read via
 // `pinnedQuery` rather than `openDayQuery` in that case (see `active` below).
 export function useTradingDayView() {
-  const supabase = createClient();
   const { selectedDate } = useSelectedTradingDay();
   const openDayQuery = useOpenTradingDay();
 
-  const pinnedQuery = useQuery({
-    queryKey: ["trading-day", "by-date", selectedDate],
-    enabled: selectedDate !== null,
-    queryFn: async () => {
-      // Ordered and capped at one rather than a bare .maybeSingle(): trade_date
-      // carries no unique constraint of its own (only the partial "at most one
-      // non-closed day" index, trading_days_single_open_idx — packages/db/
-      // migrations/0009_lifecycle-schema.sql), so two closed days could in
-      // principle share a date. Most-recently-created is the same tie-break a
-      // person would reach for.
-      const { data, error } = await supabase
-        .from("trading_days")
-        .select("id, trade_date, phase")
-        .eq("trade_date", selectedDate!)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (error) throw error;
-      return data as TradingDayView | null;
-    },
-  });
+  const pinnedQuery = useQuery(tradingDayQueries.byDate(selectedDate));
 
   // Live if nothing is pinned, OR the pinned date happens to equal the open
   // day's own date — comparing against openDayQuery.data (not pinnedQuery's
@@ -160,32 +102,8 @@ export function useTradingDayView() {
   };
 }
 
-export interface TradingDaySummary {
-  trade_date: string;
-  phase: TradingDayPhase;
-}
-
 // Which dates in one visible calendar month actually have a trading day —
-// TradingDayCalendarPicker's own data, kept out of that component so the
-// query (and its cache) is reusable if anything else ever needs "which days
-// in this range have a trading day" instead of a component internal. Ranged
-// rather than fetching every trading day ever: the table only grows, and a
-// calendar only ever shows one month at a time, so there is nothing to gain
-// from holding years of dates the grid can't display anyway. Each visited
-// month is its own cache entry (keyed by its bounds), so paging back to a
-// month already seen this session costs nothing.
+// TradingDayCalendarPicker's own data (see tradingDayQueries.range).
 export function useTradingDaysInRange(startDate: string, endDate: string) {
-  const supabase = createClient();
-  return useQuery({
-    queryKey: ["trading-day", "range", startDate, endDate],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("trading_days")
-        .select("trade_date, phase")
-        .gte("trade_date", startDate)
-        .lte("trade_date", endDate);
-      if (error) throw error;
-      return data as TradingDaySummary[];
-    },
-  });
+  return useQuery(tradingDayQueries.range(startDate, endDate));
 }

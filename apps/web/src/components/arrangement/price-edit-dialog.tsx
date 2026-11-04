@@ -9,26 +9,15 @@ import { QueryError } from "@/components/ui/query-error";
 import { useToast } from "@/components/ui/toast";
 import { errorMessage } from "@/lib/error-message";
 import { blockWheel } from "@/lib/integer-input";
+import { toInputText } from "@/lib/number-field";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
+import {
+  arrangementKeys,
+  arrangementQueries,
+  type ProductVarietyRow,
+} from "@/lib/queries/arrangement";
 import { createClient } from "@/lib/supabase/client";
 import { formatVarietyName } from "@/lib/variety-label";
-
-interface ProductVarietyRow {
-  id: string;
-  family_id: string;
-  name: string;
-  sizes: string | null;
-  pack_type: "pallets" | "crates" | null;
-  price: string | null;
-  price_range_from: string | null;
-  price_range_to: string | null;
-  price_type: string | null;
-  no_overbooking: string;
-  highlight_price_fluctuations: boolean;
-  is_seasonal_available: boolean;
-  number_of_orders_per_customer: number | null;
-  version: number;
-}
 
 // Per-variety price configuration, launched from the arrangement
 // workspace. Reuses save_product (packages/domain/src/reference-data) —
@@ -52,39 +41,11 @@ export function PriceEditDialog({
   const [priceRangeTo, setPriceRangeTo] = useState("");
   const [priceType, setPriceType] = useState("");
 
-  const varietyQueryKey = ["arrangement", "product-variety", varietyId] as const;
+  const varietyQueryKey = arrangementQueries.priceVariety(varietyId).queryKey;
 
-  const varietyQuery = useQuery({
-    queryKey: varietyQueryKey,
-    enabled: !!varietyId,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("product_varieties")
-        .select(
-          "id, family_id, name, sizes, pack_type, price, price_range_from, price_range_to, price_type, no_overbooking, highlight_price_fluctuations, is_seasonal_available, number_of_orders_per_customer, version, product_families(name)",
-        )
-        .eq("id", varietyId!)
-        .single();
-      if (error) throw error;
-      return data as ProductVarietyRow & { product_families: { name: string } | null };
-    },
-  });
+  const varietyQuery = useQuery(arrangementQueries.priceVariety(varietyId));
 
-  const capsQuery = useQuery({
-    queryKey: ["arrangement", "product-customer-caps", varietyId],
-    enabled: !!varietyId,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("product_customer_caps")
-        .select("customer_company_id, pallet_cap")
-        .eq("product_variety_id", varietyId!);
-      if (error) throw error;
-      return data.map((row) => ({
-        customerCompanyId: row.customer_company_id,
-        palletCap: row.pallet_cap,
-      }));
-    },
-  });
+  const capsQuery = useQuery(arrangementQueries.priceCaps(varietyId));
 
   // Seeded once per variety, not on every change of varietyQuery.data.
   //
@@ -106,9 +67,10 @@ export function PriceEditDialog({
     }
     if (!varietyQuery.data || seededVarietyId === varietyId) return;
     setSeededVarietyId(varietyId);
-    setPrice(varietyQuery.data.price ?? "");
-    setPriceRangeFrom(varietyQuery.data.price_range_from ?? "");
-    setPriceRangeTo(varietyQuery.data.price_range_to ?? "");
+    // The inputs hold text; the prices arrive as numbers.
+    setPrice(toInputText(varietyQuery.data.price));
+    setPriceRangeFrom(toInputText(varietyQuery.data.price_range_from));
+    setPriceRangeTo(toInputText(varietyQuery.data.price_range_to));
     setPriceType(varietyQuery.data.price_type ?? "");
   }, [varietyQuery.data, varietyId, seededVarietyId]);
 
@@ -121,9 +83,9 @@ export function PriceEditDialog({
       row
         ? {
             ...row,
-            price: price === "" ? null : price,
-            price_range_from: priceRangeFrom === "" ? null : priceRangeFrom,
-            price_range_to: priceRangeTo === "" ? null : priceRangeTo,
+            price: price === "" ? null : Number(price),
+            price_range_from: priceRangeFrom === "" ? null : Number(priceRangeFrom),
+            price_range_to: priceRangeTo === "" ? null : Number(priceRangeTo),
             price_type: priceType || null,
           }
         : row,
@@ -165,7 +127,7 @@ export function PriceEditDialog({
     onMutate: saveOptimistic.onMutate,
     onSuccess: () => {
       showToast("המחיר עודכן.", "success");
-      void queryClient.invalidateQueries({ queryKey: ["arrangement"] });
+      void queryClient.invalidateQueries({ queryKey: arrangementKeys.all });
       onClose();
     },
     onError: mergeOnError(saveOptimistic.onError, (error: { message?: string }) => {

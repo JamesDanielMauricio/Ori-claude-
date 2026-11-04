@@ -1,9 +1,4 @@
-import {
-  orderableCatalogInputSchema,
-  submitOrderInputSchema,
-  toOrderableCatalogRpcArgs,
-  toSubmitOrderRpcArgs,
-} from "@ori/domain/customer";
+import { submitOrderInputSchema, toSubmitOrderRpcArgs } from "@ori/domain/customer";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -15,8 +10,9 @@ import { useToast } from "@/components/ui/toast";
 import { errorMessage } from "@/lib/error-message";
 import { hasChanges } from "@/lib/has-changes";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
+import { customerQueries } from "@/lib/queries/customer";
+import { tradingDayQueries } from "@/lib/queries/trading-day";
 import { createClient } from "@/lib/supabase/client";
-import { fetchOpenTradingDay, OPEN_TRADING_DAY_QUERY_KEY } from "@/lib/trading-day-view";
 import { formatVarietyName } from "@/lib/variety-label";
 
 import { CommentPopup } from "./comment-popup";
@@ -139,20 +135,10 @@ export function OrderLinesEditor({
   const [submitting, setSubmitting] = useState(false);
   const [commentPopupVarietyId, setCommentPopupVarietyId] = useState<string | null>(null);
 
-  const queryKey = ["customer", "catalog", tradingDayId, customerCompanyId ?? "self"];
+  const catalogOptions = customerQueries.catalog(tradingDayId, customerCompanyId);
+  const queryKey = catalogOptions.queryKey;
 
-  const catalogQuery = useQuery({
-    queryKey,
-    queryFn: async () => {
-      const input = orderableCatalogInputSchema.parse({ tradingDayId, customerCompanyId });
-      const { data, error } = await supabase.rpc(
-        "get_orderable_catalog_for_customer",
-        toOrderableCatalogRpcArgs(input),
-      );
-      if (error) throw error;
-      return data as CatalogRow[];
-    },
-  });
+  const catalogQuery = useQuery(catalogOptions);
 
   // Keeps the draft tracking the server without clobbering typing in
   // progress. The gate used to supply an idle state that was always safe to
@@ -270,11 +256,7 @@ export function OrderLinesEditor({
       // Not on the backoffice on-behalf-of path (customerCompanyId given):
       // staff may still edit a customer's order after the shop closes.
       if (!customerCompanyId) {
-        const day = await queryClient.fetchQuery({
-          queryKey: OPEN_TRADING_DAY_QUERY_KEY,
-          queryFn: fetchOpenTradingDay,
-          staleTime: 0,
-        });
+        const day = await queryClient.fetchQuery({ ...tradingDayQueries.open(), staleTime: 0 });
         if (day?.id !== tradingDayId || day.phase !== "shop_open") {
           throw new ShopClosedError();
         }

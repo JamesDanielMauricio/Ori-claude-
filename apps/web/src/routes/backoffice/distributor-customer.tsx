@@ -20,37 +20,15 @@ import { useToast } from "@/components/ui/toast";
 import { errorMessage } from "@/lib/error-message";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { nudgeWhatsAppDispatch } from "@/lib/nudge-whatsapp-dispatch";
+import {
+  oversightQueries,
+  type DailyOrderForDay,
+  type OrderLineRow,
+  type OversightCustomer,
+} from "@/lib/queries/oversight";
 import { createClient } from "@/lib/supabase/client";
 import { useTradingDayView } from "@/lib/trading-day-view";
 import { formatVarietyName } from "@/lib/variety-label";
-
-interface CustomerCompany {
-  id: string;
-  name: string;
-  status: "active" | "inactive";
-}
-
-interface OrderLineRow {
-  id: string;
-  pallets_ordered: string;
-  comment: string | null;
-  product_varieties: {
-    id: string;
-    name: string;
-    sizes: string | null;
-    family_id: string;
-    product_families: { id: string; name: string; image_url: string | null } | null;
-  } | null;
-}
-
-interface DailyOrderForDay {
-  id: string;
-  customer_company_id: string;
-  status: "open" | "submitted";
-  submitted_at: string | null;
-  reminder_sent_at: string | null;
-  daily_order_products: OrderLineRow[];
-}
 
 // Same grouping as distributor-grower.tsx's groupPickLines, mirrored onto
 // order lines.
@@ -108,7 +86,7 @@ export default function DistributorAsCustomerPage() {
 
   const [search, setSearch] = useState("");
   const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(() => new Set());
-  const [ordersDialogCustomer, setOrdersDialogCustomer] = useState<CustomerCompany | null>(null);
+  const [ordersDialogCustomer, setOrdersDialogCustomer] = useState<OversightCustomer | null>(null);
 
   // The day this oversight screen shows: the live open day by default, or —
   // once the sidebar's picker has pinned one (lib/trading-day-view.tsx) —
@@ -117,40 +95,12 @@ export default function DistributorAsCustomerPage() {
   const dayView = useTradingDayView();
   const dayId = dayView.day?.id;
 
-  const customersQuery = useQuery({
-    queryKey: ["customer-oversight", "customers"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("companies")
-        .select("id, name, status")
-        .eq("type", "customer")
-        .eq("status", "active")
-        .order("name");
-      if (error) throw error;
-      return data as CustomerCompany[];
-    },
-  });
+  const customersQuery = useQuery(oversightQueries.activeCustomers());
 
-  // Orders AND their lines in one request — see distributor-grower.tsx's
-  // identical comment on picksForDayQuery for why: embedding
-  // daily_order_products here is what makes expanding any row free.
-  const ordersForDayQueryKey = ["customer-oversight", "orders-for-day", dayId] as const;
+  // Orders AND their lines in one request (see oversightQueries.ordersForDay).
+  const ordersForDayQueryKey = oversightQueries.ordersForDay(dayId).queryKey;
 
-  const ordersForDayQuery = useQuery({
-    queryKey: ordersForDayQueryKey,
-    enabled: !!dayId,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("daily_orders")
-        .select(
-          `id, customer_company_id, status, submitted_at, reminder_sent_at,
-           daily_order_products(id, pallets_ordered, comment, product_varieties(id, name, sizes, family_id, product_families(id, name, image_url)))`,
-        )
-        .eq("trading_day_id", dayId!);
-      if (error) throw error;
-      return data as unknown as DailyOrderForDay[];
-    },
-  });
+  const ordersForDayQuery = useQuery(oversightQueries.ordersForDay(dayId));
 
   const orderByCustomerId = useMemo(() => {
     const map = new Map<string, DailyOrderForDay>();
@@ -359,7 +309,7 @@ export default function DistributorAsCustomerPage() {
         onClose={() => setOrdersDialogCustomer(null)}
         onSubmitted={() => {
           void queryClient.invalidateQueries({
-            queryKey: ["customer-oversight", "orders-for-day", dayId],
+            queryKey: oversightQueries.ordersForDay(dayId).queryKey,
           });
           setOrdersDialogCustomer(null);
         }}

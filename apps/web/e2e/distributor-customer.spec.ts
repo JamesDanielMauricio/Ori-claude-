@@ -72,7 +72,7 @@ test.describe("Backoffice — Customer Order Status", () => {
       .single();
     await adminClient
       .from("daily_pick_products")
-      .update({ pallets_picked: "10" })
+      .update({ pallets_picked: 10 })
       .eq("daily_pick_id", pickRow.data!.id)
       .eq("product_variety_id", grower.varietyId);
 
@@ -234,7 +234,7 @@ test.describe("Backoffice — Customer Order Status", () => {
       .single();
     await adminClient
       .from("daily_pick_products")
-      .update({ pallets_picked: "10" })
+      .update({ pallets_picked: 10 })
       .eq("daily_pick_id", pickRow.data!.id)
       .eq("product_variety_id", grower.varietyId);
 

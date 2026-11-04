@@ -8,21 +8,7 @@ import { Icon } from "@/components/ui/icon";
 import { PageHeader } from "@/components/ui/page-header";
 import { QueryError } from "@/components/ui/query-error";
 import { Skeleton } from "@/components/ui/skeleton";
-import { createClient } from "@/lib/supabase/client";
-
-type TradingDayPhase = "initiated" | "shop_open" | "shop_closed" | "closed";
-
-interface DayRow {
-  id: string;
-  trade_date: string;
-  phase: TradingDayPhase;
-  // Reverse relation (trading_days -> daily_orders): RLS
-  // (daily_orders_select_own) already scopes this to the caller's own
-  // company, and the table's `unique(trading_day_id, customer_company_id)`
-  // means there is at most one entry here — an array only because that's
-  // how PostgREST shapes a one-to-many embed.
-  daily_orders: Array<{ id: string; status: "open" | "submitted"; submitted_at: string | null }>;
-}
+import { customerQueries, type CustomerHistoryDay } from "@/lib/queries/customer";
 
 // The list badge collapses order status + trading-day phase into one of
 // four states a customer actually cares about: no order was ever placed
@@ -33,7 +19,7 @@ interface DayRow {
 // trading day" convention).
 type BadgeKind = "none" | "new" | "sent" | "closed";
 
-function badgeFor(row: DayRow): BadgeKind {
+function badgeFor(row: CustomerHistoryDay): BadgeKind {
   const order = row.daily_orders[0];
   if (!order) return "none";
   if (row.phase === "closed") return "closed";
@@ -74,10 +60,6 @@ function shortDateLabel(isoDate: string): string {
   return SHORT_DATE_FORMAT.format(new Date(isoDate));
 }
 
-// Days per "הצג עוד" batch — same paging as the grower's pick history
-// (routes/grower/history.tsx explains why the list isn't loaded whole).
-const PAGE_SIZE = 60;
-
 // Read-only order history (PRD: customer-home/order-history.md) — every
 // trading day, newest first, not just the ones this company has an order
 // for. Querying FROM trading_days and embedding daily_orders (rather than
@@ -97,33 +79,16 @@ const PAGE_SIZE = 60;
 // order.tsx's `orderId` search param). A row with no order navigates via
 // `tradingDayId` instead, straight to an empty-state view.
 export default function CustomerOrderHistoryPage() {
-  const supabase = createClient();
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
 
-  const daysQuery = useInfiniteQuery({
-    queryKey: ["customer", "order-history"],
-    initialPageParam: 0,
-    queryFn: async ({ pageParam }) => {
-      const { data, error } = await supabase
-        .from("trading_days")
-        .select("id, trade_date, phase, daily_orders(id, status, submitted_at)")
-        .order("trade_date", { ascending: false })
-        // Unique tie-breaker so same-date rows keep one position across pages.
-        .order("id")
-        .range(pageParam, pageParam + PAGE_SIZE - 1);
-      if (error) throw error;
-      return data as unknown as DayRow[];
-    },
-    getNextPageParam: (lastPage, allPages) =>
-      lastPage.length < PAGE_SIZE ? undefined : allPages.length * PAGE_SIZE,
-  });
+  const daysQuery = useInfiniteQuery(customerQueries.orderHistory());
 
   // First copy of each day only — a day started between two clicks shifts
   // the pages by one (see routes/grower/history.tsx).
   const sortedDays = useMemo(() => {
     const seen = new Set<string>();
-    const rows: DayRow[] = [];
+    const rows: CustomerHistoryDay[] = [];
     for (const row of daysQuery.data?.pages.flat() ?? []) {
       if (seen.has(row.id)) continue;
       seen.add(row.id);

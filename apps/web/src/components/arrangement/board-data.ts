@@ -10,6 +10,8 @@
 // Kept out of the route component and free of dependencies so the arithmetic
 // — which is what a distributor is trusting when they decide whether a
 // customer's order is covered — can be read and tested on its own.
+import type { Json } from "@ori/db/supabase-types";
+
 import { formatVarietyName } from "@/lib/variety-label";
 
 /** A variety as it arrives embedded on a pick or order line. */
@@ -28,11 +30,11 @@ export interface BoardPickLine {
   id: string;
   daily_pick_id: string;
   product_variety_id: string;
-  pallets_picked: string;
+  pallets_picked: number;
   /** Carried forward from the grower's most recent prior line for this
    * variety (bootstrap_grower_pick / sync_grower_picks, migration 0050) —
    * counts as real supply alongside pallets_picked, not a separate pool. */
-  leftover_pallets: string;
+  leftover_pallets: number;
   comment: string | null;
   product_varieties: BoardVarietyRow | null;
 }
@@ -66,7 +68,7 @@ export interface BoardOrderLine {
   id: string;
   daily_order_id: string;
   product_variety_id: string;
-  pallets_ordered: string;
+  pallets_ordered: number;
   comment: string | null;
   product_varieties: BoardVarietyRow | null;
 }
@@ -75,8 +77,20 @@ export interface BoardOrderLine {
 export interface BoardSubmissionLog {
   id: string;
   created_at: string;
-  snapshot: Array<{ productVarietyId: string; palletsOrdered: number; comment: string | null }>;
+  /**
+   * A `jsonb` column, so the database can't describe its shape — it is
+   * whatever submit_order wrote (migration 0017): a SubmissionSnapshot. Read
+   * through `previousSnapshot` in buildBoard, the one place that asserts it.
+   */
+  snapshot: Json;
 }
+
+/** The cart submit_order records in order_submission_logs.snapshot. */
+type SubmissionSnapshot = Array<{
+  productVarietyId: string;
+  palletsOrdered: number;
+  comment: string | null;
+}>;
 
 export interface BoardOrder {
   id: string;
@@ -87,8 +101,11 @@ export interface BoardOrder {
    * Newest first is NOT assumed — `buildBoard` sorts these itself — because
    * PostgREST doesn't order embedded rows for us and trusting the wire order
    * would silently break the moment that stopped being true.
+   *
+   * Optional because only the arrangement board's query selects it — the
+   * matrix screen builds the same orders and has no use for it.
    */
-  order_submission_logs: BoardSubmissionLog[];
+  order_submission_logs?: BoardSubmissionLog[];
 }
 
 export interface BoardRecord {
@@ -239,12 +256,11 @@ export interface Board {
   customers: CustomerDemand[];
 }
 
-// PostgREST hands numerics back as bare JSON numbers on some columns and as
-// strings on others depending on how each was declared; every read here goes
-// through this rather than trusting either. A missing or unparseable value
-// becomes 0 — on a board whose whole job is totalling pallets, a NaN
-// propagating into a column heading is worse than treating an absent line as
-// contributing nothing.
+// PostgREST sends `numeric` columns as bare JSON numbers (the wire types
+// above say so), but every pallet count read here still goes through this: a
+// missing or unparseable value becomes 0 — on a board whose whole job is
+// totalling pallets, a NaN propagating into a column heading is worse than
+// treating an absent line as contributing nothing.
 export function parsePallets(value: string | number | null | undefined): number {
   const parsed = Number(value ?? 0);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -478,9 +494,12 @@ export function buildBoard({
       // pallets_ordered column above is already that same value, read
       // straight from the table submit_order just wrote instead of assumed
       // to match a log row.
-      const previousSnapshot = [...order.order_submission_logs].sort(
+      //
+      // The snapshot is jsonb (see BoardSubmissionLog), so its shape is
+      // asserted here rather than known: submit_order is its only writer.
+      const previousSnapshot = [...(order.order_submission_logs ?? [])].sort(
         (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-      )[1]?.snapshot;
+      )[1]?.snapshot as SubmissionSnapshot | undefined;
       const previousOrderedByVariety = new Map(
         (previousSnapshot ?? []).map((line) => [line.productVarietyId, num(line.palletsOrdered)]),
       );

@@ -27,45 +27,18 @@ import { QueryError } from "@/components/ui/query-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { errorMessage } from "@/lib/error-message";
-import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { nudgeWhatsAppDispatch } from "@/lib/nudge-whatsapp-dispatch";
+import {
+  growerOversightKeys,
+  oversightQueries,
+  type DailyPickForDay,
+  type OversightGrower,
+  type PickLineRow,
+} from "@/lib/queries/oversight";
 import { createClient } from "@/lib/supabase/client";
 import { useTradingDayView } from "@/lib/trading-day-view";
 import { formatVarietyName } from "@/lib/variety-label";
-
-interface GrowerCompany {
-  id: string;
-  name: string;
-  status: "active" | "inactive";
-  default_pickup_time: string | null;
-  whatsapp_group_id: string | null;
-  transporter_company_id: string | null;
-}
-
-interface PickLineRow {
-  id: string;
-  pallets_picked: string;
-  leftover_pallets: string;
-  comment: string | null;
-  product_varieties: {
-    id: string;
-    name: string;
-    sizes: string | null;
-    family_id: string;
-    product_families: { id: string; name: string; image_url: string | null } | null;
-  } | null;
-}
-
-interface DailyPickForDay {
-  id: string;
-  grower_company_id: string;
-  status: "draft" | "submitted" | "closed";
-  submitted_at: string | null;
-  pickup_time: string | null;
-  reminder_sent_at: string | null;
-  daily_pick_products: PickLineRow[];
-}
 
 // One pick's lines, grouped by family — the read view an expanded row shows.
 // Same shape the arrangement board's grower column derives (board-data.ts's
@@ -139,7 +112,7 @@ export default function DistributorAsGrowerPage() {
     status: string;
     growerName: string;
   } | null>(null);
-  const [productsDialogGrower, setProductsDialogGrower] = useState<GrowerCompany | null>(null);
+  const [productsDialogGrower, setProductsDialogGrower] = useState<OversightGrower | null>(null);
   const [productDraft, setProductDraft] = useState<Set<string>>(new Set());
   const [savingProducts, setSavingProducts] = useState(false);
 
@@ -151,40 +124,12 @@ export default function DistributorAsGrowerPage() {
   const dayView = useTradingDayView();
   const dayId = dayView.day?.id;
 
-  const growersQuery = useQuery({
-    queryKey: ["grower-oversight", "growers"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("companies")
-        .select("id, name, status, default_pickup_time, whatsapp_group_id, transporter_company_id")
-        .eq("type", "grower")
-        .eq("status", "active")
-        .order("name");
-      if (error) throw error;
-      return data as GrowerCompany[];
-    },
-  });
+  const growersQuery = useQuery(oversightQueries.activeGrowers());
 
-  // Picks AND their lines in one request — embedding daily_pick_products
-  // rather than a second query per expanded row, so opening a tenth grower's
-  // chevron costs nothing this screen hasn't already paid for the first.
-  const picksForDayQueryKey = ["grower-oversight", "picks-for-day", dayId] as const;
+  // Picks AND their lines in one request (see oversightQueries.picksForDay).
+  const picksForDayQueryKey = oversightQueries.picksForDay(dayId).queryKey;
 
-  const picksForDayQuery = useQuery({
-    queryKey: picksForDayQueryKey,
-    enabled: !!dayId,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("daily_picks")
-        .select(
-          `id, grower_company_id, status, submitted_at, pickup_time, reminder_sent_at,
-           daily_pick_products(id, pallets_picked, leftover_pallets, comment, product_varieties(id, name, sizes, family_id, product_families(id, name, image_url)))`,
-        )
-        .eq("trading_day_id", dayId!);
-      if (error) throw error;
-      return data as unknown as DailyPickForDay[];
-    },
-  });
+  const picksForDayQuery = useQuery(oversightQueries.picksForDay(dayId));
 
   const pickByGrowerId = useMemo(() => {
     const map = new Map<string, DailyPickForDay>();
@@ -192,27 +137,7 @@ export default function DistributorAsGrowerPage() {
     return map;
   }, [picksForDayQuery.data]);
 
-  const catalogQuery = useQuery({
-    queryKey: ["grower-oversight", "product-catalog"],
-    queryFn: async () => {
-      // Paged for the same reason as growers-with-products below: the
-      // catalog (~900 varieties) is near PostgREST's 1,000-row cap, which
-      // truncates silently. `id` breaks ties between same-named varieties.
-      return fetchAllRows<{
-        id: string;
-        name: string;
-        sizes: string | null;
-        product_families: { name: string } | null;
-      }>((from, to) =>
-        supabase
-          .from("product_varieties")
-          .select("id, name, sizes, product_families(name)")
-          .order("name")
-          .order("id")
-          .range(from, to),
-      );
-    },
-  });
+  const catalogQuery = useQuery(oversightQueries.productCatalog());
 
   // Which growers have an in-season list at all — separate from
   // `pickByGrowerId` because "no pick yet today" is ambiguous on its own: it
@@ -223,37 +148,11 @@ export default function DistributorAsGrowerPage() {
   // Only the second case needs a distributor to act somewhere other than the
   // pick editor, so it gets called out on the row instead of looking
   // identical to the first until the pencil is clicked.
-  //
-  // Paged (fetchAllRows) because grower_products is the table that outgrows
-  // PostgREST's 1000-row cap, which truncates silently: past it, the growers
-  // whose rows fell off the end would read as "no products in season" here.
-  const growersWithProductsQuery = useQuery({
-    queryKey: ["grower-oversight", "growers-with-products"],
-    queryFn: async () => {
-      const rows = await fetchAllRows<{ company_id: string }>((from, to) =>
-        supabase
-          .from("grower_products")
-          .select("company_id")
-          .order("company_id")
-          .order("product_variety_id")
-          .range(from, to),
-      );
-      return new Set(rows.map((row) => row.company_id));
-    },
-  });
+  const growersWithProductsQuery = useQuery(oversightQueries.growersWithProducts());
 
-  const growerProductsQuery = useQuery({
-    queryKey: ["grower-oversight", "grower-products", productsDialogGrower?.id ?? null],
-    enabled: !!productsDialogGrower,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("grower_products")
-        .select("product_variety_id")
-        .eq("company_id", productsDialogGrower!.id);
-      if (error) throw error;
-      return data.map((row) => row.product_variety_id);
-    },
-  });
+  const growerProductsQuery = useQuery(
+    oversightQueries.growerProducts(productsDialogGrower?.id ?? null),
+  );
 
   // Seeded once per opening, from THIS grower's own list — and until that
   // has happened the dialog shows no checkboxes and "שמור" stays disabled.
@@ -339,12 +238,12 @@ export default function DistributorAsGrowerPage() {
     onSuccess: () => {
       showToast("רשימת המוצרים עודכנה.", "success");
       setProductsDialogGrower(null);
-      void queryClient.invalidateQueries({ queryKey: ["grower-oversight", "grower-products"] });
+      void queryClient.invalidateQueries({ queryKey: growerOversightKeys.growerProductsAll });
       void queryClient.invalidateQueries({
-        queryKey: ["grower-oversight", "growers-with-products"],
+        queryKey: oversightQueries.growersWithProducts().queryKey,
       });
       void queryClient.invalidateQueries({
-        queryKey: ["grower-oversight", "picks-for-day", dayId],
+        queryKey: oversightQueries.picksForDay(dayId).queryKey,
       });
     },
     onError: (error: { message?: string }) => {
@@ -570,7 +469,7 @@ export default function DistributorAsGrowerPage() {
         onClose={() => setPickDialogGrower(null)}
         onSaved={() => {
           void queryClient.invalidateQueries({
-            queryKey: ["grower-oversight", "picks-for-day", dayId],
+            queryKey: oversightQueries.picksForDay(dayId).queryKey,
           });
           setPickDialogGrower(null);
         }}

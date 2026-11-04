@@ -4,22 +4,8 @@ import { useNavigate } from "react-router-dom";
 
 import { Dialog } from "@/components/ui/dialog";
 import { Icon } from "@/components/ui/icon";
+import { alertsQueries, type AlertRow } from "@/lib/queries/alerts";
 import { createClient } from "@/lib/supabase/client";
-
-interface AlertRow {
-  id: string;
-  read: boolean;
-  display_record_id: string | null;
-  number_for_display: number | null;
-  full_name_for_display: string | null;
-  created_at: string;
-  alert_types: {
-    main_text: string;
-    second_line_of_text: string | null;
-    app_screen: string;
-    url_parameter: string | null;
-  } | null;
-}
 
 // The in-app half of the notification pipeline: RLS (packages/db/migrations/0023)
 // already restricts every row this query can ever see to the signed-in
@@ -34,29 +20,7 @@ export function AlertsBell() {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
 
-  const alertsQuery = useQuery({
-    queryKey: ["alerts", "own"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("alerts")
-        .select(
-          "id, read, display_record_id, number_for_display, full_name_for_display, created_at, alert_types(main_text, second_line_of_text, app_screen, url_parameter)",
-        )
-        .order("created_at", { ascending: false })
-        .limit(50);
-      if (error) throw error;
-      return data as unknown as AlertRow[];
-    },
-    // Alerts are typically created by a backoffice action (e.g. Close
-    // Arrangement) the signed-in user isn't the one triggering. They show up
-    // within about a second (lib/live-updates.ts), replacing the 60-second
-    // poll this query used to run on every open device, used or not.
-    //
-    // The live updates re-run this query whenever ANY alert changes, not only
-    // this user's own — the message says a table changed, never whose row.
-    // That costs one small read; what comes back is still only this user's
-    // alerts, because RLS decides that, not the message.
-  });
+  const alertsQuery = useQuery(alertsQueries.own());
 
   const unreadCount = alertsQuery.data?.filter((alert) => !alert.read).length ?? 0;
 
@@ -64,7 +28,7 @@ export function AlertsBell() {
     if (!alert.read) {
       const { error } = await supabase.from("alerts").update({ read: true }).eq("id", alert.id);
       if (!error) {
-        void queryClient.invalidateQueries({ queryKey: ["alerts", "own"] });
+        void queryClient.invalidateQueries({ queryKey: alertsQueries.own().queryKey });
       }
     }
     setOpen(false);
@@ -94,7 +58,7 @@ export function AlertsBell() {
     if (unreadIds.length === 0) return;
     const { error } = await supabase.from("alerts").update({ read: true }).in("id", unreadIds);
     if (!error) {
-      void queryClient.invalidateQueries({ queryKey: ["alerts", "own"] });
+      void queryClient.invalidateQueries({ queryKey: alertsQueries.own().queryKey });
     }
   }
 

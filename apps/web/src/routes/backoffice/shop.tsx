@@ -5,8 +5,9 @@ import { Icon, type IconName } from "@/components/ui/icon";
 import { PageHeader } from "@/components/ui/page-header";
 import { QueryError } from "@/components/ui/query-error";
 import { Skeleton } from "@/components/ui/skeleton";
-import { createClient } from "@/lib/supabase/client";
-import { useTradingDayView, type TradingDayPhase } from "@/lib/trading-day-view";
+import { shopQueries } from "@/lib/queries/shop";
+import type { TradingDayPhase } from "@/lib/queries/trading-day";
+import { useTradingDayView } from "@/lib/trading-day-view";
 
 // Read-only status view of the day shown in the sidebar's picker — the live
 // trading day by default, or a specific past date once pinned there
@@ -26,40 +27,15 @@ const PHASE_LABEL: Record<TradingDayPhase | "none", string> = {
 };
 
 export default function ShopManagementPage() {
-  const supabase = createClient();
   const dayView = useTradingDayView();
   const day = dayView.day;
 
-  const metricsQuery = useQuery({
-    queryKey: ["shop-panel", "metrics", day?.id],
-    enabled: !!day,
-    queryFn: async () => {
-      const [picks, orders] = await Promise.all([
-        supabase.from("daily_picks").select("status").eq("trading_day_id", day!.id),
-        supabase.from("daily_orders").select("status").eq("trading_day_id", day!.id),
-      ]);
-      if (picks.error) throw picks.error;
-      if (orders.error) throw orders.error;
-      return {
-        picksTotal: picks.data.length,
-        picksSubmitted: picks.data.filter((row) => row.status !== "draft").length,
-        ordersTotal: orders.data.length,
-        ordersSubmitted: orders.data.filter((row) => row.status === "submitted").length,
-      };
-    },
-  });
+  const metricsQuery = useQuery(shopQueries.metrics(day?.id));
 
-  const settingsQuery = useQuery({
-    queryKey: ["shop-panel", "notification-settings"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("notification_settings")
-        .select("whatsapp_enabled, close_arrangement_customer_whatsapp_enabled")
-        .single();
-      if (error) throw error;
-      return data;
-    },
-  });
+  // The same entry the sidebar's settings dialog reads and writes (see
+  // shopQueries.notificationSettings), so a switch flipped there shows here
+  // too.
+  const settingsQuery = useQuery(shopQueries.notificationSettings());
 
   const tradeDateLabel = day
     ? new Intl.DateTimeFormat("he-IL", { dateStyle: "full" }).format(new Date(day.trade_date))

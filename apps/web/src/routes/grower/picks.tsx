@@ -10,18 +10,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { QueryError } from "@/components/ui/query-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/lib/auth-context";
-import { createClient } from "@/lib/supabase/client";
-
-interface OpenTradingDay {
-  id: string;
-  trade_date: string;
-}
-
-interface DailyPickSummary {
-  id: string;
-  status: "draft" | "submitted" | "closed";
-  submitted_at: string | null;
-}
+import { growerQueries, type DailyPickSummary } from "@/lib/queries/grower";
 
 // Exported for history.tsx: both screens show the same `daily_picks.status`
 // enum and must agree on what it's called and colored, so it's one lookup
@@ -73,39 +62,14 @@ export default function GrowerDailyPicksPage() {
 
 function TodayPickView() {
   const { profile } = useAuth();
-  const supabase = createClient();
   const queryClient = useQueryClient();
 
-  const openDayQuery = useQuery({
-    queryKey: ["grower", "open-trading-day"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("trading_days")
-        .select("id, trade_date")
-        .neq("phase", "closed")
-        .maybeSingle();
-      if (error) throw error;
-      return data as OpenTradingDay | null;
-    },
-  });
+  const openDayQuery = useQuery(growerQueries.openTradingDay());
 
   const companyId = profile?.companyId;
   const openDayId = openDayQuery.data?.id;
 
-  const pickQuery = useQuery({
-    queryKey: ["grower", "daily-pick", openDayId, companyId],
-    enabled: !!openDayId && !!companyId,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("daily_picks")
-        .select("id, status, submitted_at")
-        .eq("trading_day_id", openDayId!)
-        .eq("grower_company_id", companyId!)
-        .maybeSingle();
-      if (error) throw error;
-      return data as DailyPickSummary | null;
-    },
-  });
+  const pickQuery = useQuery(growerQueries.dailyPick(openDayId, companyId));
 
   const tradeDateLabel = useMemo(() => {
     if (!openDayQuery.data) return "";
@@ -166,33 +130,18 @@ function TodayPickView() {
       pick={pickQuery.data}
       tradeDateLabel={tradeDateLabel}
       onSaved={() =>
-        void queryClient.invalidateQueries({ queryKey: ["grower", "daily-pick", openDayId, companyId] })
+        void queryClient.invalidateQueries({
+          queryKey: growerQueries.dailyPick(openDayId, companyId).queryKey,
+        })
       }
     />
   );
 }
 
-interface SpecificPick extends DailyPickSummary {
-  trading_day_id: string;
-  trading_days: { trade_date: string } | null;
-}
-
 function SpecificPickView({ pickId }: { pickId: string }) {
-  const supabase = createClient();
   const queryClient = useQueryClient();
 
-  const pickQuery = useQuery({
-    queryKey: ["grower", "pick-by-id", pickId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("daily_picks")
-        .select("id, status, submitted_at, trading_day_id, trading_days(trade_date)")
-        .eq("id", pickId)
-        .maybeSingle();
-      if (error) throw error;
-      return data as unknown as SpecificPick | null;
-    },
-  });
+  const pickQuery = useQuery(growerQueries.pickById(pickId));
 
   if (pickQuery.isLoading) {
     return (
@@ -226,14 +175,11 @@ function SpecificPickView({ pickId }: { pickId: string }) {
     <PickDetail
       pick={pick}
       tradeDateLabel={tradeDateLabel}
-      onSaved={() => void queryClient.invalidateQueries({ queryKey: ["grower", "pick-by-id", pickId] })}
+      onSaved={() =>
+        void queryClient.invalidateQueries({ queryKey: growerQueries.pickById(pickId).queryKey })
+      }
     />
   );
-}
-
-interface EmptyTradingDay {
-  trade_date: string;
-  phase: "initiated" | "shop_open" | "shop_closed" | "closed";
 }
 
 // Reached from a history row for a trading day this grower has no
@@ -244,20 +190,7 @@ interface EmptyTradingDay {
 // phase carry nothing another company couldn't already infer from the
 // business-day flow.
 function NoPickView({ tradingDayId }: { tradingDayId: string }) {
-  const supabase = createClient();
-
-  const dayQuery = useQuery({
-    queryKey: ["grower", "trading-day-by-id", tradingDayId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("trading_days")
-        .select("trade_date, phase")
-        .eq("id", tradingDayId)
-        .maybeSingle();
-      if (error) throw error;
-      return data as EmptyTradingDay | null;
-    },
-  });
+  const dayQuery = useQuery(growerQueries.tradingDayById(tradingDayId));
 
   if (dayQuery.isLoading) {
     return (

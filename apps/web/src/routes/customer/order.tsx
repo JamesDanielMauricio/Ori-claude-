@@ -10,8 +10,13 @@ import { Icon } from "@/components/ui/icon";
 import { PageHeader } from "@/components/ui/page-header";
 import { QueryError } from "@/components/ui/query-error";
 import { Skeleton } from "@/components/ui/skeleton";
-import { createClient } from "@/lib/supabase/client";
-import { useOpenTradingDay, type TradingDayPhase } from "@/lib/trading-day-view";
+import {
+  customerQueries,
+  type HistoricalLineRow,
+  type SpecificOrder,
+} from "@/lib/queries/customer";
+import type { TradingDayPhase } from "@/lib/queries/trading-day";
+import { useOpenTradingDay } from "@/lib/trading-day-view";
 
 // Customer-facing catalog browsing + order placement (PRD:
 // place-edit-today-s-order.md, order-form.md). The actual catalog/draft/
@@ -138,29 +143,8 @@ function TodayOrderView() {
   );
 }
 
-interface SpecificOrder {
-  id: string;
-  status: "open" | "submitted";
-  submitted_at: string | null;
-  trading_day_id: string;
-  trading_days: { trade_date: string; phase: TradingDayPhase } | null;
-}
-
 function SpecificOrderView({ orderId }: { orderId: string }) {
-  const supabase = createClient();
-
-  const orderQuery = useQuery({
-    queryKey: ["customer", "order-by-id", orderId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("daily_orders")
-        .select("id, status, submitted_at, trading_day_id, trading_days(trade_date, phase)")
-        .eq("id", orderId)
-        .maybeSingle();
-      if (error) throw error;
-      return data as unknown as SpecificOrder | null;
-    },
-  });
+  const orderQuery = useQuery(customerQueries.orderById(orderId));
 
   if (orderQuery.isLoading) {
     return (
@@ -226,11 +210,6 @@ function SpecificOrderView({ orderId }: { orderId: string }) {
   return <ClosedOrderView order={order} />;
 }
 
-interface EmptyTradingDay {
-  trade_date: string;
-  phase: TradingDayPhase;
-}
-
 // Reached from a history row for a trading day this company has no
 // daily_orders row for (see CustomerOrderPage's comment on `tradingDayId`).
 // There's no order id to fetch lines by, so this only needs the day's own
@@ -238,20 +217,7 @@ interface EmptyTradingDay {
 // (true)`), not company-scoped, which is fine: a trade date and phase carry
 // nothing another company couldn't already infer from the open-shop flow.
 function NoOrderView({ tradingDayId }: { tradingDayId: string }) {
-  const supabase = createClient();
-
-  const dayQuery = useQuery({
-    queryKey: ["customer", "trading-day-by-id", tradingDayId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("trading_days")
-        .select("trade_date, phase")
-        .eq("id", tradingDayId)
-        .maybeSingle();
-      if (error) throw error;
-      return data as EmptyTradingDay | null;
-    },
-  });
+  const dayQuery = useQuery(customerQueries.tradingDayById(tradingDayId));
 
   if (dayQuery.isLoading) {
     return (
@@ -293,20 +259,6 @@ function NoOrderView({ tradingDayId }: { tradingDayId: string }) {
   );
 }
 
-// One row of get_customer_order_lines (migration 0056) — the order's lines
-// with their names, read through that function because customers can't read
-// product_varieties (and its prices) directly.
-interface HistoricalLineRow {
-  id: string;
-  pallets_ordered: number;
-  comment: string | null;
-  variety_name: string;
-  family_id: string;
-  family_name: string;
-  image_url: string | null;
-  pack_type: "pallets" | "crates" | null;
-}
-
 const STATUS_LABEL: Record<SpecificOrder["status"], string> = {
   open: "טיוטה",
   submitted: "נשלחה",
@@ -346,18 +298,7 @@ function groupHistoricalLines(lines: HistoricalLineRow[]): OrderFamilyRow[] {
 // shown — daily_order_products never captured a per-line price snapshot,
 // so there's nothing historical to show even though the live editor has it.
 function ClosedOrderView({ order }: { order: SpecificOrder }) {
-  const supabase = createClient();
-
-  const linesQuery = useQuery({
-    queryKey: ["customer", "order-lines-readonly", order.id],
-    queryFn: async () => {
-      const { data, error } = await supabase.rpc("get_customer_order_lines", {
-        p_daily_order_id: order.id,
-      });
-      if (error) throw error;
-      return data as HistoricalLineRow[];
-    },
-  });
+  const linesQuery = useQuery(customerQueries.orderLines(order.id));
 
   const families = groupHistoricalLines(linesQuery.data ?? []);
 

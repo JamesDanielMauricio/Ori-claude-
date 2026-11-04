@@ -262,7 +262,7 @@ test.describe("Performance verification — measured against the source's docume
       .single();
     await adminClient
       .from("daily_pick_products")
-      .update({ pallets_picked: "10" })
+      .update({ pallets_picked: 10 })
       .eq("daily_pick_id", pickRow.data!.id)
       .eq("product_variety_id", grower.varietyId);
 

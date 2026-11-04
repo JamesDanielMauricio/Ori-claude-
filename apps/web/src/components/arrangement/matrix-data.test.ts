@@ -43,8 +43,8 @@ function pickLine(
   id: string,
   pickId: string,
   variety: typeof lemon,
-  pallets: string,
-  leftover = "0",
+  pallets: number,
+  leftover = 0,
 ) {
   return {
     id,
@@ -57,7 +57,7 @@ function pickLine(
   };
 }
 
-function orderLine(id: string, orderId: string, variety: typeof lemon, pallets: string) {
+function orderLine(id: string, orderId: string, variety: typeof lemon, pallets: number) {
   return {
     id,
     daily_order_id: orderId,
@@ -75,8 +75,8 @@ const picks: BoardPick[] = [
     status: "submitted",
     pickup_time: null,
     daily_pick_products: [
-      pickLine("line-a-lemon", "pick-a", lemon, "5"),
-      pickLine("line-a-lychee", "pick-a", lychee, "7"),
+      pickLine("line-a-lemon", "pick-a", lemon, 5),
+      pickLine("line-a-lychee", "pick-a", lychee, 7),
     ],
   },
   {
@@ -84,7 +84,7 @@ const picks: BoardPick[] = [
     grower_company_id: GROWER_B,
     status: "submitted",
     pickup_time: null,
-    daily_pick_products: [pickLine("line-b-lemon", "pick-b", lemon, "10")],
+    daily_pick_products: [pickLine("line-b-lemon", "pick-b", lemon, 10)],
   },
 ];
 
@@ -93,14 +93,14 @@ const orders: BoardOrder[] = [
     id: "order-1",
     customer_company_id: CUSTOMER_1,
     status: "submitted",
-    daily_order_products: [orderLine("ol-1-lychee", "order-1", lychee, "5")],
+    daily_order_products: [orderLine("ol-1-lychee", "order-1", lychee, 5)],
     order_submission_logs: [],
   },
   {
     id: "order-2",
     customer_company_id: CUSTOMER_2,
     status: "submitted",
-    daily_order_products: [orderLine("ol-2-lemon", "order-2", lemon, "3")],
+    daily_order_products: [orderLine("ol-2-lemon", "order-2", lemon, 3)],
     order_submission_logs: [],
   },
 ];
@@ -229,7 +229,7 @@ describe("buildMatrix grower rows", () => {
         {
           ...picks[0]!,
           daily_pick_products: [
-            pickLine("line-a-lemon", "pick-a", lemon, "5", "4"),
+            pickLine("line-a-lemon", "pick-a", lemon, 5, 4),
             picks[0]!.daily_pick_products[1]!,
           ],
         },

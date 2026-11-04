@@ -7,23 +7,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { errorMessage } from "@/lib/error-message";
 import { useAuth } from "@/lib/auth-context";
+import { shopQueries, type NotificationSettingsRow } from "@/lib/queries/shop";
 import { createClient } from "@/lib/supabase/client";
 
 import { ThemeToggle } from "./theme-toggle";
-
-interface NotificationSettingsRow {
-  whatsapp_enabled: boolean;
-  notify_growers_on_business_day_open: boolean;
-  shop_open_whatsapp_enabled: boolean;
-  close_arrangement_customer_whatsapp_enabled: boolean;
-  close_arrangement_grower_whatsapp_enabled: boolean;
-}
-
-// Shared with the Shop screen's read-only summary cards (routes/backoffice/
-// shop.tsx, queryKey ["shop-panel", "notification-settings"]) so a toggle
-// flipped here is reflected there too, without those cards needing their own
-// mutation or knowing this button exists.
-const SETTINGS_QUERY_KEY = ["shop-panel", "notification-settings"] as const;
 
 // The one settings entry point in every shell's sidebar footer — reachable
 // from backoffice, grower, and customer alike, since appearance (below) is
@@ -45,20 +32,11 @@ export function SettingsTogglesButton() {
 
   const isBackoffice = profile?.role === "backoffice";
 
-  const settingsQuery = useQuery({
-    queryKey: SETTINGS_QUERY_KEY,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("notification_settings")
-        .select(
-          "whatsapp_enabled, notify_growers_on_business_day_open, shop_open_whatsapp_enabled, close_arrangement_customer_whatsapp_enabled, close_arrangement_grower_whatsapp_enabled",
-        )
-        .single();
-      if (error) throw error;
-      return data as NotificationSettingsRow;
-    },
-    enabled: isBackoffice,
-  });
+  // Shared with the Shop screen's read-only summary cards (see
+  // shopQueries.notificationSettings) so a toggle flipped here is reflected
+  // there too, without those cards needing their own mutation or knowing
+  // this button exists.
+  const settingsQuery = useQuery({ ...shopQueries.notificationSettings(), enabled: isBackoffice });
 
   // One mutation, keyed by which column it patches — RLS already restricts
   // both select and update on this table to the backoffice role (migration
@@ -69,7 +47,7 @@ export function SettingsTogglesButton() {
       if (error) throw error;
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: SETTINGS_QUERY_KEY });
+      void queryClient.invalidateQueries({ queryKey: shopQueries.notificationSettings().queryKey });
     },
     onError: (error: { message?: string }) => {
       showToast(`עדכון ההגדרה נכשל: ${errorMessage(error)}`, "error");

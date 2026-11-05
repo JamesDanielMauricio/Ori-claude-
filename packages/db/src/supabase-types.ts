@@ -534,6 +534,7 @@ export type Database = {
           leftover_pallets: number;
           created_at: string;
           updated_at: string;
+          end_of_day_leftover_pallets: number | null;
         };
         Insert: {
           id?: string;
@@ -544,6 +545,7 @@ export type Database = {
           leftover_pallets?: number;
           created_at?: string;
           updated_at?: string;
+          end_of_day_leftover_pallets?: number | null;
         };
         Update: {
           id?: string;
@@ -552,6 +554,7 @@ export type Database = {
           pallets_picked?: number;
           comment?: string | null;
           leftover_pallets?: number;
+          end_of_day_leftover_pallets?: number | null;
           created_at?: string;
           updated_at?: string;
         };

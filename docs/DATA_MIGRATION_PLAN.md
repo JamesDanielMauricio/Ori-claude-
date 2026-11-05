@@ -130,7 +130,7 @@ are read in **Asia/Jerusalem** (6 April is `2026-04-05T22:00:00Z` in Bubble).
 | `dailyarrangement` | `trading_days` + `daily_arrangements` | One trading day per arrangement — "initiate business day" is what creates one. A second Open arrangement for the same date created within a minute of another is a double-click and is merged into it. |
 | `dailyshop` | `daily_shops` | Attached to the trading day with its date; when a date was initiated more than once, to the latest of those days initiated at or before the shop was created. A day keeps its first shop. Unset `can see prices?` → false (Bubble reads unset as no). |
 | `dailypick` | `daily_picks` | Same date rule. On a closed day the status is closed. `pickup_time` = Bubble's `Pickup Time` once submitted or closed, null while draft (migration 0043). |
-| `dailypickproduct` | `daily_pick_products` | Only the **real** record of each real/temp pair: the grower screen edits the temp copy and copies it to the real one on confirm. Bubble's `leftovers` is the carry-in from the grower's previous day, and "the number of leftover pallets after the day ended" is picked + carry-in − arranged — the same two meanings `leftover_pallets` has since migration 0050 — so an open day gets the carry-in and a closed day the end-of-day figure. |
+| `dailypickproduct` | `daily_pick_products` | Only the **real** record of each real/temp pair: the grower screen edits the temp copy and copies it to the real one on confirm. Bubble's `leftovers` is the carry-in from the grower's previous day, and "the number of leftover pallets after the day ended" is picked + carry-in − arranged. Since migration 0070 they go to two columns: the carry-in to `leftover_pallets` on every day, the end-of-day figure to `end_of_day_leftover_pallets` on closed days (empty on the open day). |
 | `dailyorder` | `daily_orders` | Day from the order's own shop link, otherwise the date rule. |
 | `dailyorderproducts` | `daily_order_products` | `No. of pallets (new)` → `pallets_ordered`. Rows with no order are Bubble's blank per-variety placeholders and are skipped. A 0-pallet line is kept only if an arrangement record points at it — the only kind of zero line this schema has. |
 | `dailyarrangementrecords` | `arrangement_records` | Day from its pick line. Its order line is the customer's line for that variety on that day (§ 3c). If the customer never ordered the variety, a 0-pallet line is created — what `arrange_to_customer` (0040) does — and if the customer had no order that day at all, an empty open order. Records with no quantity are skipped. |
@@ -205,7 +205,7 @@ Inside the transaction, before anything commits — a failure rolls the whole im
 
 - every table's row count equals the plan, and `auth.users` holds exactly the imported logins;
 - exactly one trading day is not closed — the live day;
-- the totals of `pallets_picked`, `leftover_pallets`, `pallets_ordered` and `quantity_pallets` equal
+- the totals of `pallets_picked`, `leftover_pallets`, `end_of_day_leftover_pallets`, `pallets_ordered` and `quantity_pallets` equal
   the plan, which catches a value lost in conversion that a row count cannot;
 - ten cross-table checks, each of which must find zero rows: an arrangement record's customer is its
   order line's customer; its pick line, order line and arrangement are on one trading day; its pick

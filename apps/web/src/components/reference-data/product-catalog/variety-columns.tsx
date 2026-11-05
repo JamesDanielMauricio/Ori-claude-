@@ -1,14 +1,12 @@
 import type { UseQueryResult } from "@tanstack/react-query";
 import type { Dispatch, SetStateAction } from "react";
 
-import { CellChipList, CellPopover } from "@/components/reference-data/cell-popover";
 import { checkboxClassName, inputClassName } from "@/components/reference-data/form-field";
 import type { RecordTableColumn } from "@/components/reference-data/record-table";
-import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import { blockWheel } from "@/lib/integer-input";
-import type { PalletCap, ProductFamily, ProductVariety } from "@/lib/queries/reference-data";
+import type { ProductFamily, ProductVariety } from "@/lib/queries/reference-data";
 
 import {
   CREATED_AT_FORMAT,
@@ -24,13 +22,7 @@ export interface VarietyColumnsContext {
   setForm: Dispatch<SetStateAction<FormState>>;
   familyById: ReadonlyMap<string, ProductFamily>;
   familiesQuery: UseQueryResult<ProductFamily[]>;
-  customersQuery: UseQueryResult<Array<{ id: string; name: string }>>;
-  capsQuery: UseQueryResult<Map<string, PalletCap[]>>;
-  customerNameById: ReadonlyMap<string, string>;
   openFamily: (familyId: string) => void;
-  addCap: () => void;
-  updateCap: (index: number, patch: Partial<PalletCap>) => void;
-  removeCap: (index: number) => void;
 }
 
 // The two family-level fields the flat table used to repeat on every
@@ -43,13 +35,7 @@ export function buildVarietyColumns({
   setForm,
   familyById,
   familiesQuery,
-  customersQuery,
-  capsQuery,
-  customerNameById,
   openFamily,
-  addCap,
-  updateCap,
-  removeCap,
 }: VarietyColumnsContext): RecordTableColumn<ProductVariety>[] {
   return [
     {
@@ -263,66 +249,11 @@ export function buildVarietyColumns({
         />
       ),
     },
-    {
-      key: "caps",
-      label: "תקרות ללקוח",
-      render: (row) => (
-        <CellChipList
-          items={(capsQuery.data?.get(row.id) ?? []).map(
-            (cap) =>
-              `${customerNameById.get(cap.customerCompanyId) ?? cap.customerCompanyId}: ${cap.palletCap}`,
-          )}
-          emptyLabel="אין תקרות"
-        />
-      ),
-      renderEdit: () => (
-        <CellPopover
-          label="תקרות משטחים ללקוח"
-          summary={`${form.customerPalletCaps.length} תקרות`}
-          panelClassName="w-[26rem]"
-        >
-          <div className="flex flex-col gap-2">
-            {form.customerPalletCaps.map((cap, index) => (
-              <div key={index} className="flex flex-wrap items-center gap-2">
-                <Select
-                  aria-label="לקוח"
-                  className="min-w-0 flex-1"
-                  value={cap.customerCompanyId}
-                  onChange={(next) => updateCap(index, { customerCompanyId: next })}
-                  options={
-                    customersQuery.data?.map((customer) => ({
-                      value: customer.id,
-                      label: customer.name,
-                    })) ?? []
-                  }
-                />
-                <input
-                  type="number"
-                  min={0}
-                  aria-label="תקרת משטחים"
-                  className={`${inputClassName} w-20`}
-                  value={cap.palletCap}
-                  onWheel={blockWheel}
-                  onChange={(event) => updateCap(index, { palletCap: Number(event.target.value) })}
-                />
-                <Button type="button" variant="ghost" size="sm" onClick={() => removeCap(index)}>
-                  הסר
-                </Button>
-              </div>
-            ))}
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={addCap}
-              disabled={!customersQuery.data?.length}
-            >
-              הוסף תקרה
-            </Button>
-          </div>
-        </CellPopover>
-      ),
-    },
+    // No "תקרות ללקוח" (per-customer caps) column: nothing ever enforced
+    // them, and the one per-customer limit is number_of_orders_per_customer
+    // above (James, 2026-11-05). Caps already stored are still loaded and
+    // sent back unchanged on save (see FormState.customerPalletCaps), because
+    // save_product replaces a product's caps with whatever it is sent.
     {
       key: "seasonal",
       label: "בעונה",

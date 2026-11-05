@@ -8,9 +8,7 @@ import {
   runCleanup,
 } from "@ori/domain/auth/testing";
 import {
-  createTestCustomerCompany,
   createTestProductFamily,
-  deleteTestCompany as deleteTestCompanyById,
   deleteTestProductFamily,
   deleteTestProductVariety,
   findProductFamilyIdByName,
@@ -72,12 +70,9 @@ test.describe("Backoffice — Products", () => {
     await runCleanup(cleanupFns);
   });
 
-  test("creates a product, then edits its price, overbooking buffer, seasonal flag, and per-customer cap", async ({
+  test("creates a product, then edits its price, overbooking buffer and seasonal flag", async ({
     page,
   }) => {
-    const capCustomer = await createTestCustomerCompany(`E2E Cap Customer ${randomUUID()}`);
-    cleanupFns.push(() => deleteTestCompanyById(capCustomer.id));
-
     const family = await createTestProductFamily();
     cleanupFns.push(() => deleteTestProductFamily(family.id));
     // Somewhere to move the variety to: moving between families is the one
@@ -125,22 +120,6 @@ test.describe("Backoffice — Products", () => {
     await editingRow(page).getByLabel("חריגת הזמנה מותרת (No Overbooking)").fill("3");
     await editingRow(page).getByLabel("זמין בעונה הנוכחית").click();
 
-    // The per-customer pallet caps are their own column, edited through
-    // that cell's popover (portaled out of the table's scroll container).
-    // This is the only screen that writes product_customer_caps, and this
-    // is the only test that covers that half of `save_product`.
-    await editingRow(page).getByRole("button", { name: "תקרות משטחים ללקוח" }).click();
-    const capsPanel = page.getByRole("dialog", { name: "תקרות משטחים ללקוח" });
-    await capsPanel.getByRole("button", { name: "הוסף תקרה" }).click();
-    await chooseOption(
-      capsPanel.getByRole("combobox", { name: "לקוח", exact: true }),
-      capCustomer.name,
-    );
-    await capsPanel.getByLabel("תקרת משטחים").fill("4");
-    // Closes the popover only — the row keeps its other unsaved edits (see
-    // the same step in reference-data-growers.spec.ts).
-    await page.keyboard.press("Escape");
-
     await editingRow(page).getByRole("button", { name: "שמור" }).click();
 
     // The "בעונה"/"לא בעונה" column is its own cell now, not a badge glued
@@ -148,9 +127,6 @@ test.describe("Backoffice — Products", () => {
     // product in a seeded catalog, so it has to be read off THIS product's
     // own row.
     await expect(productRow).toContainText("לא בעונה", { timeout: 15000 });
-    // …and the cap is readable straight off the row too, with nothing
-    // expanded or opened.
-    await expect(productRow).toContainText(`${capCustomer.name}: 4`);
 
     // The family move was saved, not just drawn: after a reload the variety
     // still sits under the other family. The row leaving edit mode is the

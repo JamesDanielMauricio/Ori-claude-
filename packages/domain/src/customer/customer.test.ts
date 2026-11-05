@@ -20,7 +20,7 @@ import {
 } from "@ori/domain/lifecycle-engine/testing";
 import { createTestProductVariety, deleteTestProductVariety } from "@ori/domain/reference-data/testing";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -888,5 +888,91 @@ describe("customer ordering module", () => {
 
     const line = await getOrderProductLine((await getDailyOrderForCustomer(day.id, customer.companyId))!.id, grower.varietyId);
     expect(line).toMatchObject({ palletsOrdered: "4.00" });
+  }, 30000);
+
+  it("submit_order (migration 0068): a saved line stays allowed after stock drops below it — re-sending or lowering it is accepted, raising it is refused", async () => {
+    const grower = await createTestGrowerWithProduct();
+    cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
+    const day = await createOpenTestDay(admin.userId);
+    const pick = await pickLine(day.id, grower.companyId, grower.varietyId, 10);
+
+    const customer = await createTestCustomer(day.id);
+    const client = await signedInCustomer(customer.companyId);
+    cleanupFns.push(() => deleteTestTradingDay(day.id));
+
+    const send = (palletsOrdered: number, comment: string | null = null) =>
+      client.rpc(
+        "submit_order",
+        toSubmitOrderRpcArgs({
+          tradingDayId: day.id,
+          lines: [{ productVarietyId: grower.varietyId, palletsOrdered, comment }],
+        }),
+      );
+    const savedLine = async () =>
+      getOrderProductLine((await getDailyOrderForCustomer(day.id, customer.companyId))!.id, grower.varietyId);
+
+    expect((await send(6)).error).toBeNull();
+
+    // The grower lowers the pick to 4 — this customer's limit is now 4, below
+    // the 6 they already have.
+    await db
+      .update(dailyPickProducts)
+      .set({ palletsPicked: "4" })
+      .where(and(eq(dailyPickProducts.dailyPickId, pick.id), eq(dailyPickProducts.productVarietyId, grower.varietyId)));
+
+    // Sent again with only the comment changed: accepted, the 6 kept.
+    expect((await send(6, "שינוי בהערה")).error).toBeNull();
+    expect(await savedLine()).toMatchObject({ palletsOrdered: "6.00", comment: "שינוי בהערה" });
+
+    // Lowered, still above the limit: accepted.
+    expect((await send(5)).error).toBeNull();
+    expect(await savedLine()).toMatchObject({ palletsOrdered: "5.00" });
+
+    // Raised again: refused, and the line stays as it was.
+    const raised = await send(6);
+    expect(raised.error?.code).toBe(CUSTOMER_ERROR_CODES.INVALID_INPUT);
+    expect(await savedLine()).toMatchObject({ palletsOrdered: "5.00" });
+  }, 30000);
+
+  it("submit_order (migration 0068): two customers sending at the same moment are checked one after the other, so they can't both take the last pallets", async () => {
+    const grower = await createTestGrowerWithProduct();
+    cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
+    const day = await createOpenTestDay(admin.userId);
+    await pickLine(day.id, grower.companyId, grower.varietyId, 10);
+
+    const customerA = await createTestCustomer(day.id);
+    const profileA = await createTestProfile({ companyId: customerA.companyId, role: "customer" });
+    cleanupFns.push(() => deleteTestUser(profileA.userId));
+    const customerB = await createTestCustomer(day.id);
+    const clientB = await signedInCustomer(customerB.companyId);
+    cleanupFns.push(() => deleteTestTradingDay(day.id));
+
+    const sevenPallets = [{ productVarietyId: grower.varietyId, palletsOrdered: 7, comment: null }];
+
+    // Customer A's send runs on a connection of its own and is held open,
+    // not yet committed, while customer B sends — the moment two real sends
+    // share. `.then` starts B's request now rather than when it is awaited.
+    // B goes through the API (its own server connections), so it is not held
+    // up by this file's one-connection `db` client being inside A's transaction.
+    let sendB: PromiseLike<{ error: { code: string } | null }> | undefined;
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`select set_config('request.jwt.claim.sub', ${profileA.userId}, true)`);
+      await tx.execute(sql`set local role authenticated`);
+      await tx.execute(
+        sql`select public.submit_order(${day.id}::uuid, ${JSON.stringify(sevenPallets)}::jsonb, null)`,
+      );
+      sendB = clientB
+        .rpc("submit_order", toSubmitOrderRpcArgs({ tradingDayId: day.id, lines: sevenPallets }))
+        .then((result) => result);
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    });
+
+    // B's send waited for A's to commit, then saw it: only 3 were left.
+    const resultB = await sendB!;
+    expect(resultB.error?.code).toBe(CUSTOMER_ERROR_CODES.INVALID_INPUT);
+    const orderA = await getDailyOrderForCustomer(day.id, customerA.companyId);
+    const orderB = await getDailyOrderForCustomer(day.id, customerB.companyId);
+    expect(await getOrderProductLine(orderA!.id, grower.varietyId)).toMatchObject({ palletsOrdered: "7.00" });
+    expect(await getOrderProductLine(orderB!.id, grower.varietyId)).toBeNull();
   }, 30000);
 });

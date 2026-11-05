@@ -590,11 +590,11 @@ export function buildBoard({
  *
  * A line with something arranged against it is listed whatever its supply.
  * That cannot happen while the day is open (a pick can't be lowered below what
- * is arranged), but it does once the day has closed: close_out_pick_leftovers
- * rewrites leftover to picked + carried-in - arranged, so a line served wholly
- * from carried-in stock ends the day at 0 picked and 0 leftover with pallets
- * arranged against it — and the sidebar's date picker can show that day. Hiding
- * the line would hide real arrangements.
+ * is arranged), but days imported from Bubble include lines with more arranged
+ * than picked + carried in, and the sidebar's date picker can show them.
+ * Hiding such a line would hide real arrangements. (leftover_pallets is what
+ * was carried in on every day, closed ones included — migration 0070 moved the
+ * end-of-day figure to its own column.)
  */
 export function hasSupply(line: GrowerPickLine): boolean {
   return line.picked + line.leftover > 0 || line.allocated > 0;

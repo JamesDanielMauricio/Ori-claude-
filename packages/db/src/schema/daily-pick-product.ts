@@ -24,13 +24,14 @@ import { productVarieties } from "./product-variety";
 // that has since gone bad without touching today's pick. It counts as real
 // arrangeable supply: `pallets_picked + leftover_pallets` is the allocation
 // ceiling (`check_arrangement_allocation`) and the arrangement-edit floor
-// both fields are jointly held to (`save_pick_lines`). At day-close,
-// `close_out_pick_leftovers` folds it forward again as
-// `pallets_picked + leftover_pallets - arranged`, becoming the next day's
-// carry-in. This reverses an earlier design call (0014/R6) that collapsed
-// the PRD's two leftover fields into this one column on the premise they
-// were "never two genuinely different values" — they now are; don't
-// collapse them back.
+// both fields are jointly held to (`save_pick_lines`). `leftover_pallets`
+// means "carried in" on every day, open or closed. At day-close,
+// `close_out_pick_leftovers` writes `pallets_picked + leftover_pallets -
+// arranged` into `end_of_day_leftover_pallets` (null while the day is open),
+// which becomes the next day's carry-in. These are Bubble's two leftover
+// fields (`Leftovers`, `Leftover Pallets After Day End`): one column used to
+// hold both, overwritten at close (0050), until 0070 split them again —
+// don't collapse them back.
 export const dailyPickProducts = pgTable(
   "daily_pick_products",
   {
@@ -44,6 +45,7 @@ export const dailyPickProducts = pgTable(
     palletsPicked: numeric("pallets_picked", { precision: 10, scale: 2 }).notNull().default("0"),
     comment: text("comment"),
     leftoverPallets: numeric("leftover_pallets", { precision: 10, scale: 2 }).notNull().default("0"),
+    endOfDayLeftoverPallets: numeric("end_of_day_leftover_pallets", { precision: 10, scale: 2 }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

@@ -470,6 +470,34 @@
       "when": 1789851600000,
       "tag": "0066_rls-helpers-once-per-query",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1789938000000,
+      "tag": "0067_keep-picked-lines-when-variety-leaves-season",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1790024400000,
+      "tag": "0068_submit-order-saved-lines-and-one-at-a-time",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1790110800000,
+      "tag": "0069_stock-quantities-are-numbers",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1790197200000,
+      "tag": "0070_keep-carried-in-and-end-of-day-leftover-apart",
+      "breakpoints": true
     }
   ]
 }

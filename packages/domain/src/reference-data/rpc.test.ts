@@ -3,6 +3,15 @@ import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createTestCompany, createTestProfile, deleteTestCompany, deleteTestUser, runCleanup, signInTestUser } from "../auth/test-helpers";
+import { toBootstrapGrowerPickRpcArgs, toSavePickLinesRpcArgs } from "../grower/schemas";
+import { addGrowerProduct, deleteTestProductVariety as deleteTestGrowerVariety } from "../grower/test-helpers";
+import {
+  createTestGrowerWithProduct,
+  createTestTradingDay,
+  deleteTestGrowerWithProduct,
+  deleteTestTradingDay,
+  getPickProductLine,
+} from "../lifecycle-engine/test-helpers";
 
 import {
   PRODUCT_VERSION_CONFLICT_ERROR_CODE,
@@ -301,6 +310,70 @@ describe("reference-data save functions", () => {
     for (const row of rowsAfterDelete ?? []) {
       expect(row.contact_person_id).toBeNull();
     }
+  });
+
+  it("save_grower: taking a variety out of season keeps today's pick line once pallets are picked on it (0067)", async () => {
+    const company = await createTestCompany();
+    cleanupFns.push(() => deleteTestCompany(company.id));
+    const admin = await createTestProfile({ companyId: company.id, role: "backoffice" });
+    cleanupFns.push(() => deleteTestUser(admin.userId));
+    const client = await signInTestUser(admin.email, admin.password);
+
+    // Two in-season varieties: the grower picks one and leaves the other blank.
+    const grower = await createTestGrowerWithProduct();
+    cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
+    const blankVariety = await addGrowerProduct(grower.companyId);
+    cleanupFns.push(() => deleteTestGrowerVariety(blankVariety));
+
+    // sync_grower_picks (which save_grower calls) only acts on the open day.
+    // Pushed last so it is torn down first: its pick lines reference the
+    // varieties above, with no cascade back the other way.
+    const day = await createTestTradingDay({ initiatedByUserId: admin.userId, phase: "initiated" });
+    cleanupFns.push(() => deleteTestTradingDay(day.id));
+
+    const bootstrap = await client.rpc(
+      "bootstrap_grower_pick",
+      toBootstrapGrowerPickRpcArgs({ tradingDayId: day.id, growerCompanyId: grower.companyId }),
+    );
+    expect(bootstrap.error).toBeNull();
+    const pickId = bootstrap.data!.id;
+    const pickedLine = await getPickProductLine(pickId, grower.varietyId);
+    const blankLine = await getPickProductLine(pickId, blankVariety.varietyId);
+
+    const picked = await client.rpc(
+      "save_pick_lines",
+      toSavePickLinesRpcArgs({
+        dailyPickId: pickId,
+        lines: [
+          { dailyPickProductId: pickedLine!.id, palletsPicked: 20, leftoverPallets: 0, comment: null },
+          { dailyPickProductId: blankLine!.id, palletsPicked: 0, leftoverPallets: 0, comment: null },
+        ],
+      }),
+    );
+    expect(picked.error).toBeNull();
+
+    // The distributor unticks both varieties on the Growers screen.
+    const saved = await client.rpc(
+      "save_grower",
+      toSaveGrowerRpcArgs({
+        id: grower.companyId,
+        name: grower.companyName,
+        status: "active",
+        defaultPickupTime: null,
+        whatsappGroupId: null,
+        productVarietyIds: [],
+        transporterCompanyId: null,
+        contactPersonId: null,
+      }),
+    );
+    expect(saved.error).toBeNull();
+
+    // The 20 picked pallets are still there; only the blank line is gone.
+    expect(await getPickProductLine(pickId, grower.varietyId)).toMatchObject({
+      id: pickedLine!.id,
+      palletsPicked: "20.00",
+    });
+    expect(await getPickProductLine(pickId, blankVariety.varietyId)).toBeNull();
   });
 
   it("save_product: rejects a non-backoffice caller with a clear error, not a silent no-op", async () => {

@@ -284,8 +284,17 @@ describe("grower picking module", () => {
     expect(closeOut.error).toBeNull();
     expect(closeOut.data).toBe(1);
 
+    // Since 0070 the end-of-day figure has its own column; what was carried
+    // in (nothing, here) stays as it was.
     const afterClose = await getPickProductLine(pickId, grower.varietyId);
-    expect(afterClose).toMatchObject({ leftoverPallets: "4.00" });
+    expect(afterClose).toMatchObject({ endOfDayLeftoverPallets: "4.00", leftoverPallets: "0.00" });
+
+    // Closing out again adds nothing up a second time.
+    await backoffice.rpc("close_out_pick_leftovers", toCloseOutPickLeftoversRpcArgs({ tradingDayId: day.id }));
+    expect(await getPickProductLine(pickId, grower.varietyId)).toMatchObject({
+      endOfDayLeftoverPallets: "4.00",
+      leftoverPallets: "0.00",
+    });
   }, 30000);
 
   it("close_out_pick_leftovers treats an unarranged line as fully leftover", async () => {
@@ -315,7 +324,7 @@ describe("grower picking module", () => {
     expect(closeOut.error).toBeNull();
 
     const afterClose = await getPickProductLine(pickId, grower.varietyId);
-    expect(afterClose).toMatchObject({ leftoverPallets: "8.00" });
+    expect(afterClose).toMatchObject({ endOfDayLeftoverPallets: "8.00", leftoverPallets: "0.00" });
   }, 30000);
 
   it("bootstrap_grower_pick carries leftover_pallets forward from the grower's most recent prior line for the same variety (migration 0050)", async () => {
@@ -324,7 +333,7 @@ describe("grower picking module", () => {
     cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
 
     // Day 1: picked 10, 5 arranged to a customer, day closes — leaves
-    // leftover_pallets = 5 on day 1's own line.
+    // end_of_day_leftover_pallets = 5 on day 1's own line (migration 0070).
     const day1 = await createTestTradingDay({
       initiatedByUserId: adminId,
       tradeDate: "2020-01-01",
@@ -367,7 +376,8 @@ describe("grower picking module", () => {
     );
     expect(closeOut.error).toBeNull();
     expect(await getPickProductLine(pick1Id, grower.varietyId)).toMatchObject({
-      leftoverPallets: "5.00",
+      endOfDayLeftoverPallets: "5.00",
+      leftoverPallets: "0.00",
     });
 
     // Day 2, a later trading day for the same grower — pushed after the

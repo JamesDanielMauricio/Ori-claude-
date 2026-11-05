@@ -311,6 +311,11 @@ it; a line with real data survives a mid-day re-run even if its product just lef
 than being silently cascade-deleted. See `packages/domain/src/grower/grower.test.ts`'s prune-guard
 test, which drives exactly this scenario (an untouched line, a picked-but-unarranged line, and an
 arranged line, all removed from season in the same re-run) and asserts each is handled correctly.
+The Growers screen's save reaches the same prune by a second path — `save_grower` →
+`sync_grower_picks` (0037) — whose guard checked arrangements (and, from 0050, leftover) but never
+`pallets_picked`, so it still deleted a picked-but-unarranged line until
+`0067_keep-picked-lines-when-variety-leaves-season.sql` gave it the same `pallets_picked = 0`
+condition.
 
 The Cancel button on both screens is fixed by construction, not as a special case: pick-line
 edits (`pallets_picked`, `comment`) live in local component draft state

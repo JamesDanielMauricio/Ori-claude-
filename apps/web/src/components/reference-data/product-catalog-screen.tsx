@@ -11,7 +11,7 @@ import { Icon } from "@/components/ui/icon";
 import { PageHeader } from "@/components/ui/page-header";
 import { useToast } from "@/components/ui/toast";
 import { hasChanges } from "@/lib/has-changes";
-import type { PalletCap, ProductFamily, ProductVariety } from "@/lib/queries/reference-data";
+import type { ProductFamily, ProductVariety } from "@/lib/queries/reference-data";
 
 import { DeleteFamilyDialog, DeleteVarietyDialog } from "./product-catalog/catalog-dialogs";
 import {
@@ -120,8 +120,7 @@ export function ProductCatalogScreen({
     () => new Set<string>(),
   );
 
-  const { familiesQuery, familyById, productsQuery, customersQuery, customerNameById, capsQuery } =
-    useCatalogData();
+  const { familiesQuery, familyById, productsQuery, capsQuery } = useCatalogData();
 
   const editingRowId = editingId !== null && editingId !== NEW_ROW_ID ? editingId : null;
   const selected = productsQuery.data?.find((row) => row.id === editingRowId) ?? null;
@@ -260,34 +259,6 @@ export function ProductCatalogScreen({
     saveMutation.mutate(undefined, { onSettled: () => setSaving(false) });
   }
 
-  function addCap() {
-    const firstCustomer = customersQuery.data?.[0];
-    if (!firstCustomer) return;
-    setForm((current) => ({
-      ...current,
-      customerPalletCaps: [
-        ...current.customerPalletCaps,
-        { customerCompanyId: firstCustomer.id, palletCap: 0 },
-      ],
-    }));
-  }
-
-  function updateCap(index: number, patch: Partial<PalletCap>) {
-    setForm((current) => ({
-      ...current,
-      customerPalletCaps: current.customerPalletCaps.map((cap, i) =>
-        i === index ? { ...cap, ...patch } : cap,
-      ),
-    }));
-  }
-
-  function removeCap(index: number) {
-    setForm((current) => ({
-      ...current,
-      customerPalletCaps: current.customerPalletCaps.filter((_, i) => i !== index),
-    }));
-  }
-
   // The table's columns — the read and edit cell of every field (see
   // buildVarietyColumns).
   const columns = buildVarietyColumns({
@@ -295,13 +266,7 @@ export function ProductCatalogScreen({
     setForm,
     familyById,
     familiesQuery,
-    customersQuery,
-    capsQuery,
-    customerNameById,
     openFamily,
-    addCap,
-    updateCap,
-    removeCap,
   });
 
   // Creating a record is offered on the unfiltered catalog only. A brand-new

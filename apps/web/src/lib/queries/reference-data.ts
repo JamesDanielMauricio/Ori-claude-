@@ -195,24 +195,9 @@ export const referenceDataQueries = {
     });
   },
 
-  // Customer names for the per-customer pallet-cap column and picker.
-  customersForCaps() {
-    return queryOptions({
-      queryKey: ["reference-data", "customers-for-caps"],
-      queryFn: async (): Promise<Array<{ id: string; name: string }>> => {
-        const { data, error } = await createClient()
-          .from("companies")
-          .select("id, name")
-          .eq("type", "customer")
-          .order("name");
-        if (error) throw error;
-        return data;
-      },
-    });
-  },
-
   // Every variety's per-customer caps in ONE read, grouped client-side by
-  // variety — the caps are a column, so every visible row needs its own value.
+  // variety. No longer shown on the Products screen — read only so a save
+  // sends each variety's existing caps back unchanged.
   productCustomerCaps() {
     return queryOptions({
       queryKey: ["reference-data", "product-customer-caps-all"],

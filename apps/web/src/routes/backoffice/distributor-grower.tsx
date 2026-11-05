@@ -4,7 +4,7 @@ import {
   toBootstrapGrowerPickRpcArgs,
   toSendPickReminderRpcArgs,
 } from "@ori/domain/grower";
-import { saveGrowerInputSchema, toSaveGrowerRpcArgs } from "@ori/domain/reference-data";
+import { toSaveGrowerRpcArgs } from "@ori/domain/reference-data";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
@@ -27,6 +27,7 @@ import { QueryError } from "@/components/ui/query-error";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { errorMessage } from "@/lib/error-message";
+import { growerProductsSaveInput } from "@/lib/grower-products-save-input";
 import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { nudgeWhatsAppDispatch } from "@/lib/nudge-whatsapp-dispatch";
 import {
@@ -205,18 +206,7 @@ export default function DistributorAsGrowerPage() {
       if (!grower) throw new Error("no grower selected");
       // Backstop behind the disabled button — see `draftGrowerId` above.
       if (draftGrowerId !== grower.id) throw new Error("רשימת המוצרים של המגדל עדיין לא נטענה");
-      const saveInput = saveGrowerInputSchema.parse({
-        id: grower.id,
-        name: grower.name,
-        status: grower.status,
-        defaultPickupTime: grower.default_pickup_time,
-        whatsappGroupId: grower.whatsapp_group_id,
-        productVarietyIds: [...productDraft],
-        // Preserved as-is — this dialog only edits in-season products;
-        // save_grower replaces the whole row, so an unset value here
-        // would silently wipe out an existing transporter assignment.
-        transporterCompanyId: grower.transporter_company_id,
-      });
+      const saveInput = growerProductsSaveInput(grower, [...productDraft]);
       const { error: saveError } = await supabase.rpc(
         "save_grower",
         toSaveGrowerRpcArgs(saveInput),

@@ -313,7 +313,7 @@ const COLUMNS = {
   daily_arrangements: ["id", "trading_day_id", "status", "created_at", "closed_at"],
   daily_shops: ["id", "trading_day_id", "status", "can_see_prices", "opened_by", "created_at", "updated_at"],
   daily_picks: ["id", "trading_day_id", "grower_company_id", "status", "submitted_at", "pickup_time", "created_at", "updated_at"],
-  daily_pick_products: ["id", "daily_pick_id", "product_variety_id", "pallets_picked", "comment", "leftover_pallets", "created_at", "updated_at"],
+  daily_pick_products: ["id", "daily_pick_id", "product_variety_id", "pallets_picked", "comment", "leftover_pallets", "end_of_day_leftover_pallets", "created_at", "updated_at"],
   daily_orders: ["id", "trading_day_id", "customer_company_id", "status", "submitted_at", "created_at", "updated_at"],
   daily_order_products: ["id", "daily_order_id", "product_variety_id", "pallets_ordered", "comment", "created_at", "updated_at"],
   arrangement_records: [
@@ -1149,25 +1149,27 @@ function planTrading(data: ExportData, reference: ReferencePlan, loginIds: Map<s
 
     // Bubble's `leftovers` is the carry-in from the grower's previous day, and
     // "the number of leftover pallets after the day ended" is picked +
-    // carry-in − arranged — the same two meanings leftover_pallets has in
-    // migration 0050: the carry-in while a day is open, the end-of-day figure
-    // once it has closed.
+    // carry-in − arranged — the same two columns Ori keeps since migration
+    // 0070: leftover_pallets (carried in, on every day) and
+    // end_of_day_leftover_pallets (only once the day has closed).
     const carryIn = numberValue(line, "leftovers") ?? 0;
     const arranged = arrangedByBubblePickLine.get(line._id) ?? 0;
-    const endOfDay = numberValue(line, "the number of leftover pallets after the day ended");
-    let leftover: number;
-    if (pick.day.phase !== "closed") {
-      leftover = carryIn;
-    } else if (pick.day.bubbleClosed && endOfDay !== null) {
-      leftover = endOfDay;
-    } else {
-      leftover = palletsPicked + carryIn - arranged;
-      if (pick.day.bubbleClosed) {
-        report.note("warning", "dailypickproduct", line._id, "pick_line.no_end_of_day", `Closed day ${pick.day.tradeDate} has no end-of-day leftover — computed ${leftover}.`);
+    const bubbleEndOfDay = numberValue(line, "the number of leftover pallets after the day ended");
+    let endOfDay: number | null = null;
+    if (pick.day.phase === "closed") {
+      if (pick.day.bubbleClosed && bubbleEndOfDay !== null) {
+        endOfDay = bubbleEndOfDay;
+      } else {
+        endOfDay = palletsPicked + carryIn - arranged;
+        if (pick.day.bubbleClosed) {
+          report.note("warning", "dailypickproduct", line._id, "pick_line.no_end_of_day", `Closed day ${pick.day.tradeDate} has no end-of-day leftover — computed ${endOfDay}.`);
+        }
       }
     }
-    if (leftover < 0) {
-      report.note("warning", "dailypickproduct", line._id, "pick_line.negative_leftover", `Leftover ${leftover} on ${pick.day.tradeDate} is negative — imported as-is.`);
+    for (const [what, value] of [["Carried-in leftover", carryIn], ["End-of-day leftover", endOfDay]] as const) {
+      if (value !== null && value < 0) {
+        report.note("warning", "dailypickproduct", line._id, "pick_line.negative_leftover", `${what} ${value} on ${pick.day.tradeDate} is negative — imported as-is.`);
+      }
     }
     if (arranged > palletsPicked + carryIn) {
       report.note("warning", "dailypickproduct", line._id, "pick_line.over_arranged", `${arranged} pallets arranged but only ${palletsPicked} picked + ${carryIn} carried in on ${pick.day.tradeDate} — imported as in Bubble.`);
@@ -1180,7 +1182,8 @@ function planTrading(data: ExportData, reference: ReferencePlan, loginIds: Map<s
       product_variety_id: varietyId,
       pallets_picked: palletsPicked,
       comment: text(line, "Comment"),
-      leftover_pallets: leftover,
+      leftover_pallets: carryIn,
+      end_of_day_leftover_pallets: endOfDay,
       created_at: createdAt(line),
       updated_at: modifiedAt(line),
     });
@@ -1653,6 +1656,7 @@ async function verify(tx: Tx, reference: ReferencePlan, plan: TradingPlan) {
   const totals: Array<[string, string, number]> = [
     ["daily_pick_products", "pallets_picked", sumOf(plan.rows.daily_pick_products, "pallets_picked")],
     ["daily_pick_products", "leftover_pallets", sumOf(plan.rows.daily_pick_products, "leftover_pallets")],
+    ["daily_pick_products", "end_of_day_leftover_pallets", sumOf(plan.rows.daily_pick_products, "end_of_day_leftover_pallets")],
     ["daily_order_products", "pallets_ordered", sumOf(plan.rows.daily_order_products, "pallets_ordered")],
     ["arrangement_records", "quantity_pallets", sumOf(plan.rows.arrangement_records, "quantity_pallets")],
   ];

@@ -21,6 +21,9 @@ export interface OversightGrower {
   default_pickup_time: string | null;
   whatsapp_group_id: string | null;
   transporter_company_id: string | null;
+  // Not shown on this screen — loaded only so the products dialog can send it
+  // back unchanged (see lib/grower-products-save-input.ts).
+  contact_person_id: string | null;
 }
 
 export interface PickLineRow {
@@ -86,7 +89,7 @@ export const oversightQueries = {
         const { data, error } = await createClient()
           .from("companies")
           .select(
-            "id, name, status, default_pickup_time, whatsapp_group_id, transporter_company_id",
+            "id, name, status, default_pickup_time, whatsapp_group_id, transporter_company_id, contact_person_id",
           )
           .eq("type", "grower")
           .eq("status", "active")

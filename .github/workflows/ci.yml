@@ -2,7 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # TEMPORARY, on the merge branch only: lets CI check the staging merge
+    # before it reaches main (and so production). Never merged into main.
+    branches: [main, "merge/**"]
   pull_request:
 
 jobs:

@@ -767,13 +767,19 @@ describe("grower picking module", () => {
   // The arrangement board and matrix read a whole day as ONE trading_days row
   // with its picks, lines, orders and arrangement records nested inside
   // (apps/web/src/lib/queries/arrangement.ts). Supabase caps a response at
-  // max_rows = 1000 (supabase/config.toml, the same as the hosted project),
-  // and the question is whether that cap also cuts the NESTED lists — if it
-  // did, a big enough day would silently lose lines from the boards.
-  it("a day read as one row keeps every nested pick line past the 1,000-row cap — only top-level rows are capped", async () => {
+  // max_rows = 1000 (supabase/config.toml, the same as the hosted project) —
+  // and, as this test showed on its first CI run, that cap also cuts a
+  // NESTED list, silently. What it records: each nested list is cut on its
+  // own (two growers' lines are two lists), and a paged read gets the rest.
+  // The boards rely on exactly that: their one list that can outgrow the
+  // cap, the day's arrangement records, is re-read in pages when it comes
+  // back full (completeArrangementRecords in that file).
+  it("the 1,000-row cap cuts each nested list on its own, and a paged read gets every row", async () => {
     const { client: backoffice, userId: adminId } = await signedInBackoffice();
     const grower = await createTestGrowerWithProduct();
     cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
+    const secondGrower = await createTestGrowerWithProduct();
+    cleanupFns.push(() => deleteTestGrowerWithProduct(secondGrower));
 
     const [family] = await db.insert(productFamilies).values({ name: `משפחת בדיקה ${randomUUID()}` }).returning();
     const varieties = await db
@@ -789,21 +795,42 @@ describe("grower picking module", () => {
     const { day } = await createClosedTestDay(adminId);
     cleanupFns.push(() => deleteTestTradingDay(day.id));
 
+    // 1,100 lines on one grower's pick, 600 on another's.
     const [pick] = await db.insert(dailyPicks).values({ tradingDayId: day.id, growerCompanyId: grower.companyId }).returning();
     await db.insert(dailyPickProducts).values(varieties.map((v) => ({ dailyPickId: pick!.id, productVarietyId: v.id })));
+    const [secondPick] = await db
+      .insert(dailyPicks)
+      .values({ tradingDayId: day.id, growerCompanyId: secondGrower.companyId })
+      .returning();
+    await db
+      .insert(dailyPickProducts)
+      .values(varieties.slice(0, 600).map((v) => ({ dailyPickId: secondPick!.id, productVarietyId: v.id })));
 
-    // The control: the same lines read as top-level rows ARE cut to 1,000.
+    // Top-level rows are cut to 1,000.
     const flat = await backoffice.from("daily_pick_products").select("id").eq("daily_pick_id", pick!.id);
     expect(flat.error).toBeNull();
     expect(flat.data).toHaveLength(1000);
 
-    // The boards' shape: one day row, everything nested — all 1,100 arrive.
+    // Nested: the 1,100-line list is cut to 1,000 too, but the 600-line list
+    // beside it arrives whole — 1,600 nested rows in one response, so the
+    // cap is per list, not per response.
     const nested = await backoffice
       .from("trading_days")
       .select("id, daily_picks(id, daily_pick_products(id))")
       .eq("id", day.id)
       .maybeSingle();
     expect(nested.error).toBeNull();
-    expect(nested.data!.daily_picks[0]!.daily_pick_products).toHaveLength(1100);
+    const sizes = nested.data!.daily_picks.map((p) => p.daily_pick_products.length).sort((a, b) => a - b);
+    expect(sizes).toEqual([600, 1000]);
+
+    // A paged read gets the rest: rows 1,000-1,999 are the last 100.
+    const secondPage = await backoffice
+      .from("daily_pick_products")
+      .select("id")
+      .eq("daily_pick_id", pick!.id)
+      .order("id")
+      .range(1000, 1999);
+    expect(secondPage.error).toBeNull();
+    expect(secondPage.data).toHaveLength(100);
   }, 60000);
 });

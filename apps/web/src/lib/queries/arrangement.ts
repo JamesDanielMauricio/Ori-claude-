@@ -6,6 +6,7 @@ import type {
   BoardPick,
   BoardRecord,
 } from "@/components/arrangement/board-data";
+import { fetchAllRows, PAGE_SIZE } from "@/lib/fetch-all-rows";
 import { createClient } from "@/lib/supabase/client";
 
 // Server reads behind the two arrangement screens — the board
@@ -72,6 +73,40 @@ export interface ProductVarietyRow {
   version: number;
 }
 
+const RECORD_COLUMNS =
+  "id, daily_pick_product_id, daily_order_product_id, customer_company_id, quantity_pallets, price, price_type";
+
+// Supabase's 1,000-row cap (max_rows) cuts a NESTED list too, silently —
+// proven by the domain test "the 1,000-row cap cuts each nested list on its
+// own" (packages/domain/src/grower/grower.test.ts). Of the lists in the day
+// tree, the day's arrangement records are the one that can outgrow it — one
+// record per (grower's line → customer's line) assignment, across the whole
+// day — and a cut list would show assigned pallets as unassigned on both
+// boards. Every other list is one grower's or one customer's lines (at most
+// the ~900-variety catalog), one customer's submissions that day, or a
+// per-day count of companies.
+//
+// So: when the records come back exactly full, they may be cut, and they
+// are re-read on their own, in pages, by the arrangement's id. A normal day
+// is far below 1,000 and costs nothing extra; only a day that reaches the
+// cap pays one more round trip. The shape handed back is unchanged, so both
+// boards and their optimistic updates work as before.
+async function completeArrangementRecords(
+  day: ArrangementDay | null,
+): Promise<ArrangementDay | null> {
+  const arrangement = day?.daily_arrangements;
+  if (!day || !arrangement || arrangement.arrangement_records.length < PAGE_SIZE) return day;
+  const records = await fetchAllRows<BoardRecord>((from, to) =>
+    createClient()
+      .from("arrangement_records")
+      .select(RECORD_COLUMNS)
+      .eq("daily_arrangement_id", arrangement.id)
+      .order("id")
+      .range(from, to),
+  );
+  return { ...day, daily_arrangements: { ...arrangement, arrangement_records: records } };
+}
+
 export const arrangementQueries = {
   // Everything the board needs in ONE request, once the day is known. Every
   // table here hangs off that day by a foreign key, so PostgREST can
@@ -125,7 +160,7 @@ export const arrangementQueries = {
         if (error) throw error;
         // numeric columns come back as bare JSON numbers over PostgREST, not
         // decimal-preserving strings — see packages/db/src/supabase-types.ts.
-        return data;
+        return completeArrangementRecords(data);
       },
     });
   },
@@ -151,7 +186,7 @@ export const arrangementQueries = {
           .eq("id", dayId!)
           .maybeSingle();
         if (error) throw error;
-        return data;
+        return completeArrangementRecords(data);
       },
     });
   },

@@ -15,7 +15,7 @@
 // table's primary key. Pages are cut with OFFSET, and without an ORDER BY
 // Postgres may return rows in a different order on each request, so a row
 // can appear on two pages while another is skipped altogether.
-const PAGE_SIZE = 1000;
+export const PAGE_SIZE = 1000;
 
 export async function fetchAllRows<T>(
   page: (from: number, to: number) => PromiseLike<{

@@ -15,9 +15,11 @@ import { initTheme } from "./lib/theme";
 import "@fontsource-variable/assistant";
 import "./globals.css";
 
-// The browser entry point. Provider order matches what app/layout.tsx had:
-// Providers (React Query + tRPC + toasts) wraps AuthProvider, because the
-// auth context is consumed by components that also issue queries.
+// The browser entry point. AuthProvider wraps Providers (React Query + tRPC +
+// toasts), so that Providers can give every signed-in account a cache of its
+// own and start a fresh one when the account changes (lib/account-scope.ts).
+// AuthProvider itself reads nothing through React Query, so it needs nothing
+// from inside Providers.
 //
 // BrowserRouter sits outermost so that anything inside a provider can still
 // call useNavigate — the role guard in lib/require-role.tsx depends on this.
@@ -46,16 +48,16 @@ if (import.meta.env.PROD && "serviceWorker" in navigator) {
 createRoot(container).render(
   <StrictMode>
     <BrowserRouter>
-      <Providers>
-        <AuthProvider>
+      <AuthProvider>
+        <Providers>
           {/* Outside the routes: one of each for every screen. LiveUpdates
               sits inside AuthProvider because it listens only while someone
               is signed in (and only while the app is on screen). */}
           <LiveUpdates />
           <RefreshOnReturn />
           <AppRoutes />
-        </AuthProvider>
-      </Providers>
+        </Providers>
+      </AuthProvider>
     </BrowserRouter>
   </StrictMode>,
 );

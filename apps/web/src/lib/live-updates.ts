@@ -149,7 +149,7 @@ function syncChannel() {
   const queryClient = document.visibilityState === "hidden" ? undefined : signedInClient;
 
   if (queryClient && !channel) {
-    openChannel(queryClient);
+    openChannel();
   } else if (!queryClient && channel) {
     closing = createClient()
       .removeChannel(channel)
@@ -164,7 +164,7 @@ function syncChannel() {
   }
 }
 
-function openChannel(queryClient: QueryClient) {
+function openChannel() {
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
   let subscribedBefore = false;
 
@@ -180,6 +180,14 @@ function openChannel(queryClient: QueryClient) {
   }
 
   function refreshNow() {
+    // The cache of whoever is signed in NOW, not of whoever was when this
+    // channel opened. Each account has a cache of its own (lib/providers.tsx),
+    // and when one account replaces another without signing out in between
+    // (signing in as someone else in another tab) this channel stays open —
+    // refreshing the cache it started with would leave the new account's
+    // screens without live updates. Nobody signed in: nothing to refresh.
+    const queryClient = signedInClient;
+    if (!queryClient) return;
     // Not while this device is saving something. The optimistic updates
     // (lib/optimistic-mutation.ts) show the result of a click before the
     // server confirms it; a refresh started now, triggered by someone ELSE's

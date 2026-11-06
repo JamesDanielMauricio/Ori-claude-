@@ -22,9 +22,8 @@ export const tradingDays = pgTable("trading_days", {
   id: uuid("id").primaryKey().defaultRandom(),
   tradeDate: date("trade_date").notNull(),
   phase: tradingDayPhaseEnum("phase").notNull().default("initiated"),
-  initiatedBy: uuid("initiated_by")
-    .notNull()
-    .references(() => profiles.userId),
+  // Empty once that user has been deleted (migration 0073).
+  initiatedBy: uuid("initiated_by").references(() => profiles.userId, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

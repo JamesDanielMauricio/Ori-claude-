@@ -426,7 +426,7 @@ export default function UsersPage() {
       <Dialog open={deleteTargetId !== null} onClose={() => setDeleteTargetId(null)} title="מחיקת משתמש">
         <p className="mb-4 text-sm">
           האם למחוק את המשתמש &quot;{deleteTarget?.display_name}&quot;? פעולה זו אינה הפיכה — חשבון
-          ההתחברות יימחק לחלוטין.
+          ההתחברות יימחק לחלוטין. ההזמנות וההיסטוריה שלו נשארות, בלי השם שלו.
         </p>
         <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={() => setDeleteTargetId(null)}>

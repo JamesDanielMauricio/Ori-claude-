@@ -70,7 +70,22 @@ export function createGreenApiChannel(
         const response = await fetchImpl(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ chatId: `${to}@${isGroup ? "g" : "c"}.us`, message: body }),
+          // SECURITY: `linkPreview: false` ALLOWS a link in the message to be
+          // opened only by the person who taps it. Green API shows a preview
+          // card for every link unless told not to (its documented default),
+          // and building that card means fetching the link before anyone has
+          // tapped it. The one link this channel carries is a password-reset
+          // link (auth/whatsapp-recovery-delivery.ts), which Supabase honours
+          // exactly once — so the preview fetch would spend it, and the user's
+          // own tap would land on "link expired"; the fetch would also be the
+          // one handed the signed-in session. This PROTECTS AGAINST a reset
+          // link being used up, or used at all, by anything other than its
+          // recipient's tap.
+          body: JSON.stringify({
+            chatId: `${to}@${isGroup ? "g" : "c"}.us`,
+            message: body,
+            linkPreview: false,
+          }),
           signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
         });
         if (!response.ok) {

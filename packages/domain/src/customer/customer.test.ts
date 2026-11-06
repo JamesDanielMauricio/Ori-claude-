@@ -1,7 +1,16 @@
 import { randomUUID } from "node:crypto";
 
 import { db } from "@ori/db";
-import { dailyPickProducts, dailyPicks, notificationOutbox, orderSubmissionLogs, productVarieties } from "@ori/db/schema";
+import {
+  companies,
+  dailyPickProducts,
+  dailyPicks,
+  dailyShops,
+  notificationOutbox,
+  orderSubmissionLogs,
+  productVarieties,
+  profileBlockedProducts,
+} from "@ori/db/schema";
 import type { Database } from "@ori/db/supabase-types";
 import {
   createTestCompany,
@@ -106,7 +115,9 @@ describe("customer ordering module", () => {
   // day is what used to surface as an opaque profiles FK violation during
   // cleanup — pushing the day's cleanup after every sign-in that might
   // have called submit_order (not just after company creation) is the
-  // actual fix, not a timing workaround.
+  // actual fix, not a timing workaround. (Since migration 0073 that
+  // reference is ON DELETE SET NULL, so a user is deletable before their
+  // log row — the ordering is kept for the companies, which still need it.)
   async function createOpenTestDay(adminId: string) {
     const day = await createTestTradingDay({ initiatedByUserId: adminId, phase: "shop_open" });
     await createTestDailyShop({ tradingDayId: day.id, openedByUserId: adminId });
@@ -1009,5 +1020,115 @@ describe("customer ordering module", () => {
     // The distributor, arranging, may still adjust it on the customer's behalf.
     expect((await send(4, customer.companyId)).error).toBeNull();
     expect(await savedLine()).toMatchObject({ palletsOrdered: "4.00" });
+  }, 30000);
+
+  it("get_orderable_catalog_for_customer (migration 0072): a customer sees prices only when both the day's shop and their company allow it, and never through an older day's id", async () => {
+    const grower = await createTestGrowerWithProduct({ price: 9.9 });
+    cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
+    const day = await createOpenTestDay(admin.userId);
+    await pickLine(day.id, grower.companyId, grower.varietyId, 10);
+    // A closed earlier day whose shop showed prices, with the same product.
+    const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+    const earlier = await createTestTradingDay({ initiatedByUserId: admin.userId, phase: "closed", tradeDate: yesterday });
+    await createTestDailyShop({ tradingDayId: earlier.id, openedByUserId: admin.userId, canSeePrices: true });
+    await pickLine(earlier.id, grower.companyId, grower.varietyId, 10);
+
+    const customer = await createTestCustomer(day.id);
+    const client = await signedInCustomer(customer.companyId);
+    cleanupFns.push(() => deleteTestTradingDay(earlier.id));
+    cleanupFns.push(() => deleteTestTradingDay(day.id));
+
+    const setFlags = async (dayShowsPrices: boolean, companyMaySee: boolean | null) => {
+      await db.update(dailyShops).set({ canSeePrices: dayShowsPrices }).where(eq(dailyShops.tradingDayId, day.id));
+      await db.update(companies).set({ canSeeProductPrices: companyMaySee }).where(eq(companies.id, customer.companyId));
+    };
+    const priceSeen = async (viewer: SupabaseClient<Database>, tradingDayId: string, customerCompanyId?: string) => {
+      const { data, error } = await viewer.rpc(
+        "get_orderable_catalog_for_customer",
+        toOrderableCatalogRpcArgs({ tradingDayId, ...(customerCompanyId ? { customerCompanyId } : {}) }),
+      );
+      expect(error).toBeNull();
+      const row = data!.find((r) => r.variety_id === grower.varietyId);
+      expect(row).toBeDefined();
+      return row!.price;
+    };
+
+    // Bubble's rule: both switches on, or no price.
+    for (const [dayShowsPrices, companyMaySee] of [[true, true], [true, false], [false, true], [false, false]] as const) {
+      await setFlags(dayShowsPrices, companyMaySee);
+      expect(await priceSeen(client, day.id)).toBe(dayShowsPrices && companyMaySee ? 9.9 : null);
+    }
+    // A permission never set counts as "may not".
+    await setFlags(true, null);
+    expect(await priceSeen(client, day.id)).toBeNull();
+
+    // Today hides prices; the earlier day showed them. The prices returned
+    // are today's, so asking for the earlier day must not reveal them.
+    await setFlags(false, true);
+    expect(await priceSeen(client, earlier.id)).toBeNull();
+
+    // Staff are unchanged: the day's switch alone decides what they see.
+    await setFlags(true, false);
+    expect(await priceSeen(admin.client, day.id, customer.companyId)).toBe(9.9);
+  }, 30000);
+
+  it("get_orderable_catalog_for_customer and submit_order (migration 0072): a customer's blocked product is hidden from them and untouched by their saves; a colleague and staff are unaffected", async () => {
+    const open = await createTestGrowerWithProduct();
+    cleanupFns.push(() => deleteTestGrowerWithProduct(open));
+    const blocked = await createTestGrowerWithProduct();
+    cleanupFns.push(() => deleteTestGrowerWithProduct(blocked));
+    const day = await createOpenTestDay(admin.userId);
+    await pickLine(day.id, open.companyId, open.varietyId, 10);
+    await pickLine(day.id, blocked.companyId, blocked.varietyId, 10);
+
+    const customer = await createTestCustomer(day.id);
+    const blockedUser = await createTestProfile({ companyId: customer.companyId, role: "customer" });
+    cleanupFns.push(() => deleteTestUser(blockedUser.userId));
+    const blockedClient = await signInTestUser(blockedUser.email, blockedUser.password);
+    const colleague = await signedInCustomer(customer.companyId);
+    cleanupFns.push(() => deleteTestTradingDay(day.id));
+    await db.insert(profileBlockedProducts).values({ userId: blockedUser.userId, productVarietyId: blocked.varietyId });
+
+    const listed = async (viewer: SupabaseClient<Database>, customerCompanyId?: string) => {
+      const { data, error } = await viewer.rpc(
+        "get_orderable_catalog_for_customer",
+        toOrderableCatalogRpcArgs({ tradingDayId: day.id, ...(customerCompanyId ? { customerCompanyId } : {}) }),
+      );
+      expect(error).toBeNull();
+      return data!.map((r) => r.variety_id);
+    };
+    const send = (viewer: SupabaseClient<Database>, lines: Array<[string, number]>, customerCompanyId?: string) =>
+      viewer.rpc(
+        "submit_order",
+        toSubmitOrderRpcArgs({
+          tradingDayId: day.id,
+          lines: lines.map(([productVarietyId, palletsOrdered]) => ({ productVarietyId, palletsOrdered, comment: null })),
+          ...(customerCompanyId ? { customerCompanyId } : {}),
+        }),
+      );
+    const saved = async (varietyId: string) =>
+      (await getOrderProductLine((await getDailyOrderForCustomer(day.id, customer.companyId))!.id, varietyId))?.palletsOrdered ?? null;
+
+    // The colleague orders both products for the company.
+    expect((await send(colleague, [[open.varietyId, 1], [blocked.varietyId, 3]])).error).toBeNull();
+
+    // The blocked customer is not shown the blocked product, though it is in
+    // the company's order; the colleague and staff still see it.
+    expect(await listed(blockedClient)).toEqual([open.varietyId]);
+    expect(await listed(colleague)).toEqual(expect.arrayContaining([open.varietyId, blocked.varietyId]));
+    expect(await listed(admin.client, customer.companyId)).toEqual(expect.arrayContaining([open.varietyId, blocked.varietyId]));
+
+    // Their save sends what they see — and leaves the colleague's line alone.
+    expect((await send(blockedClient, [[open.varietyId, 2]])).error).toBeNull();
+    expect(await saved(open.varietyId)).toBe("2.00");
+    expect(await saved(blocked.varietyId)).toBe("3.00");
+
+    // Ordering the blocked product straight through the API is ignored.
+    expect((await send(blockedClient, [[open.varietyId, 2], [blocked.varietyId, 5]])).error).toBeNull();
+    expect(await saved(blocked.varietyId)).toBe("3.00");
+
+    // Staff are unaffected: leaving the line out of their save removes it.
+    expect((await send(admin.client, [[open.varietyId, 2]], customer.companyId)).error).toBeNull();
+    expect(await saved(blocked.varietyId)).toBeNull();
   }, 30000);
 });

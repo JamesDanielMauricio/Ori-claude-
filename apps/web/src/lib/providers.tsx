@@ -1,10 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MotionConfig } from "motion/react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { ToastProvider } from "@/components/ui/toast";
 import { TRANSITION_ENTER } from "@/lib/motion";
 
+import { startsNewAccountScope } from "./account-scope";
+import { useAuth } from "./auth-context";
 import { trpc, trpcClientConfig } from "./trpc-client";
 
 // Whether a failed READ is worth trying again. (Only reads: this is a
@@ -30,24 +32,66 @@ function shouldRetryRead(failureCount: number, error: unknown): boolean {
   return !(typeof code === "string" && code.length > 0);
 }
 
+// React Query's factory default (staleTime: 0) means every query is stale the
+// instant it lands — re-mounting an already-fetched query (e.g. re-selecting
+// a previously-viewed order row) shows cached data instantly but still fires
+// a background refetch, which is exactly the per-expand DB round-trip the
+// source's own Performance Issues audit (Issue 3/5) flagged and asked to be
+// eliminated. `invalidateQueries` (used throughout after every mutation)
+// forces a refetch regardless of staleTime, so this doesn't make any
+// mutation's "show the fresh data" behavior stale — it only stops an
+// unmodified row from re-querying itself on every re-visit within this
+// window. See docs/ARCHITECTURE.md § Performance verification for the
+// measurement that caught this.
+function newQueryClient() {
+  return new QueryClient({
+    defaultOptions: { queries: { staleTime: 30_000, retry: shouldRetryRead } },
+  });
+}
+
+// The cache in use and whose it is. `generation` goes up with every fresh
+// cache; it is the key that remounts every screen along with it.
+interface AccountScope {
+  userId: string | null;
+  queryClient: QueryClient;
+  generation: number;
+}
+
 export function Providers({ children }: { children: ReactNode }) {
-  // React Query's factory default (staleTime: 0) means every query is
-  // stale the instant it lands — re-mounting an already-fetched query
-  // (e.g. re-selecting a previously-viewed order row) shows cached data
-  // instantly but still fires a background refetch, which is exactly the
-  // per-expand DB round-trip the source's own Performance Issues audit
-  // (Issue 3/5) flagged and asked to be eliminated. `invalidateQueries`
-  // (used throughout after every mutation) forces a refetch regardless of
-  // staleTime, so this doesn't make any mutation's "show the fresh data"
-  // behavior stale — it only stops an unmodified row from re-querying
-  // itself on every re-visit within this window. See docs/ARCHITECTURE.md
-  // § Performance verification for the measurement that caught this.
-  const [queryClient] = useState(
-    () =>
-      new QueryClient({
-        defaultOptions: { queries: { staleTime: 30_000, retry: shouldRetryRead } },
-      }),
-  );
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
+
+  // One cache per signed-in account — see lib/account-scope.ts for why, and
+  // for the one case a cache carries over.
+  const [scope, setScope] = useState<AccountScope>(() => ({
+    userId,
+    queryClient: newQueryClient(),
+    generation: 0,
+  }));
+  // The account changed: switch caches before anything renders. Setting state
+  // while rendering is React's own pattern for "state that follows a value"
+  // (react.dev, "Adjusting some state when a prop changes") — React throws
+  // this render away and starts again with the new state straight away, so no
+  // screen ever renders against the previous account's cache, not even once.
+  if (scope.userId !== userId) {
+    setScope(
+      startsNewAccountScope(scope.userId, userId)
+        ? { userId, queryClient: newQueryClient(), generation: scope.generation + 1 }
+        : { ...scope, userId },
+    );
+  }
+
+  // And the cache that was left behind is emptied, so the previous account's
+  // data doesn't stay in memory. A request still on its way for that account
+  // lands in this abandoned cache, which no screen reads any more — that is
+  // what makes a late answer harmless, rather than having to cancel it.
+  const previousClient = useRef(scope.queryClient);
+  useEffect(() => {
+    if (previousClient.current === scope.queryClient) return;
+    previousClient.current.clear();
+    previousClient.current = scope.queryClient;
+  }, [scope.queryClient]);
+
   const [trpcClient] = useState(() => trpc.createClient(trpcClientConfig()));
 
   return (
@@ -66,9 +110,13 @@ export function Providers({ children }: { children: ReactNode }) {
     // that doesn't name its own. Something leaving should pass
     // TRANSITION_EXIT instead, so it eases in rather than out.
     <MotionConfig reducedMotion="user" transition={TRANSITION_ENTER}>
-      <trpc.Provider client={trpcClient} queryClient={queryClient}>
-        <QueryClientProvider client={queryClient}>
-          <ToastProvider>{children}</ToastProvider>
+      <trpc.Provider client={trpcClient} queryClient={scope.queryClient}>
+        <QueryClientProvider client={scope.queryClient}>
+          {/* Keyed by the cache, so a new account also gets every screen
+              mounted afresh: a form still holding the previous account's
+              values (the profile's name and phone, an order's draft) is
+              gone with it, and so is a toast meant for them. */}
+          <ToastProvider key={scope.generation}>{children}</ToastProvider>
         </QueryClientProvider>
       </trpc.Provider>
     </MotionConfig>

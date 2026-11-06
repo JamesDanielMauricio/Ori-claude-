@@ -70,7 +70,7 @@ export default function AdminResetPasswordPage() {
     <div className="flex flex-col gap-4">
       <PageHeader
         title="איפוס סיסמה למשתמש"
-        subtitle="שולח למשתמש ב-WhatsApp, למספר הטלפון שבפרופיל שלו, קישור חד-פעמי לקביעת סיסמה חדשה. הקישור לא מוצג כאן. המשתמש מנותק מכל המכשירים שבהם הוא מחובר ויתבקש לקבוע סיסמה חדשה."
+        subtitle="שולח למשתמש ב-WhatsApp, למספר הטלפון שבפרופיל שלו, קישור חד-פעמי לקביעת סיסמה חדשה, התקף לשעה. הקישור לא מוצג כאן. המשתמש מנותק מכל המכשירים שבהם הוא מחובר, והסיסמה הקודמת שלו מפסיקה לעבוד — הכניסה הבאה שלו היא דרך הקישור."
       />
 
       <Card className="max-w-md">
@@ -144,7 +144,7 @@ export default function AdminResetPasswordPage() {
                   <span>
                     המערכת במצב פיתוח: הקישור נשלח למספר הבדיקה (המסתיים ב-
                     <span dir="ltr">{resetPassword.data.lastDigits}</span>) ולא למשתמש. המשתמש נותק
-                    ויתבקש לקבוע סיסמה חדשה.
+                    והסיסמה הקודמת שלו כבר לא פעילה.
                   </span>
                 </p>
               ) : (
@@ -153,7 +153,7 @@ export default function AdminResetPasswordPage() {
                   <span>
                     הקישור נשלח ב-WhatsApp למספר המסתיים ב-
                     <span dir="ltr">{resetPassword.data.lastDigits}</span>. המשתמש נותק מכל
-                    המכשירים ויתבקש לקבוע סיסמה חדשה.
+                    המכשירים והסיסמה הקודמת שלו כבר לא פעילה.
                   </span>
                 </p>
               ))}

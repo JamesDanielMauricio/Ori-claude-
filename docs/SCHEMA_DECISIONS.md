@@ -5,7 +5,65 @@ A running log of non-obvious decisions made about `packages/db`'s schema — the
 
 ---
 
-## 2026-09-30 (latest) — Closing the business day no longer waits for a price on every product
+## 2026-11-07 (latest) — Deleting a user keeps their history, without their name (`0073`)
+
+**Context.** Four history tables name the person who did something:
+`order_submission_logs.submitted_by` (who sent an order), `trading_days.initiated_by` (who started
+the day), `daily_shops.opened_by` (who opened the shop) and `lifecycle_sessions.performed_by` (who
+performed a day action). Each pointed at `profiles.user_id` with Postgres's default rule (no
+action), so the Users screen's delete was refused for anyone they named — 17 customers and 1 staff
+account on 2026-11-06 — and nothing else could take away a departed person's access. Bubble had no
+such rule: a deleted user simply left the records that named them without a name.
+
+**What changed.** James chose Bubble's behaviour over adding a "deactivate" state. The four
+columns may now be empty, and each foreign key is `ON DELETE SET NULL`: deleting a user removes
+their login and profile, and every order, line, snapshot, day and time they are named on stays,
+with the name left empty. It is `SET NULL`, never `CASCADE`, so deleting a person can never delete
+what they did. Their own alerts and blocked-product list still go with them, and a company they
+were contact person for keeps existing without one (unchanged rules).
+
+**Accepted knowingly.** After a delete, the order audit trail shows what was sent and when, but no
+longer by whom. Nothing in the app reads these four columns; the five functions that write them
+(`initiate_business_day`, `open_shop`, `close_shop`, `close_arrangement`, `submit_order`) always
+write the signed-in caller, so every new row is still attributed.
+
+**How it was checked.** Databases built from every migration (PostgreSQL 17 in WASM, no contact
+with the hosted project), one through `0072` and one with `0073`: deleting a customer who had sent
+orders and a staff user who had run days is refused before and works after; every row they were
+named on is kept with the name empty (no row count changes outside their own profile, alerts and
+blocked products); a new order send is still attributed; only the four foreign keys and four
+columns changed (no function or policy); running `0073` twice ends in the same state; a whole
+trading day produces identical rows before and after. `auth/delete-user.test.ts` checks the same
+through the real Admin API in CI.
+
+---
+
+## 2026-11-07 — A customer sees prices only with their company's permission, and never their blocked products (`0072`)
+
+**Context.** Bubble showed a customer a price only when both their company's "Can see product
+prices" and the day's shop "can see prices?" were on. `get_orderable_catalog_for_customer` checked
+only the day's switch — and read it from whatever day the caller passed in, while the prices it
+returns are always the varieties' current ones, so an earlier day's id revealed today's hidden
+prices. Bubble also hid a customer user's "Products Blacklist" from their own shop (customers only,
+per user, even products already in the company's order; staff on the customer's behalf saw
+everything); Ori stored the list (`profile_blocked_products`) but nothing read it.
+
+**What changed.** A customer gets prices only for a day that is not closed, when that day's shop
+shows prices and their company's `can_see_product_prices` is on (empty counts as off); staff are
+unchanged. A customer's blocked products are left out of their own catalog, and on their own
+`submit_order` a line for a blocked product is neither added, changed nor pruned — they are never
+shown it, so it is never in what they send, and the prune would otherwise delete a colleague's or
+the distributor's line. Staff saves are unchanged.
+
+**How it was checked.** The same PGlite databases: 39 before/after scenarios (the four flag
+combinations, an unset permission, the earlier-day id, staff unchanged; blocked lines hidden,
+untouched by a save, ignored when sent directly, still visible to a colleague and to staff); only
+the two functions changed; a whole trading day identical before and after. Two `customer.test.ts`
+cases cover it in CI.
+
+---
+
+## 2026-09-30 — Closing the business day no longer waits for a price on every product
 
 **Context.** `close_arrangement` fills in the price of every arrangement record as part of the
 close (`populate_arrangement_prices`, migration `0022`): the record's own price if it has one,

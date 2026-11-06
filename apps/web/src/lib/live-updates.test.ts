@@ -285,6 +285,32 @@ describe("live updates", () => {
     onlyChannel();
   });
 
+  it("another account replacing this one without a sign-out: its cache gets the refreshes", async () => {
+    startLiveUpdates(queryClient);
+    const channel = onlyChannel();
+
+    // Someone signs in as a different user in another tab. Every account has
+    // a cache of its own (lib/providers.tsx), so this tab now hands over a
+    // new one — while the channel itself stays open.
+    const nextAccount = new QueryClient();
+    const invalidateNext = vi.spyOn(nextAccount, "invalidateQueries").mockResolvedValue();
+    startLiveUpdates(nextAccount);
+    expect(onlyChannel()).toBe(channel);
+
+    broadcast(channel);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(invalidateNext).toHaveBeenCalledTimes(1);
+    expect(invalidate).not.toHaveBeenCalled();
+  });
+
+  it("a refresh still pending when the account signs out refreshes nothing", async () => {
+    startLiveUpdates(queryClient);
+    broadcast(onlyChannel());
+    stopLiveUpdates();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(invalidate).not.toHaveBeenCalled();
+  });
+
   it("stops watching the screen after signing out", async () => {
     startLiveUpdates(queryClient);
     stopLiveUpdates();

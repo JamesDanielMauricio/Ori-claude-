@@ -366,7 +366,7 @@ export type Database = {
           id: string;
           trade_date: string;
           phase: Database["public"]["Enums"]["trading_day_phase"];
-          initiated_by: string;
+          initiated_by: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -374,7 +374,7 @@ export type Database = {
           id?: string;
           trade_date: string;
           phase?: Database["public"]["Enums"]["trading_day_phase"];
-          initiated_by: string;
+          initiated_by?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -382,7 +382,7 @@ export type Database = {
           id?: string;
           trade_date?: string;
           phase?: Database["public"]["Enums"]["trading_day_phase"];
-          initiated_by?: string;
+          initiated_by?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -402,7 +402,7 @@ export type Database = {
           trading_day_id: string;
           status: Database["public"]["Enums"]["daily_shop_status"];
           can_see_prices: boolean;
-          opened_by: string;
+          opened_by: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -411,7 +411,7 @@ export type Database = {
           trading_day_id: string;
           status?: Database["public"]["Enums"]["daily_shop_status"];
           can_see_prices?: boolean;
-          opened_by: string;
+          opened_by?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -420,7 +420,7 @@ export type Database = {
           trading_day_id?: string;
           status?: Database["public"]["Enums"]["daily_shop_status"];
           can_see_prices?: boolean;
-          opened_by?: string;
+          opened_by?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -672,21 +672,21 @@ export type Database = {
         Row: {
           id: string;
           daily_order_id: string;
-          submitted_by: string;
+          submitted_by: string | null;
           snapshot: Json;
           created_at: string;
         };
         Insert: {
           id?: string;
           daily_order_id: string;
-          submitted_by: string;
+          submitted_by?: string | null;
           snapshot: Json;
           created_at?: string;
         };
         Update: {
           id?: string;
           daily_order_id?: string;
-          submitted_by?: string;
+          submitted_by?: string | null;
           snapshot?: Json;
           created_at?: string;
         };
@@ -993,7 +993,7 @@ export type Database = {
           id: string;
           trading_day_id: string;
           session_type: Database["public"]["Enums"]["lifecycle_session_type"];
-          performed_by: string;
+          performed_by: string | null;
           metadata: Json;
           created_at: string;
         };
@@ -1001,7 +1001,7 @@ export type Database = {
           id?: string;
           trading_day_id: string;
           session_type: Database["public"]["Enums"]["lifecycle_session_type"];
-          performed_by: string;
+          performed_by?: string | null;
           metadata?: Json;
           created_at?: string;
         };
@@ -1009,7 +1009,7 @@ export type Database = {
           id?: string;
           trading_day_id?: string;
           session_type?: Database["public"]["Enums"]["lifecycle_session_type"];
-          performed_by?: string;
+          performed_by?: string | null;
           metadata?: Json;
           created_at?: string;
         };

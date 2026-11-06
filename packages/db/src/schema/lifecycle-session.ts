@@ -21,9 +21,8 @@ export const lifecycleSessions = pgTable("lifecycle_sessions", {
     .notNull()
     .references(() => tradingDays.id, { onDelete: "cascade" }),
   sessionType: lifecycleSessionTypeEnum("session_type").notNull(),
-  performedBy: uuid("performed_by")
-    .notNull()
-    .references(() => profiles.userId),
+  // Empty once that user has been deleted (migration 0073).
+  performedBy: uuid("performed_by").references(() => profiles.userId, { onDelete: "set null" }),
   // Surfaces things worth flagging without blocking the transition — e.g.
   // close_arrangement's Invariant-4 note ("a pick still open at phase 4 is
   // either a legitimate no-show or a bug — surface it, don't silently

@@ -17,9 +17,8 @@ export const dailyShops = pgTable("daily_shops", {
     .references(() => tradingDays.id, { onDelete: "cascade" }),
   status: dailyShopStatusEnum("status").notNull().default("open"),
   canSeePrices: boolean("can_see_prices").notNull().default(true),
-  openedBy: uuid("opened_by")
-    .notNull()
-    .references(() => profiles.userId),
+  // Empty once that user has been deleted (migration 0073).
+  openedBy: uuid("opened_by").references(() => profiles.userId, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

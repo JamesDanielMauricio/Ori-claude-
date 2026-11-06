@@ -505,6 +505,20 @@
       "when": 1790283600000,
       "tag": "0071_customers-order-only-while-shop-open",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1790370000000,
+      "tag": "0072_customer-prices-and-blocked-products-like-bubble",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1790456400000,
+      "tag": "0073_delete-users-keep-their-history",
+      "breakpoints": true
     }
   ]
 }

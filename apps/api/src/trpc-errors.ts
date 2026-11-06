@@ -37,11 +37,12 @@ export function toTRPCError(error: unknown): TRPCError {
   }
   if (error instanceof RecoveryLinkSendFailedError) {
     // Raised only after the reset was applied — the admin has to know the
-    // user is already signed out and must set a new password, and that
-    // sending again is safe (a new link replaces the old one).
+    // user is already signed out and their old password no longer works, so
+    // the only way back in is a link, and that sending again is safe (a new
+    // link replaces the old one).
     return new TRPCError({
       code: "BAD_GATEWAY",
-      message: `שליחת הקישור ב-WhatsApp נכשלה (${error.detail}). המשתמש כבר נותק ויתבקש לקבוע סיסמה חדשה — אפשר לנסות לשלוח שוב.`,
+      message: `שליחת הקישור ב-WhatsApp נכשלה (${error.detail}). המשתמש כבר נותק והסיסמה הקודמת שלו כבר לא פעילה, כך שהכניסה היא רק דרך קישור — אפשר לנסות לשלוח שוב.`,
       cause: error,
     });
   }

@@ -32,6 +32,8 @@ describe("toTRPCError", () => {
     expect(mapped.code).toBe("BAD_GATEWAY");
     expect(mapped.message).toContain("Green API responded 500");
     expect(mapped.message).toContain("נותק");
+    // The reset also ended the old password, so the link is the only way in.
+    expect(mapped.message).toContain("הסיסמה הקודמת שלו כבר לא פעילה");
     expect(mapped.message).toContain("לנסות לשלוח שוב");
   });
 

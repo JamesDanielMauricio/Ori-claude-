@@ -15,9 +15,9 @@ export const orderSubmissionLogs = pgTable("order_submission_logs", {
   dailyOrderId: uuid("daily_order_id")
     .notNull()
     .references(() => dailyOrders.id, { onDelete: "cascade" }),
-  submittedBy: uuid("submitted_by")
-    .notNull()
-    .references(() => profiles.userId),
+  // Empty once the user who sent it has been deleted — the record stays,
+  // without the name (migration 0073, as in Bubble).
+  submittedBy: uuid("submitted_by").references(() => profiles.userId, { onDelete: "set null" }),
   // `[{ "productVarietyId": uuid, "palletsOrdered": number, "comment": string|null }, ...]`
   // — exactly the line set `submit_order` wrote in this same transaction.
   snapshot: jsonb("snapshot").notNull(),

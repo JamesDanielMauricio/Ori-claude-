@@ -57,7 +57,7 @@ describe("readGreenApiCredentials", () => {
 });
 
 describe("createGreenApiChannel", () => {
-  it("posts the Green API sendMessage shape the Edge Function uses", async () => {
+  it("posts the Green API sendMessage shape the Edge Function uses, with link previews off", async () => {
     const calls: Array<{ url: string; body: unknown }> = [];
     const fakeFetch = (async (url: string, init: RequestInit) => {
       calls.push({ url, body: JSON.parse(String(init.body)) });
@@ -70,11 +70,13 @@ describe("createGreenApiChannel", () => {
     });
     await channel.send({ to: "12036", isGroup: true, body: "group" });
 
+    // linkPreview: false — a preview would fetch the link before the
+    // recipient taps it, which spends a one-time password-reset link.
     expect(calls[0]).toEqual({
       url: "https://api.green-api.com/waInstance111/sendMessage/tok",
-      body: { chatId: "972501234567@c.us", message: "hi" },
+      body: { chatId: "972501234567@c.us", message: "hi", linkPreview: false },
     });
-    expect(calls[1]?.body).toEqual({ chatId: "12036@g.us", message: "group" });
+    expect(calls[1]?.body).toEqual({ chatId: "12036@g.us", message: "group", linkPreview: false });
   });
 
   it("reports a non-2xx response and a thrown fetch as failures", async () => {

@@ -53,8 +53,8 @@ export interface AdminResetPasswordInput {
 // The order below is what keeps every failure explainable:
 //   1. everything that can refuse is checked first — nothing has changed;
 //   2. the link is generated — still nothing has changed for the user;
-//   3. the reset is applied: every existing login is ended and the account
-//      is flagged to set a new password;
+//   3. the reset is applied: the old password stops working, every existing
+//      login is ended and the account is flagged to set a new password;
 //   4. the link is sent. If only this fails, the admin is told the user is
 //      already signed out and flagged, and that trying again is safe (a new
 //      link simply replaces the old one).
@@ -99,7 +99,19 @@ export async function adminResetPassword({
   }
 
   // One transaction, so the user is never left signed out without the flag
-  // or flagged while still signed in.
+  // or flagged while still signed in, or with the old password still working.
+  //
+  // SECURITY: the password is replaced by 32 random bytes nobody ever sees —
+  // the same statement the Bubble import used on production to set every
+  // login's password (packages/db/scripts/import-from-bubble.ts), a bcrypt
+  // hash written straight into auth.users. This ALLOWS the account to be
+  // entered again only through the link this reset sends (or a later reset);
+  // it touches the password hash alone, so that link — Supabase keeps its
+  // token apart from the password — still works. It PROTECTS AGAINST the
+  // reset leaving the door open: ending every session is not enough on its
+  // own, because whoever knew the old password — the reason for a reset,
+  // when an account has been misused — could simply sign in again, be asked
+  // to choose a new password, and keep the account.
   //
   // SECURITY: deleting the user's auth.sessions rows is what "signed out
   // everywhere" means in Supabase — each session's refresh tokens are removed
@@ -113,6 +125,13 @@ export async function adminResetPassword({
   // runs over apps/api's own database connection (the owner role), which is
   // the only caller of this function, after the backoffice check upstream.
   await db.transaction(async (tx) => {
+    await tx.execute(sql`
+      update auth.users
+      set encrypted_password = extensions.crypt(
+            encode(extensions.gen_random_bytes(32), 'base64'),
+            extensions.gen_salt('bf', 10)),
+          updated_at = now()
+      where id = ${targetUserId}`);
     await tx.execute(sql`delete from auth.sessions where user_id = ${targetUserId}`);
     await tx
       .update(profiles)

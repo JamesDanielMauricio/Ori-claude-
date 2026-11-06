@@ -80,6 +80,9 @@ describe("createWhatsAppRecoveryDelivery — sending", () => {
     expect(calls[0]!.body.message).toContain(LINK);
     expect(calls[0]!.body.message).toContain("שלום דנה,");
     expect(calls[0]!.body.message).not.toContain("מצב פיתוח");
+    // No preview card: building one fetches the link, which would spend the
+    // one-time reset link before the user taps it.
+    expect(calls[0]!.body).toMatchObject({ linkPreview: false });
   });
 
   it("dev (and any WHATSAPP_ENV other than exactly `live`): goes to the test phone, never the user", async () => {

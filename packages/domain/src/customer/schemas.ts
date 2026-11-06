@@ -27,7 +27,9 @@ export function toOrderableCatalogRpcArgs(input: OrderableCatalogInput) {
 // `nullif(..., '')`). Only lines with a positive pallet count need to be
 // included; anything already on the order but absent from this array is
 // pruned by submit_order — the same upsert-and-prune shape as
-// bootstrap_grower_pick (R3), never a per-line dash-packed call.
+// bootstrap_grower_pick (R3), never a per-line dash-packed call. The one
+// exception: on a customer's own send, a line for a product on their own
+// blocked list is never pruned (nor changed, if sent) — migration 0072.
 export const orderLineInputSchema = z.object({
   productVarietyId: z.string().uuid(),
   // Pallets are always whole units — never a fractional pallet.

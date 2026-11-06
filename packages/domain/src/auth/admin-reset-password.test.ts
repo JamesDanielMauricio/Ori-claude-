@@ -104,6 +104,36 @@ describe("adminResetPassword", () => {
     expect(refreshError).not.toBeNull();
   }, 30000);
 
+  it("the old password stops working, and the link it sent signs the user in exactly once", async () => {
+    const { target } = await signedInTarget();
+    const delivered: string[] = [];
+    await adminResetPassword({
+      targetUserId: target.userId,
+      actorUserId: randomUUID(),
+      delivery: recordingDelivery(delivered),
+    });
+
+    // Whoever knew the old password — the reason for a reset when an account
+    // was misused — can't simply sign back in and keep the account.
+    await expect(signInTestUser(target.email, target.password)).rejects.toThrow(
+      /failed to sign in/,
+    );
+
+    // The link still works although the password changed under it. Opening
+    // it is Supabase's own verify step, which answers with a redirect that
+    // carries a fresh session...
+    const first = await fetch(delivered[0]!, { redirect: "manual" });
+    expect(first.status).toBeGreaterThanOrEqual(300);
+    expect(first.status).toBeLessThan(400);
+    expect(first.headers.get("location")).toContain("access_token=");
+
+    // ...once. Opened a second time — a forwarded message, a preview fetch —
+    // it is refused.
+    const second = await fetch(delivered[0]!, { redirect: "manual" });
+    expect(second.headers.get("location") ?? "").not.toContain("access_token=");
+    expect(second.headers.get("location") ?? "").toContain("error");
+  }, 30000);
+
   it("changes nothing when the link can't be delivered", async () => {
     const { target } = await signedInTarget();
     const sessionsBefore = await sessionCount(target.userId);
@@ -118,6 +148,8 @@ describe("adminResetPassword", () => {
 
     expect(await mustChangePassword(target.userId)).toBe(false);
     expect(await sessionCount(target.userId)).toBe(sessionsBefore);
+    // ...and the password still works: a refused reset locks nobody out.
+    await expect(signInTestUser(target.email, target.password)).resolves.toBeDefined();
   }, 30000);
 
   it("refuses an admin resetting their own account, and changes nothing", async () => {

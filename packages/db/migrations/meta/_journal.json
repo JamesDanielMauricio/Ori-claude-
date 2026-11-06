@@ -498,6 +498,13 @@
       "when": 1790197200000,
       "tag": "0070_keep-carried-in-and-end-of-day-leftover-apart",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1790283600000,
+      "tag": "0071_customers-order-only-while-shop-open",
+      "breakpoints": true
     }
   ]
 }

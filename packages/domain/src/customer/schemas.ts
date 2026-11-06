@@ -83,7 +83,7 @@ export const CUSTOMER_ERROR_CODES = {
   NOT_FOUND: "P0002",
   /** current_role() <> 'customer' with no company id supplied, or a non-backoffice caller supplied one. */
   FORBIDDEN: "42501",
-  /** submit_order called once the trading day is closed; send_order_reminder called on an already-submitted order. */
+  /** submit_order called once the trading day is closed — or, for a customer's own order, once the shop is no longer open (migration 0071); send_order_reminder called on an already-submitted order. */
   INVALID_STATE: "P0007",
   /** A line's pallet count is negative, references a variety not in that day's shop, or (direct customer submissions only) exceeds max_orderable_for_customer(). */
   INVALID_INPUT: "P0008",

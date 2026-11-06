@@ -8,6 +8,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { PickConfirmationDialog, type PickReviewFamily } from "@/components/grower/pick-confirmation-dialog";
+import {
+  linesToSave,
+  mergeServerLines,
+  toDraftLines,
+  toSavedLines,
+  type DraftLine,
+} from "@/components/grower/pick-draft";
 import { ActionBar } from "@/components/reference-data/action-bar";
 import { inputClassName } from "@/components/reference-data/form-field";
 import { Icon } from "@/components/ui/icon";
@@ -22,24 +29,6 @@ import { mergeOnError, optimisticUpdate } from "@/lib/optimistic-mutation";
 import { growerQueries, type PickProductLineRow } from "@/lib/queries/grower";
 import { createClient } from "@/lib/supabase/client";
 import { formatVarietyName } from "@/lib/variety-label";
-
-interface DraftLine {
-  id: string;
-  pallets: string;
-  leftover: string;
-  comment: string;
-}
-
-// The draft holds what the inputs hold — text — while the counts arrive as
-// numbers.
-function toDraftLines(rows: PickProductLineRow[]): DraftLine[] {
-  return rows.map((row) => ({
-    id: row.id,
-    pallets: String(row.pallets_picked),
-    leftover: String(row.leftover_pallets),
-    comment: row.comment ?? "",
-  }));
-}
 
 interface PickFamilyVariety {
   id: string;
@@ -92,26 +81,6 @@ function groupDraftByFamily(rows: PickProductLineRow[], draft: DraftLine[]): Pic
     });
   }
   return [...families.values()].sort((a, b) => a.familyName.localeCompare(b.familyName, "he"));
-}
-
-// The draft as save_pick_lines would actually receive it. Used for both the
-// save itself and the "is there anything to save?" comparison behind the
-// ActionBar's buttons, so that question is answered by the payload rather
-// than by the text in the inputs.
-//
-// That distinction is the whole point here. The draft is text, so a grower
-// who clears a field showing "8" and types "08" — or clears a "0" and leaves
-// it empty — has a draft that differs textually from the server while
-// meaning exactly the same thing. Comparing the sent values (8 === 8, 0 ===
-// 0) calls that unchanged, which it is. `productLabel` drops out for the
-// same reason: it is display text this editor never saves.
-function toSavedLines(lines: DraftLine[]) {
-  return lines.map((line) => ({
-    dailyPickProductId: line.id,
-    palletsPicked: Number(line.pallets || 0),
-    leftoverPallets: Number(line.leftover || 0),
-    comment: line.comment || null,
-  }));
 }
 
 // One of the row's two numeric columns (נקטף / עודף), with the caption that
@@ -246,8 +215,9 @@ export function PickLinesEditor({
   // confirm button.
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [draft, setDraft] = useState<DraftLine[]>([]);
-  // See the re-seeding effect below.
-  const touched = useRef(false);
+  // The lines this person has changed since the last save or discard — see
+  // the re-seeding effect below.
+  const editedIds = useRef<Set<string>>(new Set());
   // Collapsed by default — a grower's or a distributor's popup can list a
   // dozen families, and expanding all of them up front is a wall of inputs
   // before anyone has asked to edit any of it. Local UI state, not tied to
@@ -273,14 +243,15 @@ export function PickLinesEditor({
   const linesQuery = useQuery(linesOptions);
 
   // Keeps the draft tracking the server without ever clobbering typing in
-  // progress. The gate used to supply an idle state that was always safe to
-  // re-seed from ("not editing"); with it gone, the first keystroke is what
-  // marks the draft as the user's — seed freely until then, hold still after,
-  // until the next save or discard resets `touched`.
+  // progress: every refetch re-seeds the lines this person has NOT edited and
+  // keeps the ones they have (mergeServerLines). The pick can be open in two
+  // places at once — the grower's own screen and the distributor's pencil —
+  // and the whole draft used to freeze at the first keystroke, so each save
+  // put back the other side's lines as they were when typing began.
   useEffect(() => {
     if (!linesQuery.data) return;
-    if (touched.current) return;
-    setDraft(toDraftLines(linesQuery.data));
+    const rows = linesQuery.data;
+    setDraft((current) => mergeServerLines(current, rows, editedIds.current));
   }, [linesQuery.data]);
 
   // ONE call, one transaction (R4). This previously built an array of up to two
@@ -289,13 +260,14 @@ export function PickLinesEditor({
   // P0006 already-arranged floor rejecting one line) committed some lines and
   // not others, then reported a single error over a half-written table with no
   // indication of which edits had survived. save_pick_lines (migration 0039)
-  // takes the whole set and applies it all-or-nothing, so a rejected save now
-  // leaves the database exactly matching the draft still on screen.
+  // takes the lines it is sent and applies them all-or-nothing, so a rejected
+  // save leaves the database exactly as it was.
   //
-  // Every line is sent with its full state rather than only the changed ones:
-  // the function decides what actually changed by comparing against the stored
-  // row, which is also what keeps its pick_updated notification tied to a real
-  // quantity change instead of to whatever the client believed had changed.
+  // Only the lines edited here are sent (linesToSave), each with its full
+  // state; the function still decides what actually changed by comparing
+  // against the stored row, which is also what keeps its pick_updated
+  // notification tied to a real quantity change instead of to whatever the
+  // client believed had changed.
   // The visible pallet/comment text is already the draft, live as the grower
   // types — nothing there waits on the network. What DOES currently wait is
   // `dirty` (below), which is derived by comparing the draft against
@@ -371,7 +343,9 @@ export function PickLinesEditor({
     mutationFn: async () => {
       const input = savePickLinesInputSchema.parse({
         dailyPickId,
-        lines: toSavedLines(draft),
+        // Only the lines changed here (linesToSave): a line nobody here
+        // touched is never rewritten, whatever happened to it meanwhile.
+        lines: linesToSave(draft, editedIds.current),
       });
       const { error } = await supabase.rpc("save_pick_lines", toSavePickLinesRpcArgs(input));
       if (error) throw error;
@@ -390,10 +364,9 @@ export function PickLinesEditor({
       } else {
         showToast(submitOnSave ? "הליקוט נשמר ונשלח." : "השורות נשמרו.", "success");
       }
-      // The draft now matches the server, so let the refetch below re-seed
-      // it — otherwise the editor would stay frozen on this draft for the
-      // rest of its life and quietly stop showing other people's changes.
-      touched.current = false;
+      // The draft now matches the server, so nothing is "edited" any more —
+      // the refetch below re-seeds every line, including the ones just saved.
+      editedIds.current = new Set();
       void queryClient.invalidateQueries({ queryKey });
       // Also how the grower's screen learns the pick's status just changed
       // to "נשלח" — it refetches the pick when told a save landed.
@@ -405,7 +378,7 @@ export function PickLinesEditor({
   });
 
   function updateLine(id: string, patch: Partial<DraftLine>) {
-    touched.current = true;
+    editedIds.current.add(id);
     setDraft((current) => current.map((line) => (line.id === id ? { ...line, ...patch } : line)));
   }
 
@@ -449,7 +422,7 @@ export function PickLinesEditor({
     // Puts the fields back to what's stored, and nothing else — there is no
     // read-only mode for this button to drop into any more.
     setDraft(baselineLines);
-    touched.current = false;
+    editedIds.current = new Set();
   }
 
   function handleSave() {

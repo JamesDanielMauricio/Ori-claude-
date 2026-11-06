@@ -1,4 +1,8 @@
-import { submitOrderInputSchema, toSubmitOrderRpcArgs } from "@ori/domain/customer";
+import {
+  CUSTOMER_ERROR_CODES,
+  submitOrderInputSchema,
+  toSubmitOrderRpcArgs,
+} from "@ori/domain/customer";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -23,13 +27,9 @@ import {
   weekdayDateLabel,
   type CatalogRow,
 } from "./catalog-grouping";
+import { mergeServerRows, toDraft, toSubmittedLines, type DraftLine } from "./order-draft";
 import { OrderProductList, type OrderFamilyRow } from "./order-product-list";
 import { SubmissionConfirmationDialog } from "./submission-confirmation-dialog";
-
-interface DraftLine {
-  pallets: string;
-  comment: string;
-}
 
 // A customer's submit found the shop already closed — see submitMutation.
 class ShopClosedError extends Error {
@@ -37,35 +37,6 @@ class ShopClosedError extends Error {
     super("החנות נסגרה להזמנות.");
     this.name = "ShopClosedError";
   }
-}
-
-function toDraft(rows: CatalogRow[]): Record<string, DraftLine> {
-  const draft: Record<string, DraftLine> = {};
-  for (const row of rows) {
-    draft[row.variety_id] = {
-      pallets: row.pallets_ordered ? String(row.pallets_ordered) : "",
-      comment: row.comment ?? "",
-    };
-  }
-  return draft;
-}
-
-// The draft as submit_order would actually receive it. Used for both the
-// submission itself and the "is there anything to save?" comparison behind
-// the ActionBar's buttons, so that question is answered by the payload
-// rather than by the state of the controls.
-//
-// Which matters most for an untouched row: toDraft leaves a variety nobody
-// ordered as "" while the dropdown displays it as "0", so picking "0" on
-// such a row writes "0" into the draft and a textual comparison would call
-// that an edit. Both sides go through Number(... || 0) here, so 0 === 0 and
-// the order correctly reads as unchanged.
-function toSubmittedLines(rows: CatalogRow[], draft: Record<string, DraftLine>) {
-  return rows.map((row) => ({
-    productVarietyId: row.variety_id,
-    palletsOrdered: Number(draft[row.variety_id]?.pallets || 0),
-    comment: draft[row.variety_id]?.comment || null,
-  }));
 }
 
 // The one place both the customer's own order screen and the
@@ -129,8 +100,9 @@ export function OrderLinesEditor({
 
   const editing = !readOnly;
   const [draft, setDraft] = useState<Record<string, DraftLine>>({});
-  // See the re-seeding effect below.
-  const touched = useRef(false);
+  // The varieties this person has changed since the last send or discard —
+  // see the re-seeding effect below.
+  const editedIds = useRef<Set<string>>(new Set());
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [commentPopupVarietyId, setCommentPopupVarietyId] = useState<string | null>(null);
@@ -141,18 +113,19 @@ export function OrderLinesEditor({
   const catalogQuery = useQuery(catalogOptions);
 
   // Keeps the draft tracking the server without clobbering typing in
-  // progress. The gate used to supply an idle state that was always safe to
-  // re-seed from ("not editing"); with it gone, the first keystroke is what
-  // marks the draft as the user's — seed freely until then, hold still after,
-  // until the next save or discard resets `touched`. This matters more here
-  // than in the pick editor: the live updates (lib/live-updates.ts) refetch
-  // this query whenever anything on the day changes — any grower's pick, any
-  // customer's order, every ✓ the distributor presses on the arrangement
-  // board — which can land mid-way through this customer's own typing.
+  // progress: every refetch re-seeds the lines this person has NOT edited
+  // and keeps the ones they have (mergeServerRows). The live updates
+  // (lib/live-updates.ts) refetch this query whenever anything on the day
+  // changes — any grower's pick, any customer's order, every ✓ the
+  // distributor presses on the arrangement board — which can land mid-way
+  // through this customer's own typing. The whole draft used to freeze at
+  // the first keystroke instead, and since a send replaces the whole order,
+  // that frozen copy then deleted or reverted whatever the distributor
+  // changed on the customer's behalf in the meantime.
   useEffect(() => {
     if (!catalogQuery.data) return;
-    if (touched.current) return;
-    setDraft(toDraft(catalogQuery.data));
+    const rows = catalogQuery.data;
+    setDraft((current) => mergeServerRows(current, rows, editedIds.current));
   }, [catalogQuery.data]);
 
   // The reference design's shop screen: a collapsed row per product
@@ -244,11 +217,10 @@ export function OrderLinesEditor({
       // A customer's own order: confirm, right now, that the shop is still
       // open. The live updates (lib/live-updates.ts) tell this screen the
       // shop closed within about a second — but not on a device whose
-      // connection has dropped, and not in that second — and submit_order
-      // itself accepts a customer's write until the day is fully closed
-      // (0042, P0007). Without this, an order sent in that gap would still
-      // land after the distributor started building the arrangement from the
-      // numbers.
+      // connection has dropped, and not in that second. submit_order refuses
+      // a customer's order once the shop is not open too (migration 0071), so
+      // this check is what turns that into a clear message before anything is
+      // sent; the server's refusal below covers the moment in between.
       // One ~1 KB read, only when someone actually submits. fetchQuery also
       // writes the answer into the shared open-day cache, which is what flips
       // the page to read-only (routes/customer/order.tsx) when it's closed.
@@ -264,17 +236,27 @@ export function OrderLinesEditor({
       const lines = toSubmittedLines(catalogQuery.data ?? [], draft);
       const input = submitOrderInputSchema.parse({ tradingDayId, lines, customerCompanyId });
       const { data, error } = await supabase.rpc("submit_order", toSubmitOrderRpcArgs(input));
-      if (error) throw error;
+      if (error) {
+        // The server's own answer to the same question as the check above
+        // (migration 0071 refuses a customer's order once the shop is not
+        // open): the shop closed in the moment between that check and this
+        // send. Shown the same way, and the open-day cache refreshed so the
+        // page turns read-only.
+        if (!customerCompanyId && error.code === CUSTOMER_ERROR_CODES.INVALID_STATE) {
+          void queryClient.invalidateQueries({ queryKey: tradingDayQueries.open().queryKey });
+          throw new ShopClosedError();
+        }
+        throw error;
+      }
       return data;
     },
     onMutate: submitOptimistic.onMutate,
     onSuccess: () => {
       showToast("ההזמנה נשלחה.", "success");
       setConfirmOpen(false);
-      // The draft now matches the server, so let the refetch re-seed it —
-      // otherwise the editor stays frozen on this draft and stops reflecting
-      // anything anyone else changes.
-      touched.current = false;
+      // The draft now matches the server, so nothing is "edited" any more —
+      // the refetch re-seeds every line, including the ones just sent.
+      editedIds.current = new Set();
       void queryClient.invalidateQueries({ queryKey });
       onSubmitted?.();
     },
@@ -286,7 +268,7 @@ export function OrderLinesEditor({
   });
 
   function updateLine(varietyId: string, patch: Partial<DraftLine>) {
-    touched.current = true;
+    editedIds.current.add(varietyId);
     setDraft((current) => ({
       ...current,
       [varietyId]: { pallets: "", comment: "", ...current[varietyId], ...patch },
@@ -311,11 +293,10 @@ export function OrderLinesEditor({
 
   function handleDiscard() {
     // Puts the fields back to the stored order, and nothing else — there is
-    // no read-only mode for this button to drop into any more. Clearing
-    // `touched` also hands the draft back to the re-seeding effect above, so
-    // the screen resumes tracking what other people change.
+    // no read-only mode for this button to drop into any more. Forgetting
+    // the edited lines hands every line back to the re-seeding effect above.
     setDraft(baselineDraft);
-    touched.current = false;
+    editedIds.current = new Set();
   }
 
   function handleConfirmSubmit() {

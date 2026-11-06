@@ -975,4 +975,39 @@ describe("customer ordering module", () => {
     expect(await getOrderProductLine(orderA!.id, grower.varietyId)).toMatchObject({ palletsOrdered: "7.00" });
     expect(await getOrderProductLine(orderB!.id, grower.varietyId)).toBeNull();
   }, 30000);
+
+  it("submit_order (migration 0071): once the shop closes a customer can no longer send their own order, but staff can still edit it", async () => {
+    const grower = await createTestGrowerWithProduct();
+    cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
+    const day = await createOpenTestDay(admin.userId);
+    await pickLine(day.id, grower.companyId, grower.varietyId, 10);
+
+    const customer = await createTestCustomer(day.id);
+    const client = await signedInCustomer(customer.companyId);
+    cleanupFns.push(() => deleteTestTradingDay(day.id));
+
+    const send = (palletsOrdered: number, customerCompanyId?: string) =>
+      (customerCompanyId ? admin.client : client).rpc(
+        "submit_order",
+        toSubmitOrderRpcArgs({
+          tradingDayId: day.id,
+          lines: [{ productVarietyId: grower.varietyId, palletsOrdered, comment: null }],
+          ...(customerCompanyId ? { customerCompanyId } : {}),
+        }),
+      );
+    const savedLine = async () =>
+      getOrderProductLine((await getDailyOrderForCustomer(day.id, customer.companyId))!.id, grower.varietyId);
+
+    expect((await send(2)).error).toBeNull();
+    expect((await admin.client.rpc("close_shop")).error).toBeNull();
+
+    // The shop is closed: the customer's own change is refused and nothing moves.
+    const refused = await send(3);
+    expect(refused.error?.code).toBe(CUSTOMER_ERROR_CODES.INVALID_STATE);
+    expect(await savedLine()).toMatchObject({ palletsOrdered: "2.00" });
+
+    // The distributor, arranging, may still adjust it on the customer's behalf.
+    expect((await send(4, customer.companyId)).error).toBeNull();
+    expect(await savedLine()).toMatchObject({ palletsOrdered: "4.00" });
+  }, 30000);
 });

@@ -1,5 +1,15 @@
+import { randomUUID } from "node:crypto";
+
 import { db } from "@ori/db";
-import { arrangementRecords, dailyArrangements, notificationOutbox } from "@ori/db/schema";
+import {
+  arrangementRecords,
+  dailyArrangements,
+  dailyPickProducts,
+  dailyPicks,
+  notificationOutbox,
+  productFamilies,
+  productVarieties,
+} from "@ori/db/schema";
 import {
   createTestCompany,
   createTestProfile,
@@ -8,7 +18,7 @@ import {
   runCleanup,
   signInTestUser,
 } from "@ori/domain/auth/testing";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { toUpdatePickProductPalletsRpcArgs } from "../lifecycle-engine/schemas";
@@ -753,4 +763,47 @@ describe("grower picking module", () => {
       palletsPicked: "0.00",
     });
   }, 30000);
+
+  // The arrangement board and matrix read a whole day as ONE trading_days row
+  // with its picks, lines, orders and arrangement records nested inside
+  // (apps/web/src/lib/queries/arrangement.ts). Supabase caps a response at
+  // max_rows = 1000 (supabase/config.toml, the same as the hosted project),
+  // and the question is whether that cap also cuts the NESTED lists — if it
+  // did, a big enough day would silently lose lines from the boards.
+  it("a day read as one row keeps every nested pick line past the 1,000-row cap — only top-level rows are capped", async () => {
+    const { client: backoffice, userId: adminId } = await signedInBackoffice();
+    const grower = await createTestGrowerWithProduct();
+    cleanupFns.push(() => deleteTestGrowerWithProduct(grower));
+
+    const [family] = await db.insert(productFamilies).values({ name: `משפחת בדיקה ${randomUUID()}` }).returning();
+    const varieties = await db
+      .insert(productVarieties)
+      .values(Array.from({ length: 1100 }, (_, i) => ({ familyId: family!.id, name: `זן ${i} ${randomUUID()}` })))
+      .returning({ id: productVarieties.id });
+    cleanupFns.push(async () => {
+      await db.delete(productVarieties).where(inArray(productVarieties.id, varieties.map((v) => v.id)));
+      await db.delete(productFamilies).where(eq(productFamilies.id, family!.id));
+    });
+    // Pushed after the varieties so it is torn down first (its lines
+    // reference them, with no cascade back).
+    const { day } = await createClosedTestDay(adminId);
+    cleanupFns.push(() => deleteTestTradingDay(day.id));
+
+    const [pick] = await db.insert(dailyPicks).values({ tradingDayId: day.id, growerCompanyId: grower.companyId }).returning();
+    await db.insert(dailyPickProducts).values(varieties.map((v) => ({ dailyPickId: pick!.id, productVarietyId: v.id })));
+
+    // The control: the same lines read as top-level rows ARE cut to 1,000.
+    const flat = await backoffice.from("daily_pick_products").select("id").eq("daily_pick_id", pick!.id);
+    expect(flat.error).toBeNull();
+    expect(flat.data).toHaveLength(1000);
+
+    // The boards' shape: one day row, everything nested — all 1,100 arrive.
+    const nested = await backoffice
+      .from("trading_days")
+      .select("id, daily_picks(id, daily_pick_products(id))")
+      .eq("id", day.id)
+      .maybeSingle();
+    expect(nested.error).toBeNull();
+    expect(nested.data!.daily_picks[0]!.daily_pick_products).toHaveLength(1100);
+  }, 60000);
 });

@@ -76,6 +76,44 @@ export function toSaveCustomerRpcArgs(input: SaveCustomerInput) {
   };
 }
 
+// Rounds the way the column does. customer_scores.general_score is
+// numeric(3,2), and Postgres rounds the DECIMAL text it is sent, half away
+// from zero: 1.005 becomes 1.01. Multiplying by 100 in floating point does
+// not — 1.005 is held a hair below 1.005, so it comes out 1.00 — and the
+// screen would then show a score the database does not hold. Shifting the
+// decimal point in the text, where 1.005 is exactly 1.005, gives the same
+// answer the database will.
+function roundToTwoDecimals(value: number): number {
+  return Number(`${Math.round(Number(`${value}e2`))}e-2`);
+}
+
+// A customer's ranking score: the distributor's own scale, 1 (lowest) to 5,
+// kept so that an arrangement suggestion can order customers by it when a
+// product is short.
+//
+// The range is checked on the number as given and only then rounded, in that
+// order, because that is the order set_customer_score works in: 0.996 is off
+// the scale, not a 1.00. Null clears the score — the customer is then
+// unranked, which is a real state and not a missing value; leaving the score
+// out altogether is neither, and is refused.
+//
+// Its own input and its own function (set_customer_score, migration 0067),
+// not a field on saveCustomerInputSchema: the score is the one thing about a
+// customer that the customer must never be able to read, so it is not a
+// column of the company row they can — see that migration.
+export const setCustomerScoreInputSchema = z.object({
+  customerCompanyId: z.string().uuid(),
+  generalScore: z.number().min(1).max(5).transform(roundToTwoDecimals).nullable(),
+});
+export type SetCustomerScoreInput = z.infer<typeof setCustomerScoreInputSchema>;
+
+export function toSetCustomerScoreRpcArgs(input: SetCustomerScoreInput) {
+  return {
+    p_customer_company_id: input.customerCompanyId,
+    p_general_score: input.generalScore,
+  };
+}
+
 export const saveTransporterInputSchema = z.object({
   id: z.string().uuid().nullable(),
   name: z.string().min(1),

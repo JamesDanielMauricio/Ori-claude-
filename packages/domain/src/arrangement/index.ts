@@ -32,5 +32,8 @@ export {
   deleteArrangementRecordInputSchema,
   toDeleteArrangementRecordRpcArgs,
   type DeleteArrangementRecordInput,
+  saveArrangementProposalInputSchema,
+  toSaveArrangementProposalRpcArgs,
+  type SaveArrangementProposalInput,
   ARRANGEMENT_ERROR_CODES,
 } from "./schemas";

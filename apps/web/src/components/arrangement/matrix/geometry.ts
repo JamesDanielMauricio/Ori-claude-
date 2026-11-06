@@ -16,14 +16,21 @@ export const ROW_H = 64;
 // tiny — see the scrollport's comment in arrangement-matrix.tsx) look lost inside
 // an oversized empty band above it.
 export const HEADER_H = 80;
-export const W_PRODUCT = 232;
+// One width is NOT here: the products column's. It follows the grid's own
+// width (matrix-data.ts's productColumnWidth), so it is worked out in the
+// component from the measured scrollport and handed down. It is still one
+// number per render, shared by the <col>, the sticky offsets and the scroll
+// margins, which is all the fixed-geometry rule above actually needs.
 export const W_STOCK = 88;
 export const W_AVAILABLE = 80;
-export const W_CUSTOMER = 124;
+// As narrow as a customer's name on up to four lines allows: every pixel it
+// gives up is a pixel of another customer on screen without scrolling.
+export const W_CUSTOMER = 104;
 export const W_ORDERED = 92;
 export const W_ALLOCATED = 92;
-/** Total width of the pinned leading (right, in RTL) pane. */
-export const LEAD_PANE = W_PRODUCT + W_STOCK + W_ORDERED;
+// Under this width the products column switches to its compact label: no
+// alignment spacer, a slightly smaller name on up to three lines.
+export const COMPACT_PRODUCT_BELOW = 160;
 /** Total width of the pinned trailing (left, in RTL) pane. */
 export const TRAIL_PANE = W_AVAILABLE + W_ALLOCATED;
 /** Rows rendered beyond each edge of the viewport, so a flick doesn't blank. */

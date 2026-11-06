@@ -41,6 +41,10 @@ export function useMatrixScroll(rowCount: number) {
     percent: number;
   } | null>(null);
   const [range, setRange] = useState({ start: 0, end: 40 });
+  // The scrollport's own width, which is what the products column is sized
+  // from. Zero until first measured — see productColumnWidth for why that
+  // starts the column at its narrowest.
+  const [gridWidth, setGridWidth] = useState(0);
 
   // ---- virtualisation --------------------------------------------------
   // Measured off the scroll container rather than the window: the grid owns
@@ -56,6 +60,10 @@ export function useMatrixScroll(rowCount: number) {
     let frame = 0;
     const measure = () => {
       frame = 0;
+      // Guarded like the range below: this runs on every scroll frame, and
+      // the width only changes when the window does.
+      setGridWidth((current) => (current === element.clientWidth ? current : element.clientWidth));
+
       const first = Math.floor(element.scrollTop / ROW_H);
       const visible = Math.ceil(Math.max(0, element.clientHeight - HEADER_H) / ROW_H);
       const start = Math.max(0, first - OVERSCAN);
@@ -140,5 +148,5 @@ export function useMatrixScroll(rowCount: number) {
     };
   }, [rowCount]);
 
-  return { scrollRef, range, thumbGeo, hThumbGeo };
+  return { scrollRef, range, thumbGeo, hThumbGeo, gridWidth };
 }

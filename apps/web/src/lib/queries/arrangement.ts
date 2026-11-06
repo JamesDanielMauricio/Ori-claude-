@@ -5,6 +5,8 @@ import type {
   BoardOrder,
   BoardPick,
   BoardRecord,
+  BoardSubmissionLog,
+  BoardSubmissionTime,
 } from "@/components/arrangement/board-data";
 import { fetchAllRows, PAGE_SIZE } from "@/lib/fetch-all-rows";
 import { createClient } from "@/lib/supabase/client";
@@ -38,8 +40,9 @@ export const newArrangementKeys = {
 
 // One trading day with everything both arrangement screens draw from it, as
 // ONE nested row — see boardData() below for why this is a single shape
-// rather than seven separate queries.
-export interface ArrangementDay {
+// rather than seven separate queries. `Log` is what each order's submissions
+// carry: the board's full carts by default, the grid's times only (MatrixDay).
+export interface ArrangementDay<Log extends BoardSubmissionTime = BoardSubmissionLog> {
   id: string;
   trade_date: string;
   phase: "initiated" | "shop_open" | "shop_closed" | "closed";
@@ -47,8 +50,11 @@ export interface ArrangementDay {
   // one-to-one embed, so PostgREST returns an object here, not an array.
   daily_arrangements: DailyArrangement | null;
   daily_picks: BoardPick[];
-  daily_orders: BoardOrder[];
+  daily_orders: BoardOrder<Log>[];
 }
+
+// The grid's day: each order's submissions carry only when they were made.
+export type MatrixDay = ArrangementDay<BoardSubmissionTime>;
 
 interface DailyArrangement {
   id: string;
@@ -91,9 +97,9 @@ const RECORD_COLUMNS =
 // is far below 1,000 and costs nothing extra; only a day that reaches the
 // cap pays one more round trip. The shape handed back is unchanged, so both
 // boards and their optimistic updates work as before.
-async function completeArrangementRecords(
-  day: ArrangementDay | null,
-): Promise<ArrangementDay | null> {
+async function completeArrangementRecords<Log extends BoardSubmissionTime>(
+  day: ArrangementDay<Log> | null,
+): Promise<ArrangementDay<Log> | null> {
   const arrangement = day?.daily_arrangements;
   if (!day || !arrangement || arrangement.arrangement_records.length < PAGE_SIZE) return day;
   const records = await fetchAllRows<BoardRecord>((from, to) =>
@@ -167,21 +173,25 @@ export const arrangementQueries = {
 
   // The same day for the product × customer grid, in ONE request — see
   // boardData() for why it is a single nested read rather than a chain of
-  // dependent ones. `order_submission_logs` is the one thing that tree
-  // carries and this one does not: the "changed since their last
-  // submission" flag it feeds has nowhere to go in a grid cell.
+  // dependent ones. Of `order_submission_logs`, which that tree carries in
+  // full for its "changed since their last submission" flag, this one takes
+  // only when each submission was made — with the order's `submitted_at` and
+  // each line's `created_at`, that is what the arrangement engine ("הצע
+  // סידור") ranks an earlier order first by: an order's time is its FIRST
+  // submission (arrangement-engine-input.ts). A few bytes per order, not the
+  // carts.
   matrix(dayId: string | null) {
     return queryOptions({
       queryKey: newArrangementKeys.matrix(dayId),
       enabled: !!dayId,
-      queryFn: async (): Promise<ArrangementDay | null> => {
+      queryFn: async (): Promise<MatrixDay | null> => {
         const { data, error } = await createClient()
           .from("trading_days")
           .select(
             `id, trade_date, phase,
            daily_arrangements(id, status, arrangement_records(id, daily_pick_product_id, daily_order_product_id, customer_company_id, quantity_pallets, price, price_type)),
            daily_picks(id, grower_company_id, status, pickup_time, daily_pick_products(id, daily_pick_id, product_variety_id, pallets_picked, leftover_pallets, comment, product_varieties(id, name, sizes, family_id, product_families(name, image_url)))),
-           daily_orders(id, customer_company_id, status, daily_order_products(id, daily_order_id, product_variety_id, pallets_ordered, comment, product_varieties(id, name, sizes, family_id, product_families(name, image_url))))`,
+           daily_orders(id, customer_company_id, status, submitted_at, order_submission_logs(id, created_at), daily_order_products(id, daily_order_id, product_variety_id, pallets_ordered, comment, created_at, product_varieties(id, name, sizes, family_id, product_families(name, image_url))))`,
           )
           .eq("id", dayId!)
           .maybeSingle();

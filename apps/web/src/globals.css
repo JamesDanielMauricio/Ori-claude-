@@ -93,8 +93,9 @@
   --color-accent-ink: #ffffff;
 
   /* Marked — a data cell the user is meant to act on. Currently just the
-     arrangement grid, where a tinted cell means "this customer ordered this
-     product", i.e. where to type.
+     arrangement grid, where a yellow cell means "this customer ordered this
+     product and nothing is arranged for them yet", i.e. where to type. Once
+     the cell holds pallets it turns to `arranged`, below.
 
      Deliberately a real yellow rather than another step of brass, and that is
      a functional call rather than a decorative one: scanned across a
@@ -107,6 +108,19 @@
   --color-marked: #f7ecab;
   --color-marked-edge: #ddc264;
   --color-marked-ink: #634d0d;
+
+  /* Arranged: the grid's second tint, for a cell that holds pallets. Marked
+     (above) is then left to mean "ordered, nothing arranged yet", so the two
+     together answer the question the grid is scanned with — what is still
+     waiting — at a glance.
+
+     An orange a clear step DARKER than the yellow, not only a different hue:
+     yellow against orange is one of the pairs colour-blind readers separate
+     least well by hue, and the difference in lightness is what still tells
+     them apart. Its own ink for the same reason marked has one (6.5:1). */
+  --color-arranged: #f5b97a;
+  --color-arranged-edge: #cf7f2c;
+  --color-arranged-ink: #5c2f04;
 
   --color-warning: #8a5f00;
   --color-warning-soft: #f7efd8;
@@ -290,6 +304,12 @@
   --color-marked: #3f3514;
   --color-marked-edge: #806c2a;
   --color-marked-ink: #f2dc8c;
+
+  /* Arranged: a burnt-orange wash, redder and a step lighter than marked's
+     olive so the two stay apart on a dark ground, with light ink (7.0:1). */
+  --color-arranged: #663410;
+  --color-arranged-edge: #b06a26;
+  --color-arranged-ink: #f8c999;
 
   /* 8.0:1 on surface, 7.2:1 on its tint. */
   --color-warning: #e3a640;

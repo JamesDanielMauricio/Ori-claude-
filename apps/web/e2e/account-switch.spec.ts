@@ -41,11 +41,25 @@ test.describe("Account switch — one tab, two accounts", () => {
     await expect(page).toHaveURL(/\/login$/);
   }
 
-  // Walks back through the tab's history to the profile screen.
+  // Walks back through the tab's history to the profile screen. Only for a
+  // next account of the SAME role: walking back through another role's
+  // screens signs the account out on purpose (RequireAuth's role-mismatch
+  // rule, per the PRD), which is not what these tests are about.
   async function backToProfile(page: Page) {
     for (let step = 0; step < 6 && !page.url().endsWith("/profile"); step++) {
       await page.goBack();
     }
+    await expect(page).toHaveURL(/\/profile$/);
+  }
+
+  // Opens the profile screen the way a link inside the app would — a history
+  // entry and the router's popstate, no page load — so the cache in the tab
+  // is the one the previous account left behind, exactly as after Back.
+  async function openProfileInApp(page: Page) {
+    await page.evaluate(() => {
+      window.history.pushState({}, "", "/profile");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
     await expect(page).toHaveURL(/\/profile$/);
   }
 
@@ -120,7 +134,9 @@ test.describe("Account switch — one tab, two accounts", () => {
     await signOut(page);
 
     await signIn(page, b, /\/grower\//);
-    await backToProfile(page);
+    // In-app, not Back: Back would walk the grower through the customer's
+    // screens, and that signs them out on purpose (see backToProfile).
+    await openProfileInApp(page);
     await expect(page.getByLabel("שם תצוגה")).toHaveValue("Next Grower");
 
     // A's answer finally arrives. It must not replace what B sees.

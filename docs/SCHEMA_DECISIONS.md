@@ -63,6 +63,114 @@ cases cover it in CI.
 
 ---
 
+## 2026-10-15 — A proposed arrangement is saved in one transaction, and only into empty cells
+
+**Context.** "הצע סידור" on the arrangement-by-products screen now proposes the day's arrangement —
+worked out in the browser from the day's orders and stock, the last 60 days' arrangements and
+`customer_scores` (0074) — as an editable preview, and "שמור לסידור" saves it. Until now that save
+was a loop in the browser calling `arrange_to_customer` once per cell: a refusal half-way left half
+the day saved (against R4), and because `arrange_to_customer` updates a record it finds, a cell
+someone filled between the read and the save was silently overwritten.
+
+**What changed (`0075_save-arrangement-proposal.sql`** — written and applied to production on the
+staging branch as `0068`, renumbered when staging was merged into main on 2026-11-07**).** One function,
+`save_arrangement_proposal(trading day, allocations jsonb)`, security invoker, backoffice only.
+
+- **All or nothing.** Every cell goes through `arrange_to_customer` inside the one call, so its
+  rules stay in one place (R6) — including the zero-pallet order line it creates for a customer
+  who did not order the product — and any refusal saves nothing. The refusal keeps
+  `arrange_to_customer`'s own SQLSTATE and message; the DETAIL says which cell, so the screen can
+  name the product and the customer.
+- **Only empty cells.** A cell that already holds a record is refused with P0006 (`CONFLICT`),
+  every such cell listed at once — never overwritten. The proposal on screen is worked out against
+  a read of the day; anything written since is the distributor's decision and wins.
+- **Not a push by accident.** A cell the screen marks `forOrder` was meant to fill the customer's
+  order: the engine suggested it, or the distributor typed it for a customer who had ordered the
+  product. If that order has been withdrawn since the read, `arrange_to_customer` would turn the
+  cell into a push (a zero-pallet order line has no ceiling) and `close_arrangement` would price
+  and announce pallets the customer took back — so such a cell is refused with P0006 as well,
+  listed the same way. A cell without the mark is a push the distributor typed, saved as it is.
+- **Locks, in the order the lifecycle functions take them.** The trading day `FOR SHARE` first, so a
+  save cannot land inside a running `close_arrangement` (which locks only the day and closes the
+  arrangement last, after leftovers and prices); then the arrangement `FOR UPDATE`, which every
+  record writer takes, so "still empty" holds to commit; then the touched pick lines `FOR SHARE`, in
+  id order, because the allocation check reads `pallets_picked` unlocked and `save_pick_lines`
+  could lower it; then the involved customers' order headers `FOR UPDATE`, in id order — the lock
+  `submit_order` takes before changing a customer's lines — so "still ordered" holds to commit.
+- **The cells are read into typed columns once.** Under RLS, Postgres will not use an index for a
+  join condition that calls a function not known to be leakproof, and `->>` and the cast to `uuid`
+  are not: joined on ids pulled out of the JSON, each check read every pick line (82,000) once per
+  cell, and a 72-cell save took 12 seconds against October's data — past the 8-second statement
+  timeout of a signed-in caller. Read once with `jsonb_to_recordset` and joined on typed columns,
+  the same save takes 0.3 seconds. The local test database is empty between tests and cannot show
+  this; it was measured on the cloud database as a signed-in backoffice user, rolled back.
+- **Nothing new to read the history with.** The 60 days the engine learns from are read straight
+  from the tables under the caller's RLS, as the arrangement module's header says such reads should
+  be; paged until a page comes back empty, so a `max_rows` cap cannot cut them short.
+- **`customer_scores` now has a reader.** The engine takes a customer's score as half of the
+  owner's priority; no row counts as 1 ("nothing known"), as 0074 anticipated.
+
+---
+
+## 2026-10-12 — A customer's ranking score lives in its own table, so the customer cannot read it
+
+**Context.** The distributor ranks each customer from 1 (lowest) to 5 — worked out from payment
+record, order frequency, price and the rest — and wants that figure kept in the app, on the
+customers screen, so an arrangement suggestion can later order customers by it when a product is
+short. Nothing reads it for that yet. The one hard requirement is about who can see it: a customer
+must never learn their own rank.
+
+**What changed (`0074_customer-scores.sql`** — written and applied to production on the staging
+branch as `0067`, renumbered when staging was merged into main on 2026-11-07**).** A new table, `customer_scores` — one row per ranked
+customer (`customer_company_id` primary key → `companies`, `on delete cascade`; `general_score
+numeric(3,2)` checked to 1–5) — and one function, `set_customer_score(company, score)`.
+
+- **Why not a column on `companies`.** `companies_select_own` (0003) lets every customer user read
+  their own company row, and RLS is per row, not per column: a score column there is readable by
+  its own subject however the screens are written. In its own table the row itself is the secret.
+- **Who gets in.** Two policies, both backoffice: select, and all. There is deliberately no
+  `_select_own` beside them, which is the difference from `product_customer_caps` (0006) and the
+  thing not to "fix" by analogy. RLS is enabled and forced.
+- **No row means unranked**, a real state the screen shows as "חסר דירוג". It is not a zero — the
+  range check is what keeps the two apart — and clearing a score deletes the row.
+- **Its own function, not a parameter on `save_customer`.** That function saves the row a customer
+  can read; this one saves the row they cannot. A new parameter there would also have either
+  broken every deployed client (required) or cleared the score on each of their saves (optional).
+  `set_customer_score` is `security invoker`, refuses anyone whose role is not backoffice
+  (`is distinct from`, so a caller with no profile is refused too), a company that is not a
+  customer (`P0002`) and a score outside 1–5 (`P0008`). `EXECUTE` is revoked from `public` and
+  `anon`, as since 0055.
+- **On the screen** the score is not part of the row's edit: its box saves by itself, through this
+  function, and the row being edited shows its score as plain text. One row save that also carried
+  the score would be two writes posing as one (R4).
+- **No live-updates trigger**, for the reason 0061 gives for the rest of the reference data.
+
+**Accepted knowingly.**
+
+- A backoffice session writing the table directly, rather than through the function, is held only
+  to the range (after the column rounds, so 0.996 lands as 1.00) and to the company existing — it
+  could score a grower. That is the trust every `*_write_backoffice` policy here extends; the app
+  writes only through the function.
+- Two distributors editing the same score at once: the later save wins, with no version token.
+  One device's own saves are queued in order.
+- `authenticated` holds table privileges, as on every table, so a non-backoffice session can ask
+  PostgREST for a planner *estimate* of the row count. No score, and no customer's id, comes back.
+- **The Bubble import deletes the scores.** `import-from-bubble.ts` replaces every company with a
+  newly-numbered one, and the cascade takes the scores with the old ones. The table is on the
+  script's `WIPED_TABLES` list so that it is at least in the backup and in the deleted-rows count,
+  but nothing carries a score over to the re-imported company: after an import the scores have to
+  be entered, or loaded, again. Until the import stops being re-run, the distributor's own
+  spreadsheet is the copy that survives.
+
+**Tests.** `schemas.test.ts` covers the input schema (scale, rounding as the column rounds, null
+versus missing). `rls.test.ts` and `rpc.test.ts` gained the cases for the table and the function —
+the ranked customer, another customer, a grower and an anonymous visitor read nothing, directly or
+through their company row, and can write nothing; set, overwrite, clear, refusals, and the cascade.
+Those two files need the local Supabase stack; they were written against a hand-run check of the
+same assertions on the remote database and had not themselves been run when this entry was written.
+
+---
+
 ## 2026-09-30 — Closing the business day no longer waits for a price on every product
 
 **Context.** `close_arrangement` fills in the price of every arrangement record as part of the

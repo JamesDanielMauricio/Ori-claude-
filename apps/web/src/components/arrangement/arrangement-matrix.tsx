@@ -1,13 +1,17 @@
-import { flattenMatrixRows, type Matrix, type MatrixProductRow } from "./matrix-data";
 import {
-  LEAD_PANE,
+  flattenMatrixRows,
+  productColumnWidth,
+  type Matrix,
+  type MatrixProductRow,
+} from "./matrix-data";
+import { NO_ROWS_LABEL } from "./matrix/cell-look";
+import {
   ROW_H,
   TRAIL_PANE,
   W_ALLOCATED,
   W_AVAILABLE,
   W_CUSTOMER,
   W_ORDERED,
-  W_PRODUCT,
   W_STOCK,
   clamp,
 } from "./matrix/geometry";
@@ -52,6 +56,8 @@ import { useMatrixScroll } from "./matrix/use-matrix-scroll";
 // ---------------------------------------------------------------------------
 
 export type { MatrixWrite } from "./matrix/use-matrix-cursor";
+// How cells look by what they say, shared with the mobile list.
+export { CELL_TONE, NO_ROWS_LABEL, UNSAVED_BOX, UNSAVED_TITLE } from "./matrix/cell-look";
 
 export function ArrangementMatrix({
   matrix,
@@ -59,6 +65,7 @@ export function ArrangementMatrix({
   onToggle,
   editable,
   onCommit,
+  emptyLabel = NO_ROWS_LABEL,
 }: {
   matrix: Matrix;
   expanded: ReadonlySet<string>;
@@ -66,18 +73,31 @@ export function ArrangementMatrix({
   editable: boolean;
   /** Resolves to whether the write landed; a refusal reverts the cell. */
   onCommit: (write: MatrixWrite) => Promise<boolean>;
+  /** What to say when there are no rows — the caller knows why there are none. */
+  emptyLabel?: string;
 }) {
   const { columns } = matrix;
   const rows = flattenMatrixRows(matrix.rows, expanded);
   const rowCount = rows.length;
 
-  // The scrollport, the window of rows actually mounted, and both custom
-  // scrollbars' geometry — see useMatrixScroll.
-  const { scrollRef, range, thumbGeo, hThumbGeo } = useMatrixScroll(rowCount);
+  // The scrollport, the window of rows actually mounted, both custom
+  // scrollbars' geometry and the scrollport's width — see useMatrixScroll.
+  const { scrollRef, range, thumbGeo, hThumbGeo, gridWidth } = useMatrixScroll(rowCount);
+  // The products column follows the grid's own width — see
+  // productColumnWidth. One number per render, shared by the <col>, the
+  // sticky offsets and the scroll margins.
+  const productWidth = productColumnWidth(gridWidth);
+  /** Total width of the pinned leading (right, in RTL) pane. */
+  const leadPane = productWidth + W_STOCK + W_ORDERED;
   // The focused cell, the cell being typed into, and the spreadsheet keys —
   // see useMatrixCursor.
-  const { activeCell, draftCell, setActive, setDraft, commitDraft, handleKeyDown } =
+  const { activeCell, draftCell, hasDraft, setActive, setDraft, commitDraft, handleKeyDown } =
     useMatrixCursor({ rows, columns, scrollRef, range, onCommit });
+  // A draft cannot outlive the grid going read-only. The box it was typed
+  // into unmounts without a blur, so it is never committed — and left in
+  // state it would be back in that box the moment the grid became editable
+  // again: a number nobody saved, one blur away from being written.
+  if (!editable && hasDraft) setDraft(null);
 
   // Re-clamped on every render rather than only in useMatrixScroll's effect: a search
   // that shortens the list must not paint rows past its end for the frame
@@ -89,7 +109,7 @@ export function ArrangementMatrix({
   const bottomPad = Math.max(0, (rowCount - end) * ROW_H);
 
   const totalColumns = 3 + columns.length + 2;
-  const tableWidth = LEAD_PANE + columns.length * W_CUSTOMER + TRAIL_PANE;
+  const tableWidth = leadPane + columns.length * W_CUSTOMER + TRAIL_PANE;
 
   return (
     // Outer, non-scrolling wrapper. Its only job is to anchor the custom
@@ -160,7 +180,7 @@ export function ArrangementMatrix({
           role="grid"
         >
           <colgroup>
-            <col style={{ width: W_PRODUCT }} />
+            <col style={{ width: productWidth }} />
             <col style={{ width: W_STOCK }} />
             <col style={{ width: W_ORDERED }} />
             {columns.map((column) => (
@@ -170,7 +190,7 @@ export function ArrangementMatrix({
             <col style={{ width: W_ALLOCATED }} />
           </colgroup>
 
-          <MatrixHeader columns={columns} />
+          <MatrixHeader columns={columns} productWidth={productWidth} />
 
           <tbody>
             {/* The two spacers hold the scrollbar at the height the full list
@@ -192,6 +212,7 @@ export function ArrangementMatrix({
                   columns={columns}
                   expanded={row.kind === "product" && expanded.has(row.varietyId)}
                   onToggle={onToggle}
+                  productWidth={productWidth}
                   editable={editable}
                   active={activeCell}
                   draft={draftCell}
@@ -212,9 +233,7 @@ export function ArrangementMatrix({
         </table>
 
         {rowCount === 0 && (
-          <p className="px-6 py-10 text-center text-sm text-ink-muted">
-            אין מוצרים להצגה — נסה מונח חיפוש אחר.
-          </p>
+          <p className="px-6 py-10 text-center text-sm text-ink-muted">{emptyLabel}</p>
         )}
       </div>
 

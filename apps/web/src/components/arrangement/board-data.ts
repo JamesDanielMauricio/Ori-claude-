@@ -70,13 +70,25 @@ export interface BoardOrderLine {
   product_variety_id: string;
   pallets_ordered: number;
   comment: string | null;
+  /** When the line was written — the order's time for the arrangement engine
+   * when the order itself was never submitted. Read by the arrangement matrix
+   * only, hence optional. */
+  created_at?: string;
   product_varieties: BoardVarietyRow | null;
 }
 
-/** One `submit_order` call's full cart snapshot — see order_submission_logs. */
-export interface BoardSubmissionLog {
+/**
+ * When one `submit_order` call happened — all the arrangement grid reads of a
+ * submission (the engine ranks an order by its first one). The board reads
+ * the whole cart as well: BoardSubmissionLog.
+ */
+export interface BoardSubmissionTime {
   id: string;
   created_at: string;
+}
+
+/** One `submit_order` call's full cart snapshot — see order_submission_logs. */
+export interface BoardSubmissionLog extends BoardSubmissionTime {
   /**
    * A `jsonb` column, so the database can't describe its shape — it is
    * whatever submit_order wrote (migration 0017): a SubmissionSnapshot. Read
@@ -92,20 +104,29 @@ type SubmissionSnapshot = Array<{
   comment: string | null;
 }>;
 
-export interface BoardOrder {
+// `Log` is what each of the order's submissions carries: the board reads the
+// full cart (the default), the arrangement grid only when each happened. Code
+// that reads no more than the times takes BoardOrder<BoardSubmissionTime>,
+// which either shape satisfies.
+export interface BoardOrder<Log extends BoardSubmissionTime = BoardSubmissionLog> {
   id: string;
   customer_company_id: string;
   status: string;
+  /** When the customer submitted it; null for an order never submitted.
+   * Read by the arrangement matrix only (an earlier order wins a tie in the
+   * engine's ranking), hence optional. */
+  submitted_at?: string | null;
   daily_order_products: BoardOrderLine[];
   /**
    * Newest first is NOT assumed — `buildBoard` sorts these itself — because
    * PostgREST doesn't order embedded rows for us and trusting the wire order
    * would silently break the moment that stopped being true.
    *
-   * Optional because only the arrangement board's query selects it — the
-   * matrix screen builds the same orders and has no use for it.
+   * Optional because not every query selects it. The board's carries every
+   * submission's cart; the matrix screen's carries only when each was made
+   * (Log = BoardSubmissionTime), for the arrangement engine's ranking.
    */
-  order_submission_logs?: BoardSubmissionLog[];
+  order_submission_logs?: Log[];
 }
 
 export interface BoardRecord {

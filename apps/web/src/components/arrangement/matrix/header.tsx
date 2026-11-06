@@ -1,14 +1,6 @@
 import type { Matrix } from "../matrix-data";
 
-import {
-  CELL_BORDER,
-  HEADER_H,
-  W_ALLOCATED,
-  W_PRODUCT,
-  W_STOCK,
-  Z_CORNER,
-  Z_HEADER,
-} from "./geometry";
+import { CELL_BORDER, HEADER_H, W_ALLOCATED, W_STOCK, Z_CORNER, Z_HEADER } from "./geometry";
 
 // The matrix's header row: the three pinned leading titles, one per
 // customer, and the two pinned trailing ones.
@@ -16,7 +8,14 @@ import {
 // Sticky is declared per <th> rather than on the <thead>: a sticky
 // thead is honoured inconsistently across browsers, while a sticky
 // cell is not — and the corners need a second axis anyway.
-export function MatrixHeader({ columns }: { columns: Matrix["columns"] }) {
+export function MatrixHeader({
+  columns,
+  productWidth,
+}: {
+  columns: Matrix["columns"];
+  /** The products column's width this render — see productColumnWidth. */
+  productWidth: number;
+}) {
   return (
     <thead>
       <tr style={{ height: HEADER_H }}>
@@ -29,14 +28,14 @@ export function MatrixHeader({ columns }: { columns: Matrix["columns"] }) {
         </th>
         <th
           scope="col"
-          style={{ right: W_PRODUCT }}
+          style={{ right: productWidth }}
           className={`sticky top-0 ${Z_CORNER} ${CELL_BORDER} bg-surface-muted px-2 align-bottom pb-3 text-xs font-semibold leading-tight text-ink-subtle`}
         >
           סה״כ במלאי
         </th>
         <th
           scope="col"
-          style={{ right: W_PRODUCT + W_STOCK }}
+          style={{ right: productWidth + W_STOCK }}
           className={`sticky top-0 ${Z_CORNER} ${CELL_BORDER} bg-surface-muted px-2 align-bottom pb-3 text-xs font-semibold leading-tight text-ink-subtle`}
         >
           סה״כ הוזמן

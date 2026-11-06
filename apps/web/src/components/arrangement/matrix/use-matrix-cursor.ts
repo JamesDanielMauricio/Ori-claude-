@@ -198,5 +198,15 @@ export function useMatrixCursor({
     }
   }
 
-  return { activeCell, draftCell, setActive, setDraft, commitDraft, handleKeyDown };
+  return {
+    activeCell,
+    draftCell,
+    // Whether anything is being typed at all — even into a row a search or a
+    // collapse has hidden, which `draftCell` reads as none.
+    hasDraft: draft !== null,
+    setActive,
+    setDraft,
+    commitDraft,
+    handleKeyDown,
+  };
 }

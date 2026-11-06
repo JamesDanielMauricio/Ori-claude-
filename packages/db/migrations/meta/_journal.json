@@ -519,6 +519,20 @@
       "when": 1790456400000,
       "tag": "0073_delete-users-keep-their-history",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1790542800000,
+      "tag": "0074_customer-scores",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1790629200000,
+      "tag": "0075_save-arrangement-proposal",
+      "breakpoints": true
     }
   ]
 }

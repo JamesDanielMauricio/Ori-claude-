@@ -7,6 +7,7 @@ export * from "./product-variety";
 export * from "./profile-blocked-product";
 export * from "./grower-product";
 export * from "./product-customer-cap";
+export * from "./customer-score";
 export * from "./trading-day";
 export * from "./daily-shop";
 export * from "./daily-arrangement";
